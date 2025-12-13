@@ -15,12 +15,15 @@ export class TelnyxService {
       throw new Error('Telnyx API key not configured. Please set TELNYX_API_KEY in your .env file.');
     }
 
+    // Clean the API key - remove any whitespace, newlines, or invalid characters
+    const cleanApiKey = TELNYX_API_KEY.trim().replace(/\s+/g, '');
+
     try {
       const config = {
         method,
         url: `${TELNYX_API_URL}${endpoint}`,
         headers: {
-          'Authorization': `Bearer ${TELNYX_API_KEY}`,
+          'Authorization': `Bearer ${cleanApiKey}`,
           'Content-Type': 'application/json',
         },
         validateStatus: () => true,
