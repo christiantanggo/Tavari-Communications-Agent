@@ -25,6 +25,13 @@ router.get('/search', authenticate, async (req, res) => {
     res.json({ numbers });
   } catch (error) {
     console.error('Search phone numbers error:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      message: error.message,
+      name: error.name,
+      response: error.response?.data,
+      status: error.response?.status,
+    });
     res.status(500).json({ 
       error: error.message || 'Failed to search phone numbers',
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
