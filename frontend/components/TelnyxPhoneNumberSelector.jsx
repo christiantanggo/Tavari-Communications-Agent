@@ -234,6 +234,59 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
             </div>
           </div>
           
+          {/* Location Filters */}
+          <div className="border-t pt-3 mt-3">
+            <p className="text-sm font-semibold text-gray-700 mb-2">Location Filters (Optional):</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="areaCode" className="block text-sm font-medium text-gray-700 mb-1">
+                  Area Code:
+                </label>
+                <input
+                  id="areaCode"
+                  type="text"
+                  value={areaCode}
+                  onChange={(e) => setAreaCode(e.target.value)}
+                  placeholder="e.g., 415, 416, 212"
+                  maxLength={3}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label htmlFor="city" className="block text-sm font-medium text-gray-700 mb-1">
+                  City/Region:
+                </label>
+                <input
+                  id="city"
+                  type="text"
+                  value={locality}
+                  onChange={(e) => setLocality(e.target.value)}
+                  placeholder="e.g., Toronto, New York"
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label htmlFor="province" className="block text-sm font-medium text-gray-700 mb-1">
+                  State/Province:
+                </label>
+                <input
+                  id="province"
+                  type="text"
+                  value={administrativeArea}
+                  onChange={(e) => setAdministrativeArea(e.target.value)}
+                  placeholder="e.g., ON, CA, NY"
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Use any combination of filters to narrow your search. Leave blank to search all locations.
+            </p>
+          </div>
+          
           {/* Sort Options */}
           {availableNumbers.length > 0 && (
             <div className="flex items-center space-x-4">
