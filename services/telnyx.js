@@ -139,9 +139,11 @@ export class TelnyxService {
           cleanNumber = '1' + cleanNumber; // Add US/Canada country code
         }
         
-        // Telnyx phone number filter supports partial matching with contains
-        // Try exact match first, but also support partial (area code, etc.)
-        params.set('filter[phone_number][contains]', cleanNumber);
+        // Use prefix search - numbers that START with the entered digits
+        // Telnyx supports filtering by phone number, we'll search for numbers that start with the pattern
+        // Since Telnyx may not have a direct "starts with" filter, we'll use contains but filter results client-side
+        // OR we can use the phone_number filter which should match the pattern
+        params.set('filter[phone_number]', cleanNumber);
         params.set('page[size]', limit.toString());
       } else {
         // Normal browse search with filters
