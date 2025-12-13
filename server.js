@@ -34,7 +34,15 @@ console.log('✅ Express app created, PORT:', PORT);
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://tavarios.com',
+    'https://www.tavarios.com',
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
