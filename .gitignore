@@ -27,6 +27,7 @@ Thumbs.db
 dist/
 build/
 .next/
+.vercel/
 
 # Testing
 coverage/
