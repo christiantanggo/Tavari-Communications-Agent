@@ -18,11 +18,19 @@ import telnyxPhoneNumberRoutes from './routes/telnyxPhoneNumbers.js';
 import { setupCallAudioWebSocket } from './routes/callAudio.js';
 import logger from './utils/logger.js';
 
+console.log('✅ All routes imported successfully');
+
 // Load environment variables
 dotenv.config();
 
+// Debug: Check if database config loads
+console.log('✅ Environment variables loaded');
+console.log('✅ SUPABASE_URL:', process.env.SUPABASE_URL ? 'SET' : 'NOT SET');
+console.log('✅ SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'NOT SET');
+
 const app = express();
 const PORT = process.env.PORT || 5001;
+console.log('✅ Express app created, PORT:', PORT);
 
 // Middleware
 app.use(helmet());
