@@ -124,7 +124,7 @@ export class TelnyxService {
   }
 
   // Search for available phone numbers
-  static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20, locality = null, administrativeArea = null) {
+  static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20, locality = null, administrativeArea = null, phoneNumberSearch = null) {
     try {
       // Telnyx API uses query parameters
       const params = new URLSearchParams({
@@ -133,14 +133,24 @@ export class TelnyxService {
         'page[size]': limit.toString(),
       });
 
-      // Add city filter if provided
-      if (locality) {
-        params.append('filter[locality]', locality);
-      }
+      // If searching for a specific phone number, use that filter instead
+      if (phoneNumberSearch) {
+        // Remove other filters when searching by number
+        params.delete('filter[country_code]');
+        params.delete('filter[phone_number_type]');
+        // Clean the phone number (remove +, spaces, dashes, parentheses)
+        const cleanNumber = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
+        params.set('filter[phone_number]', cleanNumber);
+      } else {
+        // Add city filter if provided
+        if (locality) {
+          params.append('filter[locality]', locality);
+        }
 
-      // Add state/province filter if provided
-      if (administrativeArea) {
-        params.append('filter[administrative_area]', administrativeArea);
+        // Add state/province filter if provided
+        if (administrativeArea) {
+          params.append('filter[administrative_area]', administrativeArea);
+        }
       }
 
       const result = await this.makeAPIRequest('GET', `/available_phone_numbers?${params.toString()}`);

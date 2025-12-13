@@ -8,16 +8,17 @@ const router = express.Router();
 // Search for available phone numbers
 router.get('/search', authenticate, async (req, res) => {
   try {
-    const { countryCode = 'US', phoneType = 'local', limit = 20, locality, administrativeArea } = req.query;
+    const { countryCode = 'US', phoneType = 'local', limit = 20, locality, administrativeArea, phoneNumber } = req.query;
     
-    console.log('Telnyx phone number search request:', { countryCode, phoneType, limit, locality, administrativeArea });
+    console.log('Telnyx phone number search request:', { countryCode, phoneType, limit, locality, administrativeArea, phoneNumber });
 
     const numbers = await TelnyxService.searchPhoneNumbers(
       countryCode,
       phoneType,
       parseInt(limit),
       locality || null,
-      administrativeArea || null
+      administrativeArea || null,
+      phoneNumber || null
     );
     
     res.json({ numbers });
