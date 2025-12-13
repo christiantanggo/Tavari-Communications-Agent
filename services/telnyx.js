@@ -158,15 +158,28 @@ export class TelnyxService {
           params.append('filter[administrative_area]', administrativeArea);
         }
 
-        // Add area code filter if provided (national_destination_code)
+        // Add area code filter if provided
+        // Telnyx supports both 'area_code' and 'national_destination_code' - try area_code first
         if (areaCode) {
           // Clean area code (remove non-digits)
           const cleanAreaCode = areaCode.replace(/\D/g, '');
-          params.append('filter[national_destination_code]', cleanAreaCode);
+          // Try area_code filter (more commonly used)
+          params.append('filter[area_code]', cleanAreaCode);
+          // Also log what we're sending for debugging
+          console.log('Searching with area code filter:', cleanAreaCode);
         }
       }
 
-      const result = await this.makeAPIRequest('GET', `/available_phone_numbers?${params.toString()}`);
+      const apiUrl = `/available_phone_numbers?${params.toString()}`;
+      console.log('Telnyx API request URL:', apiUrl);
+      
+      const result = await this.makeAPIRequest('GET', apiUrl);
+      
+      console.log('Telnyx API response:', {
+        hasData: !!result.data,
+        dataLength: result.data?.length || 0,
+        firstResult: result.data?.[0] || null,
+      });
 
       if (result.data && Array.isArray(result.data)) {
         let numbers = result.data.map((phone) => ({
