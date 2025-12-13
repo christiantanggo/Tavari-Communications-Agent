@@ -247,7 +247,7 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                   type="text"
                   value={areaCode}
                   onChange={(e) => setAreaCode(e.target.value)}
-                  onKeyPress={(e) => {
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       searchNumbers();
@@ -268,7 +268,7 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                   type="text"
                   value={locality}
                   onChange={(e) => setLocality(e.target.value)}
-                  onKeyPress={(e) => {
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       searchNumbers();
@@ -288,7 +288,7 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                   type="text"
                   value={administrativeArea}
                   onChange={(e) => setAdministrativeArea(e.target.value)}
-                  onKeyPress={(e) => {
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       searchNumbers();
