@@ -1,0 +1,103 @@
+import express from 'express';
+import { VoximplantService } from '../services/voximplant.js';
+import { TelnyxService } from '../services/telnyx.js';
+import { CallSession } from '../models/CallSession.js';
+import { authenticate } from '../middleware/auth.js';
+
+const router = express.Router();
+
+// Unified webhook for call events (supports both Voximplant and Telnyx)
+router.post('/webhook', async (req, res) => {
+  try {
+    // Detect provider by webhook format
+    const isTelnyx = req.body.data?.event_type || req.body.event_type;
+    const isVoximplant = req.body.event || req.body.type;
+    
+    console.log('Webhook received:', { 
+      isTelnyx: !!isTelnyx, 
+      isVoximplant: !!isVoximplant,
+      body: req.body 
+    });
+    
+    // Handle Telnyx webhook
+    if (isTelnyx) {
+      const eventType = req.body.data?.event_type || req.body.event_type;
+      console.log('Telnyx webhook event:', eventType);
+      
+      if (eventType === 'call.initiated' || eventType === 'call.answered') {
+        const callData = TelnyxService.parseInboundCall(req);
+        const { callSession, business, commands } = await TelnyxService.handleCallStart(callData);
+        
+        // Return Telnyx call control commands (JSON)
+        res.json({
+          commands: commands,
+        });
+      } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
+        const callData = TelnyxService.parseInboundCall(req);
+        const duration = req.body.data?.payload?.duration_seconds || 0;
+        await TelnyxService.handleCallEnd(callData.telnyx_call_id, duration);
+        res.json({ status: 'ok' });
+      } else {
+        res.json({ status: 'ok', message: 'Event not handled' });
+      }
+    }
+    // Handle Voximplant webhook
+    else if (isVoximplant) {
+      const event = req.body.event || req.body.type;
+      console.log('Voximplant webhook event:', event);
+      
+      if (event === 'InboundCall' || event === 'CallStart') {
+        const callData = VoximplantService.parseInboundCall(req);
+        const { callSession, business, scenario } = await VoximplantService.handleCallStart(callData);
+        
+        // Return scenario XML for Voximplant
+        res.set('Content-Type', 'application/xml');
+        res.send(scenario);
+      } else if (event === 'CallEnd' || event === 'CallFinished') {
+        const callData = VoximplantService.parseInboundCall(req);
+        const duration = req.body.duration || 0;
+        await VoximplantService.handleCallEnd(callData.voximplant_call_id, duration);
+        res.json({ status: 'ok' });
+      } else {
+        res.json({ status: 'ok', message: 'Event not handled' });
+      }
+    } else {
+      console.warn('Unknown webhook format:', req.body);
+      res.status(400).json({ error: 'Unknown webhook format' });
+    }
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get call sessions for authenticated business
+router.get('/', authenticate, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const calls = await CallSession.findByBusinessId(req.businessId, limit);
+    res.json({ calls });
+  } catch (error) {
+    console.error('Get calls error:', error);
+    res.status(500).json({ error: 'Failed to get calls' });
+  }
+});
+
+// Get specific call session
+router.get('/:callId', authenticate, async (req, res) => {
+  try {
+    const call = await CallSession.findByVoximplantCallId(req.params.callId);
+    
+    if (!call || call.business_id !== req.businessId) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+    
+    res.json({ call });
+  } catch (error) {
+    console.error('Get call error:', error);
+    res.status(500).json({ error: 'Failed to get call' });
+  }
+});
+
+export default router;
+

@@ -1,0 +1,46 @@
+{
+  "name": "tavari-ai-phone-agent",
+  "version": "1.0.0",
+  "description": "AI Phone Agent - Self-serve AI phone answering service",
+  "main": "server.js",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "migrate": "node scripts/migrate.js"
+  },
+  "keywords": [
+    "ai",
+    "phone",
+    "voximplant",
+    "openai",
+    "realtime"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.87.1",
+    "axios": "^1.13.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.24.1",
+    "stripe": "^14.7.0",
+    "winston": "^3.11.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.55.0",
+    "prettier": "^3.1.1"
+  }
+}
