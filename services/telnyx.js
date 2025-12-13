@@ -133,18 +133,15 @@ export class TelnyxService {
         // Clean the phone number (remove +, spaces, dashes, parentheses)
         let cleanNumber = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
         
-        // If it doesn't start with country code, try to infer it
-        // For US/Canada, if it's 10 digits, it's likely missing country code
-        if (cleanNumber.length === 10 && (countryCode === 'US' || countryCode === 'CA')) {
-          cleanNumber = '1' + cleanNumber; // Add US/Canada country code
-        }
+        // Don't add country code automatically - let user search by what they type
+        // If they type "1", show numbers starting with 1
+        // If they type "415", show numbers starting with 415
         
-        // Use prefix search - numbers that START with the entered digits
-        // Telnyx supports filtering by phone number, we'll search for numbers that start with the pattern
-        // Since Telnyx may not have a direct "starts with" filter, we'll use contains but filter results client-side
-        // OR we can use the phone_number filter which should match the pattern
-        params.set('filter[phone_number]', cleanNumber);
-        params.set('page[size]', limit.toString());
+        // Use Telnyx starts_with filter for prefix matching
+        // Increase limit to get more results for client-side filtering
+        params.set('filter[country_code]', countryCode); // Still filter by country
+        params.set('filter[phone_number][starts_with]', cleanNumber);
+        params.set('page[size]', '100'); // Get more results to filter client-side
       } else {
         // Normal browse search with filters
         params.set('filter[country_code]', countryCode);
