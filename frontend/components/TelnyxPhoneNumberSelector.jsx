@@ -58,15 +58,21 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
     setAvailableNumbers([]);
     setShowManualEntry(false);
     try {
-      const searchParams = {
-        countryCode,
-        phoneType,
-        limit: 50,
-      };
+      let searchParams = {};
       
-      // If searching by phone number, add that parameter
+      // If searching by phone number, only send that parameter
       if (searchMode === 'search' && phoneNumberSearch.trim()) {
-        searchParams.phoneNumber = phoneNumberSearch.trim();
+        searchParams = {
+          phoneNumber: phoneNumberSearch.trim(),
+          limit: 50,
+        };
+      } else {
+        // Browse mode - use country and type filters
+        searchParams = {
+          countryCode,
+          phoneType,
+          limit: 50,
+        };
       }
       
       const response = await telnyxPhoneNumbersAPI.search(searchParams);
