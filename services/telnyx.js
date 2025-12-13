@@ -235,18 +235,27 @@ export class TelnyxService {
   // Purchase a phone number
   static async purchasePhoneNumber(phoneNumber) {
     try {
-      // Clean phone number - Telnyx expects E.164 format without + or just digits
-      // Remove +, spaces, dashes, parentheses
-      let cleanNumber = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+      // Clean phone number - Telnyx expects E.164 format WITH + prefix
+      // Remove spaces, dashes, parentheses but keep the +
+      let cleanNumber = phoneNumber.replace(/[\s\-\(\)]/g, '');
       
-      // If it doesn't start with country code and is 10 digits, add US country code
-      if (cleanNumber.length === 10) {
-        cleanNumber = '1' + cleanNumber;
+      // Ensure it starts with + for E.164 format
+      if (!cleanNumber.startsWith('+')) {
+        // If it's 10 digits, assume US and add +1
+        if (cleanNumber.length === 10) {
+          cleanNumber = '+1' + cleanNumber;
+        } else if (cleanNumber.length === 11 && cleanNumber.startsWith('1')) {
+          // Already has country code, just add +
+          cleanNumber = '+' + cleanNumber;
+        } else {
+          // Try to add +1 for US/Canada
+          cleanNumber = '+1' + cleanNumber;
+        }
       }
       
-      console.log('Purchasing phone number - original:', phoneNumber, 'cleaned:', cleanNumber);
+      console.log('Purchasing phone number - original:', phoneNumber, 'E.164 format:', cleanNumber);
       
-      // Telnyx uses "purchase" endpoint - expects phone_number in E.164 format
+      // Telnyx API expects phone_number in E.164 format (with +)
       const result = await this.makeAPIRequest('POST', '/phone_numbers', {
         phone_number: cleanNumber,
       });
