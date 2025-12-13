@@ -247,6 +247,12 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                   type="text"
                   value={areaCode}
                   onChange={(e) => setAreaCode(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      searchNumbers();
+                    }
+                  }}
                   placeholder="e.g., 415, 416, 212"
                   maxLength={3}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
@@ -262,6 +268,12 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                   type="text"
                   value={locality}
                   onChange={(e) => setLocality(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      searchNumbers();
+                    }
+                  }}
                   placeholder="e.g., Toronto, New York"
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
                   disabled={loading}
@@ -276,15 +288,30 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                   type="text"
                   value={administrativeArea}
                   onChange={(e) => setAdministrativeArea(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      searchNumbers();
+                    }
+                  }}
                   placeholder="e.g., ON, CA, NY"
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
                   disabled={loading}
                 />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Use any combination of filters to narrow your search. Leave blank to search all locations.
-            </p>
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-gray-500">
+                Use any combination of filters to narrow your search. Leave blank to search all locations.
+              </p>
+              <button
+                onClick={searchNumbers}
+                disabled={loading}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Searching...' : 'Search with Filters'}
+              </button>
+            </div>
           </div>
           
           {/* Sort Options */}
