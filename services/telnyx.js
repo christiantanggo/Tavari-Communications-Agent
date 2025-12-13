@@ -159,14 +159,14 @@ export class TelnyxService {
         }
 
         // Add area code filter if provided
-        // Telnyx supports both 'area_code' and 'national_destination_code' - try area_code first
+        // Telnyx uses 'national_destination_code' for area code filtering
         if (areaCode) {
           // Clean area code (remove non-digits)
           const cleanAreaCode = areaCode.replace(/\D/g, '');
-          // Try area_code filter (more commonly used)
-          params.append('filter[area_code]', cleanAreaCode);
+          // Telnyx API uses national_destination_code for area code
+          params.append('filter[national_destination_code]', cleanAreaCode);
           // Also log what we're sending for debugging
-          console.log('Searching with area code filter:', cleanAreaCode);
+          console.log('Searching with area code (national_destination_code) filter:', cleanAreaCode);
         }
       }
 
