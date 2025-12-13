@@ -81,11 +81,16 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // Start server
+console.log('🔵 About to start server on port:', PORT);
 server.listen(PORT, () => {
+  console.log(`🚀 Tavari AI Phone Agent server running on port ${PORT}`);
+  console.log(`📍 Health check: http://localhost:${PORT}/health`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`🚀 Tavari AI Phone Agent server running on port ${PORT}`);
   logger.info(`📍 Health check: http://localhost:${PORT}/health`);
   logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
 }).on('error', (error) => {
+  console.error('❌ Server error:', error);
   logger.error('Server error:', error);
   if (error.code === 'EADDRINUSE') {
     logger.error(`Port ${PORT} is already in use. Please stop the other process or change the PORT in .env`);
