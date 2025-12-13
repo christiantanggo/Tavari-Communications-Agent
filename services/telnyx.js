@@ -124,7 +124,7 @@ export class TelnyxService {
   }
 
   // Search for available phone numbers
-  static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20, locality = null, administrativeArea = null, phoneNumberSearch = null) {
+  static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20, locality = null, administrativeArea = null, areaCode = null, phoneNumberSearch = null) {
     try {
       const params = new URLSearchParams();
 
@@ -148,7 +148,7 @@ export class TelnyxService {
         params.set('filter[phone_number_type]', phoneType); // 'local', 'toll-free', 'mobile'
         params.set('page[size]', limit.toString());
 
-        // Add city filter if provided
+        // Add city/region filter if provided
         if (locality) {
           params.append('filter[locality]', locality);
         }
@@ -156,6 +156,13 @@ export class TelnyxService {
         // Add state/province filter if provided
         if (administrativeArea) {
           params.append('filter[administrative_area]', administrativeArea);
+        }
+
+        // Add area code filter if provided (national_destination_code)
+        if (areaCode) {
+          // Clean area code (remove non-digits)
+          const cleanAreaCode = areaCode.replace(/\D/g, '');
+          params.append('filter[national_destination_code]', cleanAreaCode);
         }
       }
 

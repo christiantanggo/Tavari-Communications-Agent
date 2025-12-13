@@ -22,6 +22,9 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
   const [phoneType, setPhoneType] = useState('local');
   const [phoneNumberSearch, setPhoneNumberSearch] = useState('');
   const [searchMode, setSearchMode] = useState('browse'); // 'browse' or 'search'
+  const [locality, setLocality] = useState(''); // City/Region
+  const [administrativeArea, setAdministrativeArea] = useState(''); // State/Province
+  const [areaCode, setAreaCode] = useState(''); // Area Code
   const [availableNumbers, setAvailableNumbers] = useState([]);
   const [filteredNumbers, setFilteredNumbers] = useState([]);
   const [sortBy, setSortBy] = useState('none'); // 'none', 'price'
@@ -67,12 +70,23 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
           limit: 50,
         };
       } else {
-        // Browse mode - use country and type filters
+        // Browse mode - use country, type, and location filters
         searchParams = {
           countryCode,
           phoneType,
           limit: 50,
         };
+        
+        // Add location filters if provided
+        if (locality.trim()) {
+          searchParams.locality = locality.trim();
+        }
+        if (administrativeArea.trim()) {
+          searchParams.administrativeArea = administrativeArea.trim();
+        }
+        if (areaCode.trim()) {
+          searchParams.areaCode = areaCode.trim();
+        }
       }
       
       const response = await telnyxPhoneNumbersAPI.search(searchParams);
