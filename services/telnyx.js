@@ -255,7 +255,27 @@ export class TelnyxService {
       
       console.log('Purchasing phone number - original:', phoneNumber, 'E.164 format:', cleanNumber);
       
+      // First, verify the number is available by checking if it exists in available numbers
+      // Telnyx requires the number to be in their available inventory
+      // Try to get the number info first to verify it's available
+      try {
+        const numberInfo = await this.getPhoneNumberInfo(cleanNumber);
+        if (numberInfo && numberInfo.phone_number) {
+          console.log('Number already exists in account:', numberInfo);
+          // Number might already be in account, return it
+          return {
+            success: true,
+            phone_number: numberInfo.phone_number,
+            phone_number_id: numberInfo.id,
+          };
+        }
+      } catch (infoError) {
+        // Number doesn't exist in account, continue to purchase
+        console.log('Number not in account, proceeding with purchase');
+      }
+      
       // Telnyx API expects phone_number in E.164 format (with +)
+      // The number must be available in Telnyx's inventory
       const result = await this.makeAPIRequest('POST', '/phone_numbers', {
         phone_number: cleanNumber,
       });
