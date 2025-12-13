@@ -162,7 +162,7 @@ export class TelnyxService {
       const result = await this.makeAPIRequest('GET', `/available_phone_numbers?${params.toString()}`);
 
       if (result.data && Array.isArray(result.data)) {
-        return result.data.map((phone) => ({
+        let numbers = result.data.map((phone) => ({
           phone_number: phone.phone_number,
           phone_price: phone.cost_information?.monthly_cost || 0,
           phone_category_name: phone.phone_number_type || 'local',
@@ -172,6 +172,22 @@ export class TelnyxService {
           can_send_sms: phone.features?.sms || false,
           features: phone.features || {},
         }));
+
+        // Client-side filtering: ensure numbers START with the search term (prefix match)
+        // This ensures that typing "1" shows numbers starting with 1, "15" shows numbers starting with 15, etc.
+        if (phoneNumberSearch) {
+          const cleanSearch = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
+          
+          numbers = numbers.filter((phone) => {
+            // Remove formatting from phone number for comparison
+            const cleanPhone = phone.phone_number.replace(/[\s\-\(\)\+]/g, '');
+            // Check if phone number starts with the search term (exact prefix match)
+            return cleanPhone.startsWith(cleanSearch);
+          });
+        }
+
+        // Limit results to requested limit
+        return numbers.slice(0, limit);
       }
 
       return [];
