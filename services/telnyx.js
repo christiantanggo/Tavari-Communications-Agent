@@ -133,15 +133,24 @@ export class TelnyxService {
         // Clean the phone number (remove +, spaces, dashes, parentheses)
         let cleanNumber = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
         
-        // Don't add country code automatically - let user search by what they type
-        // If they type "1", show numbers starting with 1
-        // If they type "415", show numbers starting with 415
-        
-        // Use Telnyx starts_with filter for prefix matching
-        // Increase limit to get more results for client-side filtering
-        params.set('filter[country_code]', countryCode); // Still filter by country
-        params.set('filter[phone_number][starts_with]', cleanNumber);
-        params.set('page[size]', '100'); // Get more results to filter client-side
+        // Check if it looks like an area code (3 digits for US/Canada)
+        // If so, use national_destination_code filter instead
+        if (cleanNumber.length === 3 && /^\d{3}$/.test(cleanNumber)) {
+          // It's an area code - use national_destination_code filter
+          params.set('filter[country_code]', countryCode);
+          params.set('filter[phone_number_type]', phoneType);
+          params.append('filter[national_destination_code]', cleanNumber);
+          params.set('page[size]', limit.toString());
+          console.log('Treating as area code search:', cleanNumber);
+        } else {
+          // It's a longer number - search without filters and filter client-side
+          // Telnyx doesn't have a reliable starts_with filter, so we'll get all numbers
+          // and filter client-side
+          params.set('filter[country_code]', countryCode);
+          params.set('filter[phone_number_type]', phoneType);
+          params.set('page[size]', '200'); // Get more results for client-side filtering
+          console.log('Treating as phone number prefix search:', cleanNumber);
+        }
       } else {
         // Normal browse search with filters
         params.set('filter[country_code]', countryCode);
@@ -198,12 +207,18 @@ export class TelnyxService {
         if (phoneNumberSearch) {
           const cleanSearch = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
           
-          numbers = numbers.filter((phone) => {
-            // Remove formatting from phone number for comparison
-            const cleanPhone = phone.phone_number.replace(/[\s\-\(\)\+]/g, '');
-            // Check if phone number starts with the search term (exact prefix match)
-            return cleanPhone.startsWith(cleanSearch);
-          });
+          // If it's a 3-digit area code, we already filtered by national_destination_code
+          // Otherwise, filter by phone number prefix
+          if (cleanSearch.length !== 3 || !/^\d{3}$/.test(cleanSearch)) {
+            numbers = numbers.filter((phone) => {
+              // Remove formatting from phone number for comparison
+              const cleanPhone = phone.phone_number.replace(/[\s\-\(\)\+]/g, '');
+              // Check if phone number starts with the search term (exact prefix match)
+              // Also check with country code prefix (1 for US/Canada)
+              return cleanPhone.startsWith(cleanSearch) || 
+                     cleanPhone.startsWith('1' + cleanSearch);
+            });
+          }
         }
 
         // Limit results to requested limit
