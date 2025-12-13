@@ -124,7 +124,7 @@ export class TelnyxService {
   }
 
   // Search for available phone numbers
-  static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20) {
+  static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20, locality = null, administrativeArea = null) {
     try {
       // Telnyx API uses query parameters
       const params = new URLSearchParams({
@@ -132,6 +132,16 @@ export class TelnyxService {
         'filter[phone_number_type]': phoneType, // 'local', 'toll-free', 'mobile'
         'page[size]': limit.toString(),
       });
+
+      // Add city filter if provided
+      if (locality) {
+        params.append('filter[locality]', locality);
+      }
+
+      // Add state/province filter if provided
+      if (administrativeArea) {
+        params.append('filter[administrative_area]', administrativeArea);
+      }
 
       const result = await this.makeAPIRequest('GET', `/available_phone_numbers?${params.toString()}`);
 
@@ -141,6 +151,8 @@ export class TelnyxService {
           phone_price: phone.cost_information?.monthly_cost || 0,
           phone_category_name: phone.phone_number_type || 'local',
           country_code: phone.region_information?.country_code || countryCode,
+          locality: phone.region_information?.locality || null, // City
+          administrative_area: phone.region_information?.administrative_area || null, // State/Province
           can_send_sms: phone.features?.sms || false,
           features: phone.features || {},
         }));
