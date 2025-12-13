@@ -126,22 +126,29 @@ export class TelnyxService {
   // Search for available phone numbers
   static async searchPhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 20, locality = null, administrativeArea = null, phoneNumberSearch = null) {
     try {
-      // Telnyx API uses query parameters
-      const params = new URLSearchParams({
-        'filter[country_code]': countryCode,
-        'filter[phone_number_type]': phoneType, // 'local', 'toll-free', 'mobile'
-        'page[size]': limit.toString(),
-      });
+      const params = new URLSearchParams();
 
-      // If searching for a specific phone number, use that filter instead
+      // If searching for a specific phone number, use that filter only
       if (phoneNumberSearch) {
-        // Remove other filters when searching by number
-        params.delete('filter[country_code]');
-        params.delete('filter[phone_number_type]');
         // Clean the phone number (remove +, spaces, dashes, parentheses)
-        const cleanNumber = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
-        params.set('filter[phone_number]', cleanNumber);
+        let cleanNumber = phoneNumberSearch.replace(/[\s\-\(\)\+]/g, '');
+        
+        // If it doesn't start with country code, try to infer it
+        // For US/Canada, if it's 10 digits, it's likely missing country code
+        if (cleanNumber.length === 10 && (countryCode === 'US' || countryCode === 'CA')) {
+          cleanNumber = '1' + cleanNumber; // Add US/Canada country code
+        }
+        
+        // Telnyx phone number filter supports partial matching with contains
+        // Try exact match first, but also support partial (area code, etc.)
+        params.set('filter[phone_number][contains]', cleanNumber);
+        params.set('page[size]', limit.toString());
       } else {
+        // Normal browse search with filters
+        params.set('filter[country_code]', countryCode);
+        params.set('filter[phone_number_type]', phoneType); // 'local', 'toll-free', 'mobile'
+        params.set('page[size]', limit.toString());
+
         // Add city filter if provided
         if (locality) {
           params.append('filter[locality]', locality);
