@@ -21,14 +21,23 @@ export class CallHandler {
     console.log('=== CallHandler.initialize() called ===');
     console.log('voximplantCallId:', this.voximplantCallId);
     console.log('businessId:', this.businessId);
+    process.stdout.write('🔵 INIT_START\n');
     
     // Check usage limits first
-    const usageCheck = await this.checkUsageLimits();
-    if (!usageCheck.allowed) {
-      console.error('Usage limit check failed:', usageCheck.reason);
-      throw new Error(usageCheck.reason || 'Usage limit reached');
+    console.log('🔵 Step: Checking usage limits...');
+    process.stdout.write('🔵 BEFORE_USAGE_CHECK\n');
+    try {
+      const usageCheck = await this.checkUsageLimits();
+      process.stdout.write('🔵 AFTER_USAGE_CHECK\n');
+      if (!usageCheck.allowed) {
+        console.error('❌ Usage limit check failed:', usageCheck.reason);
+        throw new Error(usageCheck.reason || 'Usage limit reached');
+      }
+      console.log('✅ Usage limit check passed');
+    } catch (usageError) {
+      console.error('❌ Error in usage check:', usageError);
+      throw usageError;
     }
-    console.log('Usage limit check passed');
     
     // Get call session - try database ID first, then voximplant_call_id
     let callSession = null;
@@ -86,11 +95,13 @@ export class CallHandler {
     console.log('Call session DB ID:', this.callSessionDbId);
     
     // Get AI agent config
-    console.log('Fetching AI agent config for business:', this.businessId);
-    console.log('Calling AIAgent.findByBusinessId()...');
+    console.log('🔵 Step: Fetching AI agent config for business:', this.businessId);
+    console.log('🔵 Calling AIAgent.findByBusinessId()...');
+    process.stdout.write('🔵 BEFORE_AI_AGENT_QUERY\n');
     const agentConfigStartTime = Date.now();
     try {
       this.agentConfig = await AIAgent.findByBusinessId(this.businessId);
+      process.stdout.write('🔵 AFTER_AI_AGENT_QUERY\n');
       const agentConfigDuration = Date.now() - agentConfigStartTime;
       console.log(`✅ AIAgent.findByBusinessId() completed in ${agentConfigDuration}ms`);
       
