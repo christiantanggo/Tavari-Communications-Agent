@@ -1,8 +1,7 @@
 import WebSocket from 'ws';
-import dotenv from 'dotenv';
 
-dotenv.config();
-
+// In production (Railway), env vars are already available via process.env
+// dotenv.config() is only needed for local development
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 export class AIRealtimeService {
