@@ -186,6 +186,14 @@ export const setupCallAudioWebSocket = (server) => {
       console.log(`[${connectionId}] Path starts with /api/calls/?`, url.pathname.startsWith('/api/calls/'));
       console.log(`[${connectionId}] Path ends with /audio?`, url.pathname.endsWith('/audio'));
       
+      // Allow test connections for debugging
+      if (url.pathname === '/api/calls/test-connection/audio') {
+        console.log(`[${connectionId}] ✅ Test WebSocket connection received`);
+        ws.send(JSON.stringify({ type: 'test_response', message: 'WebSocket server is accessible!' }));
+        setTimeout(() => ws.close(1000, 'Test complete'), 1000);
+        return;
+      }
+      
       if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
         console.log(`[${connectionId}] ❌ Invalid path, closing connection:`, url.pathname);
         ws.close(1008, 'Invalid path');
