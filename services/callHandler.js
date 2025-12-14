@@ -163,7 +163,7 @@ export class CallHandler {
     return true;
   }
   
-  // Handle incoming audio from Voximplant
+  // Handle incoming audio from Telnyx
   handleIncomingAudio(audioData) {
     if (!this.aiService) {
       console.warn('⚠️ AI service not initialized, cannot send audio to OpenAI');
@@ -176,8 +176,7 @@ export class CallHandler {
       return;
     }
     
-    // Convert audio format if needed and send to OpenAI
-    console.log('🔵 Sending audio to OpenAI, size:', audioData?.length || 'unknown');
+    // Send audio to OpenAI (no logging per chunk - too verbose)
     this.aiService.sendAudio(audioData);
   }
   

@@ -390,17 +390,19 @@ export const setupCallAudioWebSocket = (server) => {
         }
       }
       
-      // Handle incoming audio from Voximplant
+      // Handle incoming audio from Telnyx
       console.log('Setting up WebSocket message handler...');
+      let audioChunkCount = 0;
       ws.on('message', async (data) => {
-        console.log(`📥 WebSocket message received for call: ${callSessionId}`);
-        console.log(`Message data type: ${typeof data}, isBuffer: ${Buffer.isBuffer(data)}, length: ${data?.length || 'N/A'}`);
+        audioChunkCount++;
+        // Only log every 100th chunk to reduce noise
+        if (audioChunkCount % 100 === 0) {
+          console.log(`📥 Received ${audioChunkCount} audio chunks from Telnyx for call: ${callSessionId}`);
+        }
         
         if (handler) {
-          console.log('Handler exists, processing incoming audio...');
           try {
             handler.handleIncomingAudio(data);
-            console.log('✅ Audio data processed successfully');
           } catch (audioError) {
             console.error('❌ Error processing incoming audio:', audioError);
             console.error('Audio error message:', audioError.message);

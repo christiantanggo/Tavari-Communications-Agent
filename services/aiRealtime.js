@@ -307,15 +307,11 @@ export class AIRealtimeService {
         ? audioToSend.toString('base64')
         : audioToSend;
       
-      const audioSize = Buffer.isBuffer(audioToSend) ? audioToSend.length : (typeof audioToSend === 'string' ? audioToSend.length : 'unknown');
-      console.log('🔵 Sending G.711 μ-law audio to OpenAI (no conversion needed), size:', audioSize, 'bytes, base64 length:', base64Audio.length);
-      
+      // Send audio to OpenAI (no per-chunk logging - too verbose)
       this.ws.send(JSON.stringify({
         type: 'input_audio_buffer.append',
         audio: base64Audio,
       }));
-      
-      console.log('✅ Audio sent to OpenAI successfully');
     } catch (error) {
       console.error('❌ Error sending audio to OpenAI:', error);
       console.error('Error stack:', error.stack);
