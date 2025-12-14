@@ -33,6 +33,7 @@ router.get('/data', authenticate, async (req, res) => {
         timezone: business.timezone,
         onboarding_complete: business.onboarding_complete,
         voximplant_number: business.voximplant_number,
+        telnyx_number: business.telnyx_number,
       },
       agent: agent || null,
     });

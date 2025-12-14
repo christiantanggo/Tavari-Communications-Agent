@@ -174,6 +174,7 @@ router.get('/me', authenticate, async (req, res) => {
         email: business.email,
         onboarding_complete: business.onboarding_complete,
         voximplant_number: business.voximplant_number,
+        telnyx_number: business.telnyx_number,
       },
     });
   } catch (error) {

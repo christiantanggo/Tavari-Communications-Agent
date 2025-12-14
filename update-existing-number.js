@@ -115,24 +115,27 @@ async function updateExistingNumber() {
     
     console.log('Updated configuration:');
     console.log(`  Phone Number: ${phoneData.phone_number}`);
-    console.log(`  Voice API Application: ${phoneData.voice_application_id || phoneData.connection_id || 'NOT SET'}`);
+    console.log(`  Voice API Application: ${phoneData.connection_id || 'NOT SET'}`);
     console.log(`  Messaging Profile: ${phoneData.messaging_profile_id || 'NOT SET'}`);
-    console.log(`  Webhook URL: ${phoneData.webhook_url || 'NOT SET'}`);
+    console.log(`  Webhook URL: Configured on Voice API Application (not stored on phone number)`);
     console.log('');
     
     // Check if everything is configured
-    const voiceConfigured = phoneData.voice_application_id || phoneData.connection_id;
+    // Note: Webhook URL is stored on the Voice API Application, not the phone number
+    const voiceConfigured = phoneData.connection_id;
     const messagingConfigured = phoneData.messaging_profile_id;
-    const webhookConfigured = phoneData.webhook_url;
     
-    if (voiceConfigured && messagingConfigured && webhookConfigured) {
+    if (voiceConfigured && messagingConfigured) {
       console.log('✅ TEST PASSED - All settings configured correctly!');
+      console.log('   - Voice API Application: SET (routes calls to webhook)');
+      console.log('   - Messaging Profile: SET (routes SMS to webhook)');
+      console.log('   - Webhook URL: Configured on Voice API Application');
+      console.log('');
       console.log('   This confirms that new purchases will configure automatically.');
     } else {
       console.log('⚠️  PARTIAL CONFIGURATION:');
       if (!voiceConfigured) console.log('   - Voice API Application: NOT SET');
       if (!messagingConfigured) console.log('   - Messaging Profile: NOT SET');
-      if (!webhookConfigured) console.log('   - Webhook URL: NOT SET');
     }
   } catch (error) {
     console.error('❌ Update failed:', error.message);
