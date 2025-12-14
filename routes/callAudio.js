@@ -444,8 +444,11 @@ export const setupCallAudioWebSocket = (server) => {
       
       console.log('✅ All WebSocket event handlers registered successfully');
       console.log(`✅ WebSocket connection fully established for call: ${callSessionId}`);
+      process.stdout.write(`[${connectionId}] HANDLER_COMPLETE\n`);
+      process.stdout.write(`[${connectionId}] WS_READY\n`);
       
       } catch (error) {
+        process.stdout.write(`[${connectionId}] HANDLER_ERROR\n`);
         console.error(`[${connectionId}] ❌ Error setting up call handler for ${callSessionId}:`, error);
         console.error(`[${connectionId}] Error name:`, error.name);
         console.error(`[${connectionId}] Error message:`, error.message);
