@@ -24,8 +24,27 @@ export const setupCallAudioWebSocket = (server) => {
       try {
         console.log(`[${connectionId}] Step 0: Logging request info...`);
         console.log(`[${connectionId}] Request object exists:`, !!req);
+        
+        // Force flush and add delay to see if it's a timing issue
+        process.stdout.write(`[${connectionId}] FLUSH TEST 1\n`);
+        
         console.log(`[${connectionId}] Request object type:`, typeof req);
-        console.log(`[${connectionId}] Request object keys:`, req ? Object.keys(req) : 'N/A');
+        process.stdout.write(`[${connectionId}] FLUSH TEST 2\n`);
+        
+        // Try to get keys safely
+        let requestKeys = 'N/A';
+        try {
+          if (req) {
+            requestKeys = Object.keys(req);
+            console.log(`[${connectionId}] Request object keys:`, requestKeys);
+          } else {
+            console.log(`[${connectionId}] Request object is null/undefined, cannot get keys`);
+          }
+        } catch (keysError) {
+          console.error(`[${connectionId}] ❌ Error getting request keys:`, keysError);
+          requestKeys = 'ERROR';
+        }
+        process.stdout.write(`[${connectionId}] FLUSH TEST 3\n`);
         
         // Try to access req.url safely
         let requestUrl = 'undefined';
