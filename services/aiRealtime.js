@@ -42,7 +42,9 @@ export class AIRealtimeService {
         this.ws = new WebSocket(url);
         
         this.ws.on('open', () => {
-          console.log('Connected to OpenAI Realtime API');
+          process.stdout.write('\n✅ OPENAI WEBSOCKET CONNECTED\n');
+          console.log('✅ Connected to OpenAI Realtime API');
+          console.log('✅ OpenAI WebSocket readyState:', this.ws.readyState);
           
           // Wait a moment before sending session configuration
           setTimeout(() => {
@@ -68,7 +70,10 @@ export class AIRealtimeService {
               // This ensures the session is configured before we start sending audio
               const sessionUpdatedHandler = (message) => {
                 if (message.type === 'session.updated') {
-                  console.log('Session updated successfully');
+                  process.stdout.write('\n✅ OPENAI SESSION UPDATED - Ready to receive audio\n');
+                  console.log('✅ Session updated successfully');
+                  console.log('✅ OpenAI session is now configured and ready');
+                  this.sessionConfigured = true;
                   this.ws.removeListener('message', sessionUpdatedHandler);
                   resolve(true);
                 } else if (message.type === 'error') {
@@ -236,20 +241,34 @@ export class AIRealtimeService {
   
   // Send audio input to OpenAI
   sendAudio(audioData) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try {
-        // Convert audio to base64 if it's a buffer
-        const base64Audio = Buffer.isBuffer(audioData) 
-          ? audioData.toString('base64')
-          : audioData;
-        
-        this.ws.send(JSON.stringify({
-          type: 'input_audio_buffer.append',
-          audio: base64Audio,
-        }));
-      } catch (error) {
-        console.error('Error sending audio to OpenAI:', error);
-      }
+    if (!this.ws) {
+      console.warn('⚠️ OpenAI WebSocket not initialized, cannot send audio');
+      return;
+    }
+    
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('⚠️ OpenAI WebSocket not open (readyState:', this.ws.readyState, '), cannot send audio');
+      return;
+    }
+    
+    try {
+      // Convert audio to base64 if it's a buffer
+      const base64Audio = Buffer.isBuffer(audioData) 
+        ? audioData.toString('base64')
+        : audioData;
+      
+      const audioSize = Buffer.isBuffer(audioData) ? audioData.length : (typeof audioData === 'string' ? audioData.length : 'unknown');
+      console.log('🔵 Sending audio to OpenAI Realtime API, size:', audioSize, 'bytes, base64 length:', base64Audio.length);
+      
+      this.ws.send(JSON.stringify({
+        type: 'input_audio_buffer.append',
+        audio: base64Audio,
+      }));
+      
+      console.log('✅ Audio sent to OpenAI successfully');
+    } catch (error) {
+      console.error('❌ Error sending audio to OpenAI:', error);
+      console.error('Error stack:', error.stack);
     }
   }
   

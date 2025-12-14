@@ -159,10 +159,20 @@ export class CallHandler {
   
   // Handle incoming audio from Voximplant
   handleIncomingAudio(audioData) {
-    if (this.aiService) {
-      // Convert audio format if needed and send to OpenAI
-      this.aiService.sendAudio(audioData);
+    if (!this.aiService) {
+      console.warn('⚠️ AI service not initialized, cannot send audio to OpenAI');
+      return;
     }
+    
+    // Check if OpenAI WebSocket is connected
+    if (!this.aiService.ws || this.aiService.ws.readyState !== 1) {
+      console.warn('⚠️ OpenAI WebSocket not connected (readyState:', this.aiService.ws?.readyState, '), cannot send audio');
+      return;
+    }
+    
+    // Convert audio format if needed and send to OpenAI
+    console.log('🔵 Sending audio to OpenAI, size:', audioData?.length || 'unknown');
+    this.aiService.sendAudio(audioData);
   }
   
   // Send audio to Voximplant
