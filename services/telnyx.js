@@ -354,27 +354,84 @@ export class TelnyxService {
   }
 
   // Purchase and assign phone number to business
+  // NEW APPROACH: Search for the number first to get the exact format, then purchase
   static async purchaseAndAssignPhoneNumber(businessId, phoneNumber, countryCode = 'US') {
     try {
-      // Step 1: Purchase the phone number
-      const purchaseResult = await this.purchasePhoneNumber(phoneNumber);
-      const phoneNumberId = purchaseResult.phone_number_id;
-
-      // Step 2: Configure webhook URL
+      console.log('=== NEW PURCHASE APPROACH ===');
+      console.log('Step 1: Searching for exact number format:', phoneNumber);
+      
+      // Clean the number for search (remove all formatting)
+      let searchNumber = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+      if (searchNumber.length === 10) {
+        searchNumber = '1' + searchNumber; // Add country code for US
+      }
+      
+      // Search for the number to get exact format from Telnyx
+      const searchParams = new URLSearchParams({
+        'filter[phone_number]': searchNumber,
+        'filter[country_code]': countryCode,
+        'page[size]': '10',
+      });
+      
+      const searchResult = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+      
+      if (!searchResult.data || searchResult.data.length === 0) {
+        throw new Error(`Phone number ${phoneNumber} not found in Telnyx available inventory. Please select a number from the search results.`);
+      }
+      
+      // Find exact match
+      const exactMatch = searchResult.data.find(num => {
+        const numClean = num.phone_number?.replace(/[\s\-\(\)\+]/g, '') || '';
+        return numClean === searchNumber;
+      });
+      
+      if (!exactMatch) {
+        throw new Error(`Exact match not found for ${phoneNumber} in search results.`);
+      }
+      
+      console.log('Step 2: Found exact match:', exactMatch.phone_number);
+      console.log('Step 3: Purchasing with exact format from Telnyx');
+      
+      // Use the EXACT phone_number format from Telnyx search results
+      const purchasePayload = {
+        phone_number: exactMatch.phone_number, // Use exact format from Telnyx
+      };
+      
+      console.log('Purchase payload:', JSON.stringify(purchasePayload, null, 2));
+      
+      // Purchase using exact format
+      const purchaseResult = await this.makeAPIRequest('POST', '/phone_numbers', purchasePayload);
+      
+      console.log('Purchase result:', JSON.stringify(purchaseResult, null, 2));
+      
+      if (!purchaseResult.data) {
+        throw new Error('Purchase succeeded but no data returned from Telnyx');
+      }
+      
+      const phoneNumberId = purchaseResult.data.id;
+      const purchasedNumber = purchaseResult.data.phone_number;
+      
+      console.log('Step 4: Configuring webhook for number:', purchasedNumber);
+      
+      // Configure webhook URL
       const webhookUrl = process.env.WEBHOOK_URL || `${process.env.SERVER_URL || 'http://localhost:5001'}/api/calls/webhook`;
       await this.configurePhoneNumber(phoneNumberId, webhookUrl);
 
-      // Step 3: Update business record (format with + prefix for display)
-      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
-      await Business.setTelnyxNumber(businessId, formattedNumber);
+      // Update business record
+      await Business.setTelnyxNumber(businessId, purchasedNumber);
 
+      console.log('=== PURCHASE SUCCESS ===');
+      
       return {
         success: true,
-        phone_number: formattedNumber,
+        phone_number: purchasedNumber,
         phone_number_id: phoneNumberId,
       };
     } catch (error) {
-      console.error('Purchase and assign phone number error:', error);
+      console.error('=== PURCHASE AND ASSIGN ERROR ===');
+      console.error('Error:', error.message);
+      console.error('Response:', error.response?.data);
+      console.error('Status:', error.response?.status);
       throw error;
     }
   }
