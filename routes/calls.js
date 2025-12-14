@@ -42,28 +42,7 @@ router.post('/webhook', async (req, res) => {
         // The actual answer command is sent via Call Control API
         res.json({ status: 'ok' });
       } else if (eventType === 'call.answered') {
-        // Call was answered, speak greeting
-        const callControlId = req.body.data?.payload?.call_control_id || req.body.payload?.call_control_id;
-        const toNumber = req.body.data?.payload?.to;
-        
-        await TelnyxService.handleCallAnswered(callControlId, toNumber);
-        res.json({ status: 'ok' });
-      } else if (eventType === 'call.speak.ended') {
-        // Greeting finished, start gathering speech
-        const callControlId = req.body.data?.payload?.call_control_id || req.body.payload?.call_control_id;
-        const clientStateBase64 = req.body.data?.payload?.client_state;
-        
-        await TelnyxService.handleSpeakEnded(callControlId, clientStateBase64);
-        res.json({ status: 'ok' });
-      } else if (eventType === 'call.ai.gathered' || eventType === 'call.ai_gather.ended') {
-        // Speech was gathered, process with AI
-        const callControlId = req.body.data?.payload?.call_control_id || req.body.payload?.call_control_id;
-        const clientStateBase64 = req.body.data?.payload?.client_state;
-        const speechResult = req.body.data?.payload?.result?.user_speech || 
-                           req.body.data?.payload?.parameters?.user_speech ||
-                           req.body.data?.payload?.user_speech || '';
-        
-        await TelnyxService.handleSpeechGathered(callControlId, clientStateBase64, speechResult);
+        // Call was answered, WebSocket streaming will handle audio
         res.json({ status: 'ok' });
       } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
         const callData = TelnyxService.parseInboundCall(req);

@@ -28,21 +28,57 @@ export class AIRealtimeService {
         this.ws.on('open', () => {
           console.log('Connected to OpenAI Realtime API');
           
-          // Send session configuration
-          this.ws.send(JSON.stringify({
-            type: 'session.update',
-            session: {
-              modalities: ['text', 'audio'],
-              instructions: this.buildSystemInstructions(),
-              voice: 'alloy',
-              input_audio_format: 'pcm16',
-              output_audio_format: 'pcm16',
-              temperature: 0.8,
-              max_response_output_tokens: 4096,
-            },
-          }));
-          
-          resolve(true);
+          // Wait a moment before sending session configuration
+          setTimeout(() => {
+            try {
+              // Send session configuration
+              const sessionConfig = {
+                type: 'session.update',
+                session: {
+                  modalities: ['text', 'audio'],
+                  instructions: this.buildSystemInstructions(),
+                  voice: 'alloy',
+                  input_audio_format: 'pcm16',
+                  output_audio_format: 'pcm16',
+                  temperature: 0.8,
+                  max_response_output_tokens: 4096,
+                },
+              };
+              
+              console.log('Sending session.update:', JSON.stringify(sessionConfig, null, 2));
+              this.ws.send(JSON.stringify(sessionConfig));
+              
+              // Wait for session.updated event before resolving
+              // This ensures the session is configured before we start sending audio
+              const sessionUpdatedHandler = (message) => {
+                if (message.type === 'session.updated') {
+                  console.log('Session updated successfully');
+                  this.ws.removeListener('message', sessionUpdatedHandler);
+                  resolve(true);
+                } else if (message.type === 'error') {
+                  console.error('Error during session update:', JSON.stringify(message, null, 2));
+                  this.ws.removeListener('message', sessionUpdatedHandler);
+                  reject(new Error('Session update failed: ' + JSON.stringify(message)));
+                }
+              };
+              
+              // Listen for session.updated or error
+              this.ws.on('message', sessionUpdatedHandler);
+              
+              // Timeout after 5 seconds if no response
+              setTimeout(() => {
+                this.ws.removeListener('message', sessionUpdatedHandler);
+                if (!this.sessionConfigured) {
+                  console.warn('Session update timeout - proceeding anyway');
+                  resolve(true); // Proceed even if we don't get confirmation
+                }
+              }, 5000);
+              
+            } catch (error) {
+              console.error('Error sending session.update:', error);
+              reject(error);
+            }
+          }, 100);
         });
         
         this.ws.on('message', (data) => {
@@ -99,6 +135,11 @@ export class AIRealtimeService {
           const audioBuffer = Buffer.from(message.delta, 'base64');
           this.handleAudioOutput(audioBuffer);
         }
+        break;
+        
+      case 'session.updated':
+        console.log('Session updated event received');
+        this.sessionConfigured = true;
         break;
         
       case 'response.done':
