@@ -23,24 +23,78 @@ export const setupCallAudioWebSocket = (server) => {
       console.log(`[${connectionId}] Step 0: Starting request info logging...`);
       try {
         console.log(`[${connectionId}] Step 0: Logging request info...`);
-      console.log(`[${connectionId}] Request object exists:`, !!req);
-      console.log(`[${connectionId}] Request URL:`, req?.url || 'undefined');
-      console.log(`[${connectionId}] Request method:`, req?.method || 'undefined');
-      
-      try {
-        console.log(`[${connectionId}] Request headers exist:`, !!req?.headers);
-        if (req?.headers) {
-          console.log(`[${connectionId}] Request headers host:`, req.headers.host || 'undefined');
-          console.log(`[${connectionId}] Request headers keys:`, Object.keys(req.headers || {}));
-        } else {
-          console.log(`[${connectionId}] ⚠️ Request headers are null/undefined`);
+        console.log(`[${connectionId}] Request object exists:`, !!req);
+        console.log(`[${connectionId}] Request object type:`, typeof req);
+        console.log(`[${connectionId}] Request object keys:`, req ? Object.keys(req) : 'N/A');
+        
+        // Try to access req.url safely
+        let requestUrl = 'undefined';
+        try {
+          if (req && 'url' in req) {
+            requestUrl = req.url || 'undefined';
+            console.log(`[${connectionId}] Request URL (direct access):`, requestUrl);
+          } else {
+            console.log(`[${connectionId}] ⚠️ req.url property does not exist`);
+            try {
+              requestUrl = req?.url || 'undefined';
+              console.log(`[${connectionId}] Request URL (optional chaining):`, requestUrl);
+            } catch (urlError) {
+              console.error(`[${connectionId}] ❌ Error accessing req.url:`, urlError);
+            }
+          }
+        } catch (urlAccessError) {
+          console.error(`[${connectionId}] ❌ Exception accessing req.url:`, urlAccessError);
+          console.error(`[${connectionId}] URL access error message:`, urlAccessError.message);
+          console.error(`[${connectionId}] URL access error stack:`, urlAccessError.stack);
         }
-      } catch (headerAccessError) {
-        console.error(`[${connectionId}] ❌ Error accessing headers:`, headerAccessError);
-        console.error(`[${connectionId}] Header access error message:`, headerAccessError.message);
-        console.error(`[${connectionId}] Header access error stack:`, headerAccessError.stack);
-      }
-      
+        
+        // Try to access req.method safely
+        let requestMethod = 'undefined';
+        try {
+          if (req && 'method' in req) {
+            requestMethod = req.method || 'undefined';
+            console.log(`[${connectionId}] Request method (direct access):`, requestMethod);
+          } else {
+            console.log(`[${connectionId}] ⚠️ req.method property does not exist`);
+            try {
+              requestMethod = req?.method || 'undefined';
+              console.log(`[${connectionId}] Request method (optional chaining):`, requestMethod);
+            } catch (methodError) {
+              console.error(`[${connectionId}] ❌ Error accessing req.method:`, methodError);
+            }
+          }
+        } catch (methodAccessError) {
+          console.error(`[${connectionId}] ❌ Exception accessing req.method:`, methodAccessError);
+          console.error(`[${connectionId}] Method access error message:`, methodAccessError.message);
+          console.error(`[${connectionId}] Method access error stack:`, methodAccessError.stack);
+        }
+        
+        // Try to access req.headers safely
+        try {
+          console.log(`[${connectionId}] Attempting to access req.headers...`);
+          if (req && 'headers' in req) {
+            console.log(`[${connectionId}] Request headers exist:`, !!req.headers);
+            if (req.headers) {
+              console.log(`[${connectionId}] Request headers host:`, req.headers.host || 'undefined');
+              console.log(`[${connectionId}] Request headers keys:`, Object.keys(req.headers || {}));
+            } else {
+              console.log(`[${connectionId}] ⚠️ Request headers are null/undefined`);
+            }
+          } else {
+            console.log(`[${connectionId}] ⚠️ req.headers property does not exist`);
+            try {
+              const headers = req?.headers;
+              console.log(`[${connectionId}] Request headers (optional chaining):`, headers ? 'exists' : 'undefined');
+            } catch (headersError) {
+              console.error(`[${connectionId}] ❌ Error accessing req.headers:`, headersError);
+            }
+          }
+        } catch (headerAccessError) {
+          console.error(`[${connectionId}] ❌ Exception accessing headers:`, headerAccessError);
+          console.error(`[${connectionId}] Header access error message:`, headerAccessError.message);
+          console.error(`[${connectionId}] Header access error stack:`, headerAccessError.stack);
+        }
+        
         console.log(`[${connectionId}] ✅ Request info logged successfully`);
       } catch (headerError) {
         console.error(`[${connectionId}] ❌ Error logging request info:`, headerError);
