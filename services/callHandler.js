@@ -3,6 +3,7 @@ import { AIAgent } from '../models/AIAgent.js';
 import { AIRealtimeService } from './aiRealtime.js';
 import { UsageMinutes } from '../models/UsageMinutes.js';
 import { Business } from '../models/Business.js';
+import { supabaseClient } from '../config/database.js';
 
 export class CallHandler {
   constructor(voximplantCallId, businessId) {
@@ -40,7 +41,7 @@ export class CallHandler {
       // It's a database ID, fetch directly
       try {
         console.log('Fetching call session by UUID from database...');
-        const { supabaseClient } = await import('../config/database.js');
+        console.log('Using pre-imported Supabase client');
         const { data, error } = await supabaseClient
           .from('call_sessions')
           .select('*')
@@ -86,12 +87,25 @@ export class CallHandler {
     
     // Get AI agent config
     console.log('Fetching AI agent config for business:', this.businessId);
-    this.agentConfig = await AIAgent.findByBusinessId(this.businessId);
-    if (!this.agentConfig) {
-      console.error('AI agent not configured for business:', this.businessId);
-      throw new Error('AI agent not configured');
+    console.log('Calling AIAgent.findByBusinessId()...');
+    const agentConfigStartTime = Date.now();
+    try {
+      this.agentConfig = await AIAgent.findByBusinessId(this.businessId);
+      const agentConfigDuration = Date.now() - agentConfigStartTime;
+      console.log(`✅ AIAgent.findByBusinessId() completed in ${agentConfigDuration}ms`);
+      
+      if (!this.agentConfig) {
+        console.error('❌ AI agent not configured for business:', this.businessId);
+        throw new Error('AI agent not configured');
+      }
+      console.log('✅ AI agent config found');
+      console.log('AI agent config keys:', Object.keys(this.agentConfig || {}));
+    } catch (agentConfigError) {
+      console.error('❌ Error fetching AI agent config:', agentConfigError);
+      console.error('Agent config error message:', agentConfigError.message);
+      console.error('Agent config error stack:', agentConfigError.stack);
+      throw agentConfigError;
     }
-    console.log('AI agent config found');
     
     // Initialize AI Realtime service
     console.log('Creating AIRealtimeService...');
