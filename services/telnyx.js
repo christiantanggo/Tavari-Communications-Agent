@@ -320,14 +320,17 @@ export class TelnyxService {
         console.error('Full Telnyx error data:', JSON.stringify(error.response.data, null, 2));
       }
       
+      // Use phoneNumber parameter (always available) instead of cleanNumber (might not be defined)
+      const numberForError = phoneNumber || 'unknown';
+      
       // Provide more helpful error messages
       if (error.message?.includes('not found') || error.message?.includes('could not be found')) {
         // Check if it's a 404 or specific Telnyx error
         const telnyxError = error.response?.data?.errors?.[0];
         if (telnyxError) {
-          throw new Error(`Telnyx error: ${telnyxError.title || telnyxError.detail || error.message}. Phone number: ${cleanNumber}`);
+          throw new Error(`Telnyx error: ${telnyxError.title || telnyxError.detail || error.message}. Phone number: ${numberForError}`);
         }
-        throw new Error(`Phone number ${cleanNumber} is not available for purchase. It may have already been purchased or is not in Telnyx's inventory. Please select a different number from the available list.`);
+        throw new Error(`Phone number ${numberForError} is not available for purchase. It may have already been purchased or is not in Telnyx's inventory. Please select a different number from the available list.`);
       }
       
       throw error;
