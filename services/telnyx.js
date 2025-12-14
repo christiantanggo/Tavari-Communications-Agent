@@ -276,13 +276,62 @@ export class TelnyxService {
       
       // Telnyx API expects phone_number in E.164 format (with +)
       // First verify the number is in available inventory
-      const searchParams = new URLSearchParams({
-        'filter[phone_number]': cleanNumber.replace('+', ''), // Search without +
-        'page[size]': '1',
-      });
+      // Try searching with both formats (with and without +)
+      const numberWithoutPlus = cleanNumber.replace('+', '');
       
       console.log('Verifying number is available:', cleanNumber);
-      const availableCheck = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+      console.log('Searching with number (no +):', numberWithoutPlus);
+      
+      // Try searching without + first (most common format for Telnyx filters)
+      let searchParams = new URLSearchParams({
+        'filter[phone_number]': numberWithoutPlus,
+        'page[size]': '10', // Get more results to be sure
+      });
+      
+      let availableCheck = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+      
+      // If no results, try with + prefix
+      if (!availableCheck.data || availableCheck.data.length === 0) {
+        console.log('No results without +, trying with + prefix');
+        searchParams = new URLSearchParams({
+          'filter[phone_number]': cleanNumber,
+          'page[size]': '10',
+        });
+        availableCheck = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+      }
+      
+      // If still no results, try searching by area code and matching manually
+      if (!availableCheck.data || availableCheck.data.length === 0) {
+        console.log('No direct match, trying area code search');
+        const areaCode = numberWithoutPlus.substring(0, 3); // First 3 digits for US/Canada
+        searchParams = new URLSearchParams({
+          'filter[national_destination_code]': areaCode,
+          'filter[country_code]': 'US',
+          'page[size]': '100', // Get more to search through
+        });
+        availableCheck = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+        
+        // Now filter client-side to find exact match
+        if (availableCheck.data && availableCheck.data.length > 0) {
+          const exactMatch = availableCheck.data.find(num => {
+            const numWithoutPlus = num.phone_number?.replace('+', '') || '';
+            return numWithoutPlus === numberWithoutPlus;
+          });
+          
+          if (exactMatch) {
+            availableCheck.data = [exactMatch];
+            console.log('Found exact match via area code search:', exactMatch.phone_number);
+          } else {
+            availableCheck.data = [];
+          }
+        }
+      }
+      
+      console.log('Available check result:', {
+        hasData: !!availableCheck.data,
+        dataLength: availableCheck.data?.length || 0,
+        firstResult: availableCheck.data?.[0] || null,
+      });
       
       if (!availableCheck.data || availableCheck.data.length === 0) {
         throw new Error(`Phone number ${cleanNumber} is not available for purchase. Please select a number from the available list.`);
