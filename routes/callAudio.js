@@ -11,68 +11,105 @@ export const setupCallAudioWebSocket = (server) => {
   const wss = new WebSocketServer({ server });
   
   wss.on('connection', async (ws, req) => {
-    console.log('=== WebSocket connection received ===');
+    const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`=== WebSocket connection received [${connectionId}] ===`);
     
-    // Log request info safely
+    // Log request info safely with extensive error handling
     try {
-      console.log('Request URL:', req.url || 'undefined');
-      console.log('Request method:', req.method || 'undefined');
-      console.log('Request headers host:', req.headers?.host || 'undefined');
+      console.log(`[${connectionId}] Step 0: Logging request info...`);
+      console.log(`[${connectionId}] Request object exists:`, !!req);
+      console.log(`[${connectionId}] Request URL:`, req?.url || 'undefined');
+      console.log(`[${connectionId}] Request method:`, req?.method || 'undefined');
+      
+      try {
+        console.log(`[${connectionId}] Request headers exist:`, !!req?.headers);
+        if (req?.headers) {
+          console.log(`[${connectionId}] Request headers host:`, req.headers.host || 'undefined');
+          console.log(`[${connectionId}] Request headers keys:`, Object.keys(req.headers || {}));
+        } else {
+          console.log(`[${connectionId}] ⚠️ Request headers are null/undefined`);
+        }
+      } catch (headerAccessError) {
+        console.error(`[${connectionId}] ❌ Error accessing headers:`, headerAccessError);
+        console.error(`[${connectionId}] Header access error message:`, headerAccessError.message);
+        console.error(`[${connectionId}] Header access error stack:`, headerAccessError.stack);
+      }
+      
+      console.log(`[${connectionId}] ✅ Request info logged successfully`);
     } catch (headerError) {
-      console.error('Error logging request info:', headerError);
+      console.error(`[${connectionId}] ❌ Error logging request info:`, headerError);
+      console.error(`[${connectionId}] Header error message:`, headerError.message);
+      console.error(`[${connectionId}] Header error stack:`, headerError.stack);
     }
     
     try {
+      console.log(`[${connectionId}] Step 1: Starting URL parsing...`);
       // Handle WebSocket URL parsing - Telnyx might send full URL or just path
       let url;
       try {
-        const requestUrl = req.url || '/';
-        console.log('Attempting to parse URL:', requestUrl);
+        const requestUrl = req?.url || '/';
+        console.log(`[${connectionId}] Attempting to parse URL:`, requestUrl);
+        console.log(`[${connectionId}] Request URL type:`, typeof requestUrl);
+        console.log(`[${connectionId}] Request URL length:`, requestUrl?.length || 'N/A');
         
         if (requestUrl.startsWith('http://') || requestUrl.startsWith('https://') || requestUrl.startsWith('ws://') || requestUrl.startsWith('wss://')) {
+          console.log(`[${connectionId}] URL is absolute, parsing directly...`);
           url = new URL(requestUrl);
-          console.log('Parsed as absolute URL');
+          console.log(`[${connectionId}] ✅ Parsed as absolute URL`);
         } else {
           // It's just a path, construct full URL
-          const protocol = req.headers['x-forwarded-proto'] === 'https' || req.connection?.encrypted ? 'https' : 'http';
-          const host = req.headers?.host || req.headers?.['x-forwarded-host'] || 'localhost:5001';
-          const baseUrl = `${protocol}://${host}`;
-          console.log('Constructing URL from path, base:', baseUrl);
-          url = new URL(requestUrl, baseUrl);
-          console.log('Parsed as relative URL');
+          console.log(`[${connectionId}] URL is relative, constructing full URL...`);
+          try {
+            const protocol = req.headers?.['x-forwarded-proto'] === 'https' || req.connection?.encrypted ? 'https' : 'http';
+            console.log(`[${connectionId}] Protocol determined:`, protocol);
+            
+            const host = req.headers?.host || req.headers?.['x-forwarded-host'] || 'localhost:5001';
+            console.log(`[${connectionId}] Host determined:`, host);
+            
+            const baseUrl = `${protocol}://${host}`;
+            console.log(`[${connectionId}] Constructing URL from path, base:`, baseUrl);
+            url = new URL(requestUrl, baseUrl);
+            console.log(`[${connectionId}] ✅ Parsed as relative URL`);
+          } catch (relativeUrlError) {
+            console.error(`[${connectionId}] ❌ Error constructing relative URL:`, relativeUrlError);
+            throw relativeUrlError;
+          }
         }
-        console.log('✅ Parsed URL pathname:', url.pathname);
-        console.log('✅ Full parsed URL:', url.toString());
+        console.log(`[${connectionId}] ✅ Parsed URL pathname:`, url.pathname);
+        console.log(`[${connectionId}] ✅ Full parsed URL:`, url.toString());
       } catch (urlError) {
-        console.error('❌ Error parsing URL:', urlError);
-        console.error('Error message:', urlError.message);
-        console.error('Error stack:', urlError.stack);
-        console.error('Request URL was:', req.url);
-        console.error('Headers host:', req.headers?.host);
+        console.error(`[${connectionId}] ❌ Error parsing URL:`, urlError);
+        console.error(`[${connectionId}] Error message:`, urlError.message);
+        console.error(`[${connectionId}] Error stack:`, urlError.stack);
+        console.error(`[${connectionId}] Request URL was:`, req?.url);
+        console.error(`[${connectionId}] Headers host:`, req?.headers?.host);
+        console.error(`[${connectionId}] Closing WebSocket due to URL parsing error...`);
         ws.close(1011, 'Invalid URL');
         return;
       }
       
       // Only handle audio streaming paths
-      console.log('Checking path validity...');
-      console.log('Path starts with /api/calls/?', url.pathname.startsWith('/api/calls/'));
-      console.log('Path ends with /audio?', url.pathname.endsWith('/audio'));
+      console.log(`[${connectionId}] Step 2: Checking path validity...`);
+      console.log(`[${connectionId}] Path starts with /api/calls/?`, url.pathname.startsWith('/api/calls/'));
+      console.log(`[${connectionId}] Path ends with /audio?`, url.pathname.endsWith('/audio'));
       
       if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
-        console.log('❌ Invalid path, closing connection:', url.pathname);
+        console.log(`[${connectionId}] ❌ Invalid path, closing connection:`, url.pathname);
         ws.close(1008, 'Invalid path');
         return;
       }
       
-      console.log('✅ Path is valid, extracting callSessionId...');
+      console.log(`[${connectionId}] ✅ Path is valid, extracting callSessionId...`);
       const pathParts = url.pathname.split('/');
-      console.log('Path parts:', pathParts);
+      console.log(`[${connectionId}] Path parts:`, pathParts);
+      console.log(`[${connectionId}] Path parts length:`, pathParts.length);
       const callSessionId = pathParts[3]; // /api/calls/{id}/audio
-      console.log(`✅ Audio WebSocket connected for call: ${callSessionId}`);
+      console.log(`[${connectionId}] ✅ Extracted callSessionId:`, callSessionId);
+      console.log(`[${connectionId}] ✅ Audio WebSocket connected for call: ${callSessionId}`);
       
       try {
-      console.log('=== WebSocket connection handler ===');
-      console.log('callSessionId:', callSessionId);
+      console.log(`[${connectionId}] === WebSocket connection handler ===`);
+      console.log(`[${connectionId}] callSessionId:`, callSessionId);
       
       // Get or create call handler
       let handler = getCallHandler(callSessionId);
@@ -298,14 +335,24 @@ export const setupCallAudioWebSocket = (server) => {
       console.log(`✅ WebSocket connection fully established for call: ${callSessionId}`);
       
       } catch (error) {
-        console.error(`Error setting up call handler for ${callSessionId}:`, error);
-        console.error('Error stack:', error.stack);
-        console.error('Error details:', JSON.stringify(error, null, 2));
+        console.error(`[${connectionId}] ❌ Error setting up call handler for ${callSessionId}:`, error);
+        console.error(`[${connectionId}] Error name:`, error.name);
+        console.error(`[${connectionId}] Error message:`, error.message);
+        console.error(`[${connectionId}] Error stack:`, error.stack);
+        try {
+          console.error(`[${connectionId}] Error details:`, JSON.stringify(error, null, 2));
+        } catch (jsonError) {
+          console.error(`[${connectionId}] Could not stringify error:`, jsonError);
+        }
+        console.error(`[${connectionId}] Closing WebSocket due to handler setup error...`);
         ws.close(1011, 'Internal server error');
       }
     } catch (urlError) {
-      console.error('Error parsing URL or setting up WebSocket:', urlError);
-      console.error('URL error stack:', urlError.stack);
+      console.error(`[${connectionId}] ❌ Error parsing URL or setting up WebSocket:`, urlError);
+      console.error(`[${connectionId}] URL error name:`, urlError.name);
+      console.error(`[${connectionId}] URL error message:`, urlError.message);
+      console.error(`[${connectionId}] URL error stack:`, urlError.stack);
+      console.error(`[${connectionId}] Closing WebSocket due to outer catch error...`);
       ws.close(1011, 'Invalid request');
     }
   });
