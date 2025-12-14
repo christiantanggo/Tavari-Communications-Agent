@@ -228,40 +228,62 @@ export const setupCallAudioWebSocket = (server) => {
           console.log(`Is UUID? ${isUUID}`);
           
           if (isUUID) {
-            console.log('callSessionId is a UUID, querying database directly...');
+            console.log(`[${connectionId}] callSessionId is a UUID, querying database directly...`);
             try {
+              console.log(`[${connectionId}] Importing Supabase client...`);
               const { supabaseClient } = await import('../config/database.js');
-              console.log('Supabase client imported, querying call_sessions table...');
-              console.log(`Query: SELECT * FROM call_sessions WHERE id = '${callSessionId}'`);
+              console.log(`[${connectionId}] ✅ Supabase client imported`);
+              console.log(`[${connectionId}] Querying call_sessions table...`);
+              console.log(`[${connectionId}] Query: SELECT * FROM call_sessions WHERE id = '${callSessionId}'`);
               
-              const { data, error } = await supabaseClient
+              console.log(`[${connectionId}] Executing Supabase query (with timeout check)...`);
+              const queryStartTime = Date.now();
+              
+              // Add a timeout promise
+              const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                  reject(new Error('Database query timeout after 10 seconds'));
+                }, 10000); // 10 second timeout
+              });
+              
+              const queryPromise = supabaseClient
                 .from('call_sessions')
                 .select('*')
                 .eq('id', callSessionId)
                 .single();
               
-              console.log('Database query completed');
-              console.log('Query result data:', data ? 'Found' : 'Not found');
-              console.log('Query result error:', error ? 'Error occurred' : 'No error');
+              console.log(`[${connectionId}] Waiting for query result...`);
+              const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+              
+              const queryDuration = Date.now() - queryStartTime;
+              console.log(`[${connectionId}] ✅ Database query completed in ${queryDuration}ms`);
+              console.log(`[${connectionId}] Query result data:`, data ? 'Found' : 'Not found');
+              console.log(`[${connectionId}] Query result error:`, error ? 'Error occurred' : 'No error');
               
               if (error) {
-                console.error('❌ Database query error:', error);
-                console.error('Error code:', error.code);
-                console.error('Error message:', error.message);
-                console.error('Error details:', error.details);
-                console.error('Error hint:', error.hint);
+                console.error(`[${connectionId}] ❌ Database query error:`, error);
+                console.error(`[${connectionId}] Error code:`, error.code);
+                console.error(`[${connectionId}] Error message:`, error.message);
+                console.error(`[${connectionId}] Error details:`, error.details);
+                console.error(`[${connectionId}] Error hint:`, error.hint);
               } else if (data) {
                 callSession = data;
-                console.log('✅ Found call session by database ID:', callSession.id);
-                console.log('Call session business_id:', callSession.business_id);
-                console.log('Call session status:', callSession.status);
+                console.log(`[${connectionId}] ✅ Found call session by database ID:`, callSession.id);
+                console.log(`[${connectionId}] Call session business_id:`, callSession.business_id);
+                console.log(`[${connectionId}] Call session status:`, callSession.status);
               } else {
-                console.log('⚠️ No call session found by database ID (data is null)');
+                console.log(`[${connectionId}] ⚠️ No call session found by database ID (data is null)`);
               }
             } catch (dbError) {
-              console.error('❌ Exception during database query:', dbError);
-              console.error('DB error message:', dbError.message);
-              console.error('DB error stack:', dbError.stack);
+              console.error(`[${connectionId}] ❌ Exception during database query:`, dbError);
+              console.error(`[${connectionId}] DB error name:`, dbError.name);
+              console.error(`[${connectionId}] DB error message:`, dbError.message);
+              console.error(`[${connectionId}] DB error stack:`, dbError.stack);
+              
+              // Check if it's a timeout
+              if (dbError.message && dbError.message.includes('timeout')) {
+                console.error(`[${connectionId}] ⚠️ Database query timed out - this may indicate a connection issue`);
+              }
             }
           } else {
             console.log('⚠️ callSessionId is not a UUID, skipping database ID lookup');
