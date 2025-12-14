@@ -16,8 +16,25 @@ export const setupCallAudioWebSocket = (server) => {
     console.log('Request headers:', JSON.stringify(req.headers, null, 2));
     
     try {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      console.log('Parsed URL pathname:', url.pathname);
+      // Handle WebSocket URL parsing - Telnyx might send full URL or just path
+      let url;
+      try {
+        if (req.url.startsWith('http://') || req.url.startsWith('https://') || req.url.startsWith('ws://') || req.url.startsWith('wss://')) {
+          url = new URL(req.url);
+        } else {
+          // It's just a path, construct full URL
+          const protocol = req.headers['x-forwarded-proto'] === 'https' || req.connection?.encrypted ? 'https' : 'http';
+          const host = req.headers.host || req.headers['x-forwarded-host'] || 'localhost:5001';
+          url = new URL(req.url, `${protocol}://${host}`);
+        }
+        console.log('Parsed URL pathname:', url.pathname);
+        console.log('Full parsed URL:', url.toString());
+      } catch (urlError) {
+        console.error('Error parsing URL:', urlError);
+        console.error('Request URL was:', req.url);
+        console.error('Headers host:', req.headers.host);
+        throw urlError;
+      }
       
       // Only handle audio streaming paths
       if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
