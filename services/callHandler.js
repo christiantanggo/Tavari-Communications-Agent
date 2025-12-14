@@ -132,13 +132,19 @@ export class CallHandler {
     console.log('✅ AIRealtimeService created');
     
     // Connect to OpenAI
+    process.stdout.write('\n🔵 STEP: Connecting to OpenAI Realtime API...\n');
+    console.log('🔵 Connecting to OpenAI Realtime API...');
     console.log('🔵 Step: About to connect to OpenAI Realtime API...');
     console.log('🔵 OPENAI_API_KEY check:', !!process.env.OPENAI_API_KEY);
     try {
       console.log('🔵 Calling aiService.connect()...');
       await this.aiService.connect();
+      process.stdout.write('\n✅ OPENAI CONNECTION SUCCESSFUL\n');
       console.log('✅ Successfully connected to OpenAI Realtime API');
+      console.log('✅ OpenAI WebSocket readyState:', this.aiService.ws?.readyState);
+      console.log('✅ OpenAI session configured:', this.aiService.sessionConfigured);
     } catch (error) {
+      process.stdout.write('\n❌ OPENAI CONNECTION FAILED\n');
       console.error('❌ Failed to connect to OpenAI Realtime API:', error);
       console.error('❌ Error name:', error.name);
       console.error('❌ Error message:', error.message);
