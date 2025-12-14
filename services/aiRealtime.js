@@ -117,20 +117,29 @@ export class AIRealtimeService {
         this.ws.on('message', (data) => {
           try {
             const message = JSON.parse(data.toString());
-            // Log ALL messages from OpenAI for debugging
-            console.log('🔵 OpenAI message received:', JSON.stringify(message, null, 2));
             
-            // Log errors prominently
+            // Log only important messages (reduce noise)
             if (message.type === 'error' || message.type === 'error.event') {
               process.stdout.write(`\n❌ OPENAI ERROR MESSAGE:\n`);
-              console.error('❌ OpenAI Realtime error message received:', JSON.stringify(message, null, 2));
+              console.error('❌ OpenAI Realtime error:', JSON.stringify(message, null, 2));
+            } else if (message.type?.startsWith('response.')) {
+              // Log response events (transcript, audio) - but not every delta
+              if (message.type === 'response.audio_transcript.delta' || message.type === 'response.audio.delta') {
+                // Only log every 10th delta to reduce noise
+                if (!this._deltaCount) this._deltaCount = 0;
+                this._deltaCount++;
+                if (this._deltaCount % 10 === 0) {
+                  console.log('🔵 OpenAI response:', message.type, message.delta ? `(delta: ${message.delta.substring(0, 50)}...)` : '');
+                }
+              } else {
+                // Log non-delta response events
+                console.log('🔵 OpenAI response:', message.type);
+              }
+            } else if (message.type === 'session.updated' || message.type === 'session.created') {
+              process.stdout.write(`\n✅ OPENAI ${message.type.toUpperCase()}\n`);
+              console.log('✅ OpenAI session event:', message.type);
             }
-            
-            // Log session.updated prominently
-            if (message.type === 'session.updated') {
-              process.stdout.write(`\n✅ OPENAI SESSION.UPDATED RECEIVED\n`);
-              console.log('✅ OpenAI session.updated event received:', JSON.stringify(message, null, 2));
-            }
+            // Don't log other message types - too verbose
             
             this.handleMessage(message);
           } catch (error) {
