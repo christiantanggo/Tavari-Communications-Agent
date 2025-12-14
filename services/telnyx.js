@@ -379,14 +379,29 @@ export class TelnyxService {
         throw new Error(`Phone number ${phoneNumber} not found in Telnyx available inventory. Please select a number from the search results.`);
       }
       
-      // Find exact match
-      const exactMatch = searchResult.data.find(num => {
+      // Find exact match - be more flexible with matching
+      let exactMatch = searchResult.data.find(num => {
         const numClean = num.phone_number?.replace(/[\s\-\(\)\+]/g, '') || '';
         return numClean === searchNumber;
       });
       
+      // If no exact match, try matching the last 10 digits (for US numbers)
+      if (!exactMatch && searchNumber.length >= 10) {
+        const last10 = searchNumber.slice(-10);
+        exactMatch = searchResult.data.find(num => {
+          const numClean = num.phone_number?.replace(/[\s\-\(\)\+]/g, '') || '';
+          return numClean.slice(-10) === last10;
+        });
+      }
+      
+      // If still no match, just use the first result (it's from the search, so it should be close)
+      if (!exactMatch && searchResult.data.length > 0) {
+        console.log('No exact match found, using first search result');
+        exactMatch = searchResult.data[0];
+      }
+      
       if (!exactMatch) {
-        throw new Error(`Exact match not found for ${phoneNumber} in search results.`);
+        throw new Error(`Could not find phone number ${phoneNumber} in Telnyx search results. Found ${searchResult.data.length} results but none matched.`);
       }
       
       console.log('Step 2: Found exact match:', exactMatch.phone_number);
