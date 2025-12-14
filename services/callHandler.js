@@ -23,8 +23,31 @@ export class CallHandler {
       throw new Error(usageCheck.reason || 'Usage limit reached');
     }
     
-    // Get call session
-    const callSession = await CallSession.findByVoximplantCallId(this.voximplantCallId);
+    // Get call session - try database ID first, then voximplant_call_id
+    let callSession = null;
+    
+    // Check if voximplantCallId is a UUID (database ID)
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.voximplantCallId);
+    
+    if (isUUID) {
+      // It's a database ID, fetch directly
+      const { supabaseClient } = await import('../config/database.js');
+      const { data, error } = await supabaseClient
+        .from('call_sessions')
+        .select('*')
+        .eq('id', this.voximplantCallId)
+        .single();
+      
+      if (!error && data) {
+        callSession = data;
+      }
+    }
+    
+    // If not found by ID, try by voximplant_call_id
+    if (!callSession) {
+      callSession = await CallSession.findByVoximplantCallId(this.voximplantCallId);
+    }
+    
     if (!callSession) {
       throw new Error('Call session not found');
     }
