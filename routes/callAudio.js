@@ -24,36 +24,67 @@ export const setupCallAudioWebSocket = (server) => {
     console.log(`Audio WebSocket connected for call: ${callSessionId}`);
     
     try {
+      console.log('=== WebSocket connection handler ===');
+      console.log('callSessionId:', callSessionId);
+      
       // Get or create call handler
       let handler = getCallHandler(callSessionId);
+      console.log('Existing handler found?', !!handler);
       
       if (!handler) {
+        console.log('No existing handler, creating new one...');
+        
         // Get call session to find business_id
         // Try both Voximplant and Telnyx call ID formats
+        console.log('Trying to find call session by voximplant_call_id...');
         let callSession = await CallSession.findByVoximplantCallId(callSessionId);
+        console.log('Found by voximplant_call_id?', !!callSession);
+        
         if (!callSession) {
           // Try finding by database ID if callSessionId is a UUID
+          console.log('Trying to find call session by database ID (UUID)...');
           const { supabaseClient } = await import('../config/database.js');
-          const { data } = await supabaseClient
+          const { data, error } = await supabaseClient
             .from('call_sessions')
             .select('*')
             .eq('id', callSessionId)
             .single();
-          callSession = data;
+          
+          if (error) {
+            console.error('Database query error:', error);
+            console.error('Error code:', error.code);
+            console.error('Error message:', error.message);
+          } else if (data) {
+            callSession = data;
+            console.log('✅ Found call session by database ID:', callSession.id);
+          } else {
+            console.log('⚠️ No call session found by database ID');
+          }
+        } else {
+          console.log('✅ Found call session by voximplant_call_id:', callSession.id);
         }
         
         if (!callSession) {
-          console.error('Call session not found for:', callSessionId);
+          console.error('❌ Call session not found for:', callSessionId);
           ws.close(1008, 'Call session not found');
           return;
         }
         
+        console.log('Call session found, business_id:', callSession.business_id);
+        
         // Create new handler
+        console.log('Creating CallHandler...');
         handler = new CallHandler(callSessionId, callSession.business_id);
+        
+        console.log('Initializing CallHandler...');
         await handler.initialize();
+        console.log('CallHandler initialized successfully');
+        
         handler.setAudioWebSocket(ws);
         setCallHandler(callSessionId, handler);
+        console.log('CallHandler set and ready');
       } else {
+        console.log('Using existing handler');
         handler.setAudioWebSocket(ws);
       }
       
