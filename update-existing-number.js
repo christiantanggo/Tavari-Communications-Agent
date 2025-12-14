@@ -59,17 +59,18 @@ async function updateExistingNumber() {
   console.log(`  Current webhook_url: ${testNumber.webhook_url || 'NOT SET'}`);
   console.log('');
   
-  // Build update payloads (voice and messaging must be separate)
-  const voiceUpdatePayload = {
+  // Build update payloads (voice, messaging, and webhook must be separate)
+  const voiceUpdatePayload = {};
+  
+  if (voiceAppId) {
+    voiceUpdatePayload.connection_id = voiceAppId; // Voice API Applications use connection_id
+    console.log(`  Will set connection_id (Voice API Application): ${voiceAppId}`);
+  }
+  
+  const webhookUpdatePayload = {
     webhook_url: webhookUrl,
     webhook_url_method: 'POST',
   };
-  
-  if (voiceAppId) {
-    voiceUpdatePayload.voice_application_id = voiceAppId;
-    console.log(`  Will set voice_application_id: ${voiceAppId}`);
-  }
-  
   console.log(`  Will set webhook_url: ${webhookUrl}`);
   console.log('');
   
@@ -81,15 +82,22 @@ async function updateExistingNumber() {
   // Actually update the number
   console.log('Updating number...');
   try {
-    // Step 1: Update voice settings
-    console.log('Step 1: Updating voice settings...');
-    const voiceResult = await TelnyxService.makeAPIRequest('PATCH', `/phone_numbers/${testNumber.id}`, voiceUpdatePayload);
-    console.log('✅ Voice settings updated');
+    // Step 1: Update voice settings (Voice API Application)
+    if (voiceAppId) {
+      console.log('Step 1: Updating voice settings (Voice API Application)...');
+      const voiceResult = await TelnyxService.makeAPIRequest('PATCH', `/phone_numbers/${testNumber.id}/voice`, voiceUpdatePayload);
+      console.log('✅ Voice settings updated');
+    }
     
-    // Step 2: Update messaging settings (separate endpoint required by Telnyx)
+    // Step 2: Update webhook URL
+    console.log('Step 2: Updating webhook URL...');
+    const webhookResult = await TelnyxService.makeAPIRequest('PATCH', `/phone_numbers/${testNumber.id}`, webhookUpdatePayload);
+    console.log('✅ Webhook URL updated');
+    
+    // Step 3: Update messaging settings (separate endpoint required by Telnyx)
     let messagingResult = null;
     if (messagingProfileId) {
-      console.log('Step 2: Updating messaging settings...');
+      console.log('Step 3: Updating messaging settings...');
       const messagingUpdatePayload = {
         messaging_profile_id: messagingProfileId,
       };
@@ -97,17 +105,35 @@ async function updateExistingNumber() {
       console.log('✅ Messaging settings updated');
     }
     
-    const updateResult = messagingResult || voiceResult;
     console.log('✅ Number updated successfully!');
     console.log('');
+    
+    // Verify configuration by fetching the phone number again
+    console.log('Verifying configuration...');
+    const verifyResult = await TelnyxService.makeAPIRequest('GET', `/phone_numbers/${testNumber.id}`);
+    const phoneData = verifyResult.data;
+    
     console.log('Updated configuration:');
-    console.log(`  Phone Number: ${updateResult.data?.phone_number || testNumber.phone_number}`);
-    console.log(`  Voice API Application: ${updateResult.data?.voice_application_id || 'NOT SET'}`);
-    console.log(`  Messaging Profile: ${updateResult.data?.messaging_profile_id || 'NOT SET'}`);
-    console.log(`  Webhook URL: ${updateResult.data?.webhook_url || 'NOT SET'}`);
+    console.log(`  Phone Number: ${phoneData.phone_number}`);
+    console.log(`  Voice API Application: ${phoneData.voice_application_id || phoneData.connection_id || 'NOT SET'}`);
+    console.log(`  Messaging Profile: ${phoneData.messaging_profile_id || 'NOT SET'}`);
+    console.log(`  Webhook URL: ${phoneData.webhook_url || 'NOT SET'}`);
     console.log('');
-    console.log('✅ TEST PASSED - Configuration works!');
-    console.log('   This confirms that new purchases will configure automatically.');
+    
+    // Check if everything is configured
+    const voiceConfigured = phoneData.voice_application_id || phoneData.connection_id;
+    const messagingConfigured = phoneData.messaging_profile_id;
+    const webhookConfigured = phoneData.webhook_url;
+    
+    if (voiceConfigured && messagingConfigured && webhookConfigured) {
+      console.log('✅ TEST PASSED - All settings configured correctly!');
+      console.log('   This confirms that new purchases will configure automatically.');
+    } else {
+      console.log('⚠️  PARTIAL CONFIGURATION:');
+      if (!voiceConfigured) console.log('   - Voice API Application: NOT SET');
+      if (!messagingConfigured) console.log('   - Messaging Profile: NOT SET');
+      if (!webhookConfigured) console.log('   - Webhook URL: NOT SET');
+    }
   } catch (error) {
     console.error('❌ Update failed:', error.message);
     console.error('Error details:', JSON.stringify(error.response?.data || error.message, null, 2));

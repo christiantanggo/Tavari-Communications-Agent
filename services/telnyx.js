@@ -351,31 +351,34 @@ export class TelnyxService {
         // Continue anyway - maybe the ID format is different
       }
       
-      // Configure voice settings (webhook, connection/application)
-      // Note: messaging_profile_id must be set via separate endpoint
-      const voiceUpdatePayload = {
-        webhook_url: webhookUrl,
-        webhook_url_method: 'POST',
-      };
+      // Configure voice settings using the dedicated /voice endpoint
+      // Note: messaging_profile_id must be set via separate /messaging endpoint
+      const voiceUpdatePayload = {};
       
-      // Set connection_id if available (for SIP trunking)
-      if (process.env.TELNYX_CONNECTION_ID) {
-        voiceUpdatePayload.connection_id = process.env.TELNYX_CONNECTION_ID;
-        console.log('Setting connection_id:', process.env.TELNYX_CONNECTION_ID);
-      }
-      
-      // Set voice_application_id if available (for Voice API Applications)
-      // This takes precedence over connection_id if both are set
+      // Set connection_id if available (for SIP trunking or Voice API Applications)
+      // Voice API Applications use connection_id, not voice_application_id
       if (process.env.TELNYX_VOICE_APPLICATION_ID) {
-        voiceUpdatePayload.voice_application_id = process.env.TELNYX_VOICE_APPLICATION_ID;
-        console.log('Setting voice_application_id:', process.env.TELNYX_VOICE_APPLICATION_ID);
+        voiceUpdatePayload.connection_id = process.env.TELNYX_VOICE_APPLICATION_ID;
+        console.log('Setting connection_id (Voice API Application):', process.env.TELNYX_VOICE_APPLICATION_ID);
+      } else if (process.env.TELNYX_CONNECTION_ID) {
+        voiceUpdatePayload.connection_id = process.env.TELNYX_CONNECTION_ID;
+        console.log('Setting connection_id (SIP Connection):', process.env.TELNYX_CONNECTION_ID);
       }
       
       console.log('Voice update payload:', JSON.stringify(voiceUpdatePayload, null, 2));
       
-      // Update voice settings
-      const voiceResult = await this.makeAPIRequest('PATCH', `/phone_numbers/${phoneNumberId}`, voiceUpdatePayload);
+      // Update voice settings using dedicated /voice endpoint
+      const voiceResult = await this.makeAPIRequest('PATCH', `/phone_numbers/${phoneNumberId}/voice`, voiceUpdatePayload);
       console.log('Voice configuration result:', JSON.stringify(voiceResult, null, 2));
+      
+      // Configure webhook URL separately (on the main phone number endpoint)
+      const webhookUpdatePayload = {
+        webhook_url: webhookUrl,
+        webhook_url_method: 'POST',
+      };
+      console.log('Webhook update payload:', JSON.stringify(webhookUpdatePayload, null, 2));
+      const webhookResult = await this.makeAPIRequest('PATCH', `/phone_numbers/${phoneNumberId}`, webhookUpdatePayload);
+      console.log('Webhook configuration result:', JSON.stringify(webhookResult, null, 2));
       
       // Configure messaging settings separately (required by Telnyx API)
       if (process.env.TELNYX_MESSAGING_PROFILE_ID) {
