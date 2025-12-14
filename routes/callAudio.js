@@ -9,7 +9,10 @@ const router = express.Router();
 
 // WebSocket endpoint for audio streaming
 export const setupCallAudioWebSocket = (server) => {
+  console.log('🔵 Setting up WebSocket server for audio streaming...');
   const wss = new WebSocketServer({ server });
+  console.log('✅ WebSocket server created and attached to HTTP server');
+  console.log('🔵 WebSocket server listening for connections on path: /api/calls/*/audio');
   
   wss.on('connection', async (ws, req) => {
     const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
