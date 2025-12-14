@@ -13,10 +13,16 @@ export const setupCallAudioWebSocket = (server) => {
   wss.on('connection', async (ws, req) => {
     const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     console.log(`=== WebSocket connection received [${connectionId}] ===`);
+    console.log(`[${connectionId}] WebSocket object exists:`, !!ws);
+    console.log(`[${connectionId}] Request object exists:`, !!req);
+    console.log(`[${connectionId}] Entering connection handler...`);
     
-    // Log request info safely with extensive error handling
+    // Wrap everything in a try-catch to catch any unhandled errors
     try {
-      console.log(`[${connectionId}] Step 0: Logging request info...`);
+      // Log request info safely with extensive error handling
+      console.log(`[${connectionId}] Step 0: Starting request info logging...`);
+      try {
+        console.log(`[${connectionId}] Step 0: Logging request info...`);
       console.log(`[${connectionId}] Request object exists:`, !!req);
       console.log(`[${connectionId}] Request URL:`, req?.url || 'undefined');
       console.log(`[${connectionId}] Request method:`, req?.method || 'undefined');
@@ -35,14 +41,14 @@ export const setupCallAudioWebSocket = (server) => {
         console.error(`[${connectionId}] Header access error stack:`, headerAccessError.stack);
       }
       
-      console.log(`[${connectionId}] ✅ Request info logged successfully`);
-    } catch (headerError) {
-      console.error(`[${connectionId}] ❌ Error logging request info:`, headerError);
-      console.error(`[${connectionId}] Header error message:`, headerError.message);
-      console.error(`[${connectionId}] Header error stack:`, headerError.stack);
-    }
-    
-    try {
+        console.log(`[${connectionId}] ✅ Request info logged successfully`);
+      } catch (headerError) {
+        console.error(`[${connectionId}] ❌ Error logging request info:`, headerError);
+        console.error(`[${connectionId}] Header error message:`, headerError.message);
+        console.error(`[${connectionId}] Header error stack:`, headerError.stack);
+        throw headerError; // Re-throw to be caught by outer catch
+      }
+      
       console.log(`[${connectionId}] Step 1: Starting URL parsing...`);
       // Handle WebSocket URL parsing - Telnyx might send full URL or just path
       let url;
@@ -345,16 +351,31 @@ export const setupCallAudioWebSocket = (server) => {
           console.error(`[${connectionId}] Could not stringify error:`, jsonError);
         }
         console.error(`[${connectionId}] Closing WebSocket due to handler setup error...`);
-        ws.close(1011, 'Internal server error');
+        try {
+          ws.close(1011, 'Internal server error');
+        } catch (closeError) {
+          console.error(`[${connectionId}] Error closing WebSocket:`, closeError);
+        }
       }
-    } catch (urlError) {
-      console.error(`[${connectionId}] ❌ Error parsing URL or setting up WebSocket:`, urlError);
-      console.error(`[${connectionId}] URL error name:`, urlError.name);
-      console.error(`[${connectionId}] URL error message:`, urlError.message);
-      console.error(`[${connectionId}] URL error stack:`, urlError.stack);
-      console.error(`[${connectionId}] Closing WebSocket due to outer catch error...`);
-      ws.close(1011, 'Invalid request');
+    } catch (outerError) {
+      console.error(`[${connectionId}] ❌ OUTER CATCH: Error in WebSocket connection handler:`, outerError);
+      console.error(`[${connectionId}] OUTER CATCH: Error name:`, outerError.name);
+      console.error(`[${connectionId}] OUTER CATCH: Error message:`, outerError.message);
+      console.error(`[${connectionId}] OUTER CATCH: Error stack:`, outerError.stack);
+      try {
+        console.error(`[${connectionId}] OUTER CATCH: Error details:`, JSON.stringify(outerError, null, 2));
+      } catch (jsonError) {
+        console.error(`[${connectionId}] OUTER CATCH: Could not stringify error:`, jsonError);
+      }
+      console.error(`[${connectionId}] OUTER CATCH: Closing WebSocket due to outer catch error...`);
+      try {
+        ws.close(1011, 'Invalid request');
+      } catch (closeError) {
+        console.error(`[${connectionId}] OUTER CATCH: Error closing WebSocket:`, closeError);
+      }
     }
+    
+    console.log(`[${connectionId}] Connection handler execution completed`);
   });
   
   return wss;
