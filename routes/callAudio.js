@@ -13,13 +13,19 @@ export const setupCallAudioWebSocket = (server) => {
   
   wss.on('connection', async (ws, req) => {
     const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    process.stdout.write(`\n=== WS_CONN [${connectionId}] ===\n`);
     console.log(`=== WebSocket connection received [${connectionId}] ===`);
+    process.stdout.write(`[${connectionId}] WS_EXISTS: ${!!ws}\n`);
     console.log(`[${connectionId}] WebSocket object exists:`, !!ws);
+    process.stdout.write(`[${connectionId}] REQ_EXISTS: ${!!req}\n`);
     console.log(`[${connectionId}] Request object exists:`, !!req);
+    process.stdout.write(`[${connectionId}] ENTERING_HANDLER\n`);
     console.log(`[${connectionId}] Entering connection handler...`);
     
     // Wrap everything in a try-catch to catch any unhandled errors
+    process.stdout.write(`[${connectionId}] BEFORE_TRY\n`);
     try {
+      process.stdout.write(`[${connectionId}] INSIDE_TRY\n`);
       // Log request info safely with extensive error handling
       console.log(`[${connectionId}] Step 0: Starting request info logging...`);
       process.stdout.write(`[${connectionId}] STEP_0_START\n`);
