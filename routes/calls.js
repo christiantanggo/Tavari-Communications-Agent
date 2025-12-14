@@ -7,14 +7,41 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Test endpoint to verify webhook URL is accessible
+router.get('/webhook/test', (req, res) => {
+  const timestamp = new Date().toISOString();
+  process.stdout.write(`\n✅ Webhook test endpoint hit at ${timestamp}\n`);
+  console.log('✅ Webhook test endpoint hit at', timestamp);
+  res.json({ 
+    status: 'ok', 
+    message: 'Webhook endpoint is accessible',
+    timestamp,
+    url: '/api/calls/webhook'
+  });
+});
+
 // Unified webhook for call events (supports both Voximplant and Telnyx)
 router.post('/webhook', async (req, res) => {
+  const timestamp = new Date().toISOString();
+  const requestId = `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  // VERY VISIBLE LOGGING - Force output immediately
+  process.stdout.write(`\n\n${'='.repeat(80)}\n`);
+  process.stdout.write(`🔔 WEBHOOK RECEIVED [${requestId}] at ${timestamp}\n`);
+  process.stdout.write(`${'='.repeat(80)}\n`);
+  console.log(`🔔 WEBHOOK RECEIVED [${requestId}] at ${timestamp}`);
+  console.log(`🔔 Request method: ${req.method}`);
+  console.log(`🔔 Request URL: ${req.url}`);
+  console.log(`🔔 Request headers:`, JSON.stringify(req.headers, null, 2));
+  console.log(`🔔 Request body:`, JSON.stringify(req.body, null, 2));
+  process.stdout.write(`🔔 END WEBHOOK LOG [${requestId}]\n\n`);
+  
   try {
     // Detect provider by webhook format
     const isTelnyx = req.body.data?.event_type || req.body.event_type;
     const isVoximplant = req.body.event || req.body.type;
     
-    console.log('Webhook received:', { 
+    console.log(`[${requestId}] Webhook received:`, { 
       isTelnyx: !!isTelnyx, 
       isVoximplant: !!isVoximplant,
       body: req.body 
@@ -23,23 +50,34 @@ router.post('/webhook', async (req, res) => {
     // Handle Telnyx webhook
     if (isTelnyx) {
       const eventType = req.body.data?.event_type || req.body.event_type;
-      console.log('Telnyx webhook event:', eventType);
+      process.stdout.write(`\n🔵 [${requestId}] TELNYX WEBHOOK EVENT: ${eventType}\n`);
+      console.log(`[${requestId}] Telnyx webhook event:`, eventType);
       
       if (eventType === 'call.initiated') {
+        process.stdout.write(`\n🔵 [${requestId}] CALL.INITIATED EVENT - Processing...\n`);
+        console.log(`[${requestId}] Call initiated event received`);
+        
         const callData = TelnyxService.parseInboundCall(req);
         // Extract call_control_id from webhook payload
         const callControlId = req.body.data?.payload?.call_control_id || 
                              req.body.payload?.call_control_id ||
                              callData.telnyx_call_id;
         
-        console.log('Call initiated, call_control_id:', callControlId);
-        console.log('Webhook payload:', JSON.stringify(req.body, null, 2));
+        process.stdout.write(`\n🔵 [${requestId}] Call Control ID: ${callControlId}\n`);
+        console.log(`[${requestId}] Call initiated, call_control_id:`, callControlId);
+        console.log(`[${requestId}] Webhook payload:`, JSON.stringify(req.body, null, 2));
         
         // Handle call start (this will answer the call via API)
+        process.stdout.write(`\n🔵 [${requestId}] Calling TelnyxService.handleCallStart()...\n`);
+        console.log(`[${requestId}] Calling TelnyxService.handleCallStart()...`);
         await TelnyxService.handleCallStart(callData, callControlId);
+        process.stdout.write(`\n✅ [${requestId}] TelnyxService.handleCallStart() completed\n`);
+        console.log(`[${requestId}] TelnyxService.handleCallStart() completed`);
         
         // Return 200 OK - Telnyx just needs acknowledgment
         // The actual answer command is sent via Call Control API
+        process.stdout.write(`\n✅ [${requestId}] Sending 200 OK response to Telnyx\n`);
+        console.log(`[${requestId}] Sending 200 OK response to Telnyx`);
         res.json({ status: 'ok' });
       } else if (eventType === 'call.answered') {
         // Call was answered, WebSocket streaming will handle audio
@@ -78,7 +116,11 @@ router.post('/webhook', async (req, res) => {
       res.status(400).json({ error: 'Unknown webhook format' });
     }
   } catch (error) {
-    console.error('Webhook error:', error);
+    process.stdout.write(`\n❌ [${requestId}] WEBHOOK ERROR:\n`);
+    process.stdout.write(`❌ [${requestId}] Error message: ${error.message}\n`);
+    process.stdout.write(`❌ [${requestId}] Error stack: ${error.stack}\n`);
+    console.error(`[${requestId}] Webhook error:`, error);
+    console.error(`[${requestId}] Error stack:`, error.stack);
     res.status(500).json({ error: error.message });
   }
 });

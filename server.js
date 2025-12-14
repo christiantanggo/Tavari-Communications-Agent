@@ -46,6 +46,14 @@ app.use(cors({
   ],
   credentials: true
 }));
+// Log all incoming requests (for debugging)
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  process.stdout.write(`\n📥 [${timestamp}] ${req.method} ${req.url}\n`);
+  console.log(`📥 [${timestamp}] ${req.method} ${req.url}`);
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
