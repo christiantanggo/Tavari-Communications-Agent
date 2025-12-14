@@ -338,10 +338,25 @@ export class TelnyxService {
   // Update phone number to route to webhook
   static async configurePhoneNumber(phoneNumberId, webhookUrl) {
     try {
+      console.log('Configuring webhook - Phone Number ID:', phoneNumberId);
+      console.log('Webhook URL:', webhookUrl);
+      console.log('Endpoint: PATCH /phone_numbers/' + phoneNumberId);
+      
+      // First, try to get the phone number to verify it exists
+      try {
+        const phoneInfo = await this.makeAPIRequest('GET', `/phone_numbers/${phoneNumberId}`);
+        console.log('Phone number exists:', phoneInfo.data?.phone_number);
+      } catch (getError) {
+        console.error('Could not fetch phone number:', getError.message);
+        // Continue anyway - maybe the ID format is different
+      }
+      
       const result = await this.makeAPIRequest('PATCH', `/phone_numbers/${phoneNumberId}`, {
         webhook_url: webhookUrl,
         webhook_url_method: 'POST',
       });
+
+      console.log('Webhook configuration result:', JSON.stringify(result, null, 2));
 
       return {
         success: true,
@@ -349,6 +364,11 @@ export class TelnyxService {
       };
     } catch (error) {
       console.error('Configure phone number error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
       throw error;
     }
   }
