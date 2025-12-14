@@ -292,9 +292,14 @@ export class TelnyxService {
       console.log('Number confirmed available, purchasing:', availableNumber.phone_number);
       
       // Purchase using the exact phone_number format from available numbers response
-      const result = await this.makeAPIRequest('POST', '/phone_numbers', {
+      // Log the exact request we're sending
+      const purchasePayload = {
         phone_number: availableNumber.phone_number, // Use exact format from Telnyx
-      });
+      };
+      console.log('Purchase request payload:', JSON.stringify(purchasePayload, null, 2));
+      console.log('Available number object:', JSON.stringify(availableNumber, null, 2));
+      
+      const result = await this.makeAPIRequest('POST', '/phone_numbers', purchasePayload);
 
       if (result.data) {
         return {
