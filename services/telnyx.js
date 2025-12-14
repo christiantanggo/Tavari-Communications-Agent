@@ -562,46 +562,166 @@ export class TelnyxService {
       }
     }
 
-    // Start media stream for bidirectional audio
-    // Telnyx uses Media Streams API for real-time audio
-    if (callControlId) {
-      try {
-        console.log('Starting media stream for call:', callControlId);
-        
-        // Get server URL for WebSocket
-        const serverUrl = process.env.SERVER_URL || process.env.WEBHOOK_BASE_URL || 'https://api.tavarios.com';
-        const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
-        const wsHost = serverUrl.replace(/^https?:\/\//, '');
-        const streamUrl = `${wsProtocol}://${wsHost}/api/calls/${callSession.id}/audio`;
-        
-        // Start media stream using Telnyx Call Control API
-        // This creates a bidirectional WebSocket connection for audio
-        const streamPayload = {
-          stream_url: streamUrl,
-          stream_track: 'both_tracks', // Send and receive audio
-        };
-        
-        console.log('Starting media stream with URL:', streamUrl);
-        await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/streaming_start`, streamPayload);
-        console.log('Media stream started successfully');
-        
-        // Initialize call handler for audio processing
-        // This will be handled when the WebSocket connects
-        // Note: Handler will be created when WebSocket connects in callAudio.js
-        console.log('Call handler will be initialized when WebSocket connects');
-        
-      } catch (error) {
-        console.error('Failed to start media stream:', error.message);
-        console.error('Error details:', error.response?.data);
-        // Don't throw - call is answered, just no audio streaming
-      }
-    }
-
     return {
       callSession,
       business,
       callControlId,
     };
+  }
+
+  // Handle call answered - speak greeting
+  static async handleCallAnswered(callControlId, toNumber) {
+    try {
+      // Find business by phone number
+      const business = await this.findBusinessByNumber(toNumber);
+      if (!business) {
+        console.error('Business not found for number:', toNumber);
+        return;
+      }
+
+      // Get opening message
+      const openingMessage = business.opening_message || `Hello! Thank you for calling ${business.name}. How can I help you today?`;
+      
+      // Store client state for conversation tracking
+      const clientStateData = {
+        business_id: business.id,
+        call_control_id: callControlId,
+        conversation_turn: 1,
+        waiting_for_speak_end: true,
+        conversation_history: [],
+        remembered_info: {},
+      };
+      const clientStateBase64 = Buffer.from(JSON.stringify(clientStateData)).toString('base64');
+
+      // Speak greeting
+      await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/speak`, {
+        payload: openingMessage,
+        voice: 'Polly.Joanna',
+        language: 'en-US',
+        premium: true,
+        client_state: clientStateBase64,
+        interruption_settings: {
+          enabled: false,
+        },
+      });
+
+      console.log('Greeting spoken, waiting for speak.ended to start gather');
+    } catch (error) {
+      console.error('Error in handleCallAnswered:', error);
+    }
+  }
+
+  // Handle speak ended - start gathering speech
+  static async handleSpeakEnded(callControlId, clientStateBase64) {
+    try {
+      if (!clientStateBase64) {
+        console.log('No client_state in speak.ended, ignoring');
+        return;
+      }
+
+      // Decode client state
+      let clientState = {};
+      try {
+        clientState = JSON.parse(Buffer.from(clientStateBase64, 'base64').toString());
+      } catch (e) {
+        console.error('Error decoding client_state:', e);
+        return;
+      }
+
+      // Only start gather if we're waiting for speak to end
+      if (clientState.waiting_for_speak_end) {
+        console.log('Speak ended, starting gather');
+        
+        // Remove the flag
+        delete clientState.waiting_for_speak_end;
+        const newClientStateBase64 = Buffer.from(JSON.stringify(clientState)).toString('base64');
+
+        // Start gather_using_ai
+        await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/gather_using_ai`, {
+          instructions: 'You are a speech-to-text transcription service. Only transcribe what the user says. Do not respond, do not ask questions, do not have a conversation. Just listen and transcribe the user\'s speech accurately. Ignore background noise, music, TV sounds, or other ambient sounds. Only transcribe clear human speech directed at you.',
+          parameters: {
+            type: 'object',
+            properties: {
+              user_speech: {
+                type: 'string',
+                description: 'The full transcription of what the caller said. Ignore background noise.',
+              },
+            },
+            required: ['user_speech'],
+          },
+          voice: 'Polly.Joanna',
+          client_state: newClientStateBase64,
+          timeout_ms: 15000,
+          interruption_settings: {
+            enabled: false,
+          },
+        });
+
+        console.log('Gather started after speak ended');
+      }
+    } catch (error) {
+      console.error('Error in handleSpeakEnded:', error);
+    }
+  }
+
+  // Handle speech gathered - process with AI and speak response
+  static async handleSpeechGathered(callControlId, clientStateBase64, speechText) {
+    try {
+      if (!speechText || speechText.trim() === '') {
+        console.log('No speech text, re-gathering');
+        // Re-gather if no speech
+        await this.handleSpeakEnded(callControlId, clientStateBase64);
+        return;
+      }
+
+      // Decode client state
+      let clientState = {};
+      if (clientStateBase64) {
+        try {
+          clientState = JSON.parse(Buffer.from(clientStateBase64, 'base64').toString());
+        } catch (e) {
+          console.error('Error decoding client_state:', e);
+          return;
+        }
+      }
+
+      console.log('Processing speech with AI:', speechText);
+
+      // Process speech with AI
+      const { AIProcessor } = await import('./aiProcessor.js');
+      const aiResult = await AIProcessor.processSpeech(
+        speechText,
+        clientState.business_id,
+        clientState.conversation_history || [],
+        clientState.remembered_info || {}
+      );
+
+      // Update client state
+      const nextClientState = {
+        ...clientState,
+        conversation_turn: (clientState.conversation_turn || 1) + 1,
+        waiting_for_speak_end: true,
+        conversation_history: aiResult.conversation_history,
+        remembered_info: aiResult.remembered_info,
+      };
+      const nextClientStateBase64 = Buffer.from(JSON.stringify(nextClientState)).toString('base64');
+
+      // Speak AI response
+      await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/speak`, {
+        payload: aiResult.response,
+        voice: 'Polly.Joanna',
+        language: 'en-US',
+        premium: true,
+        client_state: nextClientStateBase64,
+        interruption_settings: {
+          enabled: false,
+        },
+      });
+
+      console.log('AI response spoken, waiting for speak.ended to start next gather');
+    } catch (error) {
+      console.error('Error in handleSpeechGathered:', error);
+    }
   }
 
   // Handle call end
