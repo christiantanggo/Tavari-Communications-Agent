@@ -161,6 +161,7 @@ router.post('/finalize', authenticate, async (req, res) => {
       success: true,
       onboarding_complete: true,
       voximplant_number: business.voximplant_number,
+      telnyx_number: business.telnyx_number,
     });
   } catch (error) {
     console.error('Finalize setup error:', error);
