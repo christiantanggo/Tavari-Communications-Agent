@@ -275,9 +275,25 @@ export class TelnyxService {
       }
       
       // Telnyx API expects phone_number in E.164 format (with +)
-      // The number must be available in Telnyx's inventory
+      // First verify the number is in available inventory
+      const searchParams = new URLSearchParams({
+        'filter[phone_number]': cleanNumber.replace('+', ''), // Search without +
+        'page[size]': '1',
+      });
+      
+      console.log('Verifying number is available:', cleanNumber);
+      const availableCheck = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+      
+      if (!availableCheck.data || availableCheck.data.length === 0) {
+        throw new Error(`Phone number ${cleanNumber} is not available for purchase. Please select a number from the available list.`);
+      }
+      
+      const availableNumber = availableCheck.data[0];
+      console.log('Number confirmed available, purchasing:', availableNumber.phone_number);
+      
+      // Purchase using the exact phone_number format from available numbers response
       const result = await this.makeAPIRequest('POST', '/phone_numbers', {
-        phone_number: cleanNumber,
+        phone_number: availableNumber.phone_number, // Use exact format from Telnyx
       });
 
       if (result.data) {
