@@ -538,7 +538,7 @@ export class TelnyxService {
   }
 
   // Handle call start (webhook response)
-  static async handleCallStart(callData) {
+  static async handleCallStart(callData, callControlId) {
     // Find business by called number
     const business = await this.findBusinessByNumber(callData.called_number);
 
@@ -549,28 +549,41 @@ export class TelnyxService {
     // Create call session
     const callSession = await this.createCallSession(business.id, callData);
 
+    // Answer the call using Telnyx Call Control API
+    // Telnyx requires a separate API call to answer, not a webhook response
+    if (callControlId) {
+      try {
+        console.log('Answering call via Call Control API, call_control_id:', callControlId);
+        await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
+        console.log('Call answered successfully');
+      } catch (error) {
+        console.error('Failed to answer call:', error.message);
+        // Don't throw - continue with call setup
+      }
+    }
+
     // Get server URL for WebSocket
-    const serverUrl = process.env.SERVER_URL || process.env.WEBHOOK_BASE_URL || 'localhost:5001';
+    const serverUrl = process.env.SERVER_URL || process.env.WEBHOOK_BASE_URL || 'https://api.tavarios.com';
     const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
     const wsHost = serverUrl.replace(/^https?:\/\//, '');
     const audioWebSocketUrl = `${wsProtocol}://${wsHost}/api/calls/${callSession.id}/audio`;
 
-    // Return Telnyx call control commands
-    // Telnyx Call Control API uses specific command format
-    // Note: This is a simplified version - actual implementation may need
-    // to use Telnyx Call Control API to answer and stream
+    // Start streaming audio (if supported)
+    // Note: Telnyx streaming might require additional setup
+    if (callControlId) {
+      try {
+        console.log('Starting audio stream, WebSocket URL:', audioWebSocketUrl);
+        // Telnyx streaming setup would go here
+        // This might require additional API calls or WebSocket setup
+      } catch (error) {
+        console.error('Failed to start audio stream:', error.message);
+      }
+    }
+
     return {
       callSession,
       business,
-      commands: [
-        {
-          command: 'answer',
-        },
-        {
-          command: 'stream',
-          stream_url: audioWebSocketUrl,
-        },
-      ],
+      callControlId,
     };
   }
 

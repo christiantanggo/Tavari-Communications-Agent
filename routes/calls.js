@@ -24,14 +24,29 @@ router.post('/webhook', async (req, res) => {
       const eventType = req.body.data?.event_type || req.body.event_type;
       console.log('Telnyx webhook event:', eventType);
       
-      if (eventType === 'call.initiated' || eventType === 'call.answered') {
+      if (eventType === 'call.initiated') {
         const callData = TelnyxService.parseInboundCall(req);
-        const { callSession, business, commands } = await TelnyxService.handleCallStart(callData);
+        // Extract call_control_id from webhook payload
+        const callControlId = req.body.data?.payload?.call_control_id || 
+                             req.body.payload?.call_control_id ||
+                             callData.telnyx_call_id;
         
-        // Return Telnyx call control commands (JSON)
-        res.json({
-          commands: commands,
-        });
+        console.log('Call initiated, call_control_id:', callControlId);
+        console.log('Webhook payload:', JSON.stringify(req.body, null, 2));
+        
+        // Handle call start (this will answer the call via API)
+        await TelnyxService.handleCallStart(callData, callControlId);
+        
+        // Return 200 OK - Telnyx just needs acknowledgment
+        // The actual answer command is sent via Call Control API
+        res.json({ status: 'ok' });
+      } else if (eventType === 'call.answered') {
+        // Call was answered, continue with audio setup
+        const callData = TelnyxService.parseInboundCall(req);
+        const callControlId = req.body.data?.payload?.call_control_id || req.body.payload?.call_control_id;
+        
+        // Set up audio streaming here if needed
+        res.json({ status: 'ok' });
       } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
         const callData = TelnyxService.parseInboundCall(req);
         const duration = req.body.data?.payload?.duration_seconds || 0;
