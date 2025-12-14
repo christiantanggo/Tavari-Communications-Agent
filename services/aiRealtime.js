@@ -22,22 +22,25 @@ export class AIRealtimeService {
   async connect() {
     return new Promise((resolve, reject) => {
       try {
-        // OpenAI Realtime API uses Authorization header, not query parameter
-        const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
+        // Verify API key is set
+        if (!OPENAI_API_KEY) {
+          const error = new Error('OPENAI_API_KEY environment variable is not set');
+          console.error('❌', error.message);
+          reject(error);
+          return;
+        }
+        
+        // OpenAI Realtime API requires api_key in query parameter
+        // Format: wss://api.openai.com/v1/realtime?model=MODEL&api_key=KEY
+        const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01&api_key=${OPENAI_API_KEY}`;
         
         console.log('🔵 Connecting to OpenAI Realtime API...');
-        console.log('🔵 URL:', url);
         console.log('🔵 API Key present:', !!OPENAI_API_KEY);
         console.log('🔵 API Key length:', OPENAI_API_KEY?.length || 0);
-        console.log('🔵 Using Authorization header for authentication');
+        console.log('🔵 API Key starts with:', OPENAI_API_KEY?.substring(0, 7) || 'N/A');
+        console.log('🔵 Using api_key query parameter (OpenAI Realtime API standard)');
         
-        // Use Authorization header instead of query parameter
-        this.ws = new WebSocket(url, {
-          headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'realtime=v1'
-          }
-        });
+        this.ws = new WebSocket(url);
         
         this.ws.on('open', () => {
           console.log('Connected to OpenAI Realtime API');
