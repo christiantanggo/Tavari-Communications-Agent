@@ -231,12 +231,7 @@ export class AIRealtimeService {
         break;
         
       case 'session.updated':
-        console.log('Session updated event received');
-        this.sessionConfigured = true;
-        break;
-        
-      case 'session.updated':
-        console.log('Session updated event received');
+        console.log('✅ OpenAI session.updated event received');
         this.sessionConfigured = true;
         break;
         
