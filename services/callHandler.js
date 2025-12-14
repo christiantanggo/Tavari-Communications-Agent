@@ -17,17 +17,24 @@ export class CallHandler {
   
   // Initialize call handler
   async initialize() {
+    console.log('=== CallHandler.initialize() called ===');
+    console.log('voximplantCallId:', this.voximplantCallId);
+    console.log('businessId:', this.businessId);
+    
     // Check usage limits first
     const usageCheck = await this.checkUsageLimits();
     if (!usageCheck.allowed) {
+      console.error('Usage limit check failed:', usageCheck.reason);
       throw new Error(usageCheck.reason || 'Usage limit reached');
     }
+    console.log('Usage limit check passed');
     
     // Get call session - try database ID first, then voximplant_call_id
     let callSession = null;
     
     // Check if voximplantCallId is a UUID (database ID)
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.voximplantCallId);
+    console.log('Is UUID?', isUUID);
     
     if (isUUID) {
       // It's a database ID, fetch directly
@@ -40,27 +47,42 @@ export class CallHandler {
       
       if (!error && data) {
         callSession = data;
+        console.log('Found call session by UUID:', callSession.id);
+      } else {
+        console.log('Not found by UUID, error:', error);
       }
     }
     
     // If not found by ID, try by voximplant_call_id
     if (!callSession) {
+      console.log('Trying to find by voximplant_call_id...');
       callSession = await CallSession.findByVoximplantCallId(this.voximplantCallId);
+      if (callSession) {
+        console.log('Found call session by voximplant_call_id:', callSession.id);
+      } else {
+        console.log('Not found by voximplant_call_id either');
+      }
     }
     
     if (!callSession) {
+      console.error('Call session not found for:', this.voximplantCallId);
       throw new Error('Call session not found');
     }
     
     this.callSessionDbId = callSession.id;
+    console.log('Call session DB ID:', this.callSessionDbId);
     
     // Get AI agent config
+    console.log('Fetching AI agent config for business:', this.businessId);
     this.agentConfig = await AIAgent.findByBusinessId(this.businessId);
     if (!this.agentConfig) {
+      console.error('AI agent not configured for business:', this.businessId);
       throw new Error('AI agent not configured');
     }
+    console.log('AI agent config found');
     
     // Initialize AI Realtime service
+    console.log('Creating AIRealtimeService...');
     this.aiService = new AIRealtimeService(
       this.callSessionDbId,
       this.businessId,
@@ -68,7 +90,15 @@ export class CallHandler {
     );
     
     // Connect to OpenAI
-    await this.aiService.connect();
+    console.log('Connecting to OpenAI Realtime API...');
+    try {
+      await this.aiService.connect();
+      console.log('✅ Successfully connected to OpenAI Realtime API');
+    } catch (error) {
+      console.error('❌ Failed to connect to OpenAI Realtime API:', error);
+      console.error('Error details:', error.message, error.stack);
+      throw error;
+    }
     
     // Set up audio output handler
     this.aiService.onAudioOutput = (audio) => {
@@ -76,6 +106,7 @@ export class CallHandler {
     };
     
     this.startTime = new Date();
+    console.log('=== CallHandler initialized successfully ===');
     
     return true;
   }
