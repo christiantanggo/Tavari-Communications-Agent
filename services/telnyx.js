@@ -351,16 +351,23 @@ export class TelnyxService {
         // Continue anyway - maybe the ID format is different
       }
       
-      // Configure webhook, connection, and messaging profile
+      // Configure webhook, connection/application, and messaging profile
       const updatePayload = {
         webhook_url: webhookUrl,
         webhook_url_method: 'POST',
       };
       
-      // Set connection_id if available (for voice calls)
+      // Set connection_id if available (for SIP trunking)
       if (process.env.TELNYX_CONNECTION_ID) {
         updatePayload.connection_id = process.env.TELNYX_CONNECTION_ID;
         console.log('Setting connection_id:', process.env.TELNYX_CONNECTION_ID);
+      }
+      
+      // Set voice_application_id if available (for Voice API Applications)
+      // This takes precedence over connection_id if both are set
+      if (process.env.TELNYX_VOICE_APPLICATION_ID) {
+        updatePayload.voice_application_id = process.env.TELNYX_VOICE_APPLICATION_ID;
+        console.log('Setting voice_application_id:', process.env.TELNYX_VOICE_APPLICATION_ID);
       }
       
       // Set messaging_profile_id if available (for SMS/MMS)
