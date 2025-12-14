@@ -12,28 +12,45 @@ export const setupCallAudioWebSocket = (server) => {
   
   wss.on('connection', async (ws, req) => {
     console.log('=== WebSocket connection received ===');
-    console.log('Request URL:', req.url);
-    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
+    
+    // Log request info safely
+    try {
+      console.log('Request URL:', req.url || 'undefined');
+      console.log('Request method:', req.method || 'undefined');
+      console.log('Request headers host:', req.headers?.host || 'undefined');
+    } catch (headerError) {
+      console.error('Error logging request info:', headerError);
+    }
     
     try {
       // Handle WebSocket URL parsing - Telnyx might send full URL or just path
       let url;
       try {
-        if (req.url.startsWith('http://') || req.url.startsWith('https://') || req.url.startsWith('ws://') || req.url.startsWith('wss://')) {
-          url = new URL(req.url);
+        const requestUrl = req.url || '/';
+        console.log('Attempting to parse URL:', requestUrl);
+        
+        if (requestUrl.startsWith('http://') || requestUrl.startsWith('https://') || requestUrl.startsWith('ws://') || requestUrl.startsWith('wss://')) {
+          url = new URL(requestUrl);
+          console.log('Parsed as absolute URL');
         } else {
           // It's just a path, construct full URL
           const protocol = req.headers['x-forwarded-proto'] === 'https' || req.connection?.encrypted ? 'https' : 'http';
-          const host = req.headers.host || req.headers['x-forwarded-host'] || 'localhost:5001';
-          url = new URL(req.url, `${protocol}://${host}`);
+          const host = req.headers?.host || req.headers?.['x-forwarded-host'] || 'localhost:5001';
+          const baseUrl = `${protocol}://${host}`;
+          console.log('Constructing URL from path, base:', baseUrl);
+          url = new URL(requestUrl, baseUrl);
+          console.log('Parsed as relative URL');
         }
-        console.log('Parsed URL pathname:', url.pathname);
-        console.log('Full parsed URL:', url.toString());
+        console.log('✅ Parsed URL pathname:', url.pathname);
+        console.log('✅ Full parsed URL:', url.toString());
       } catch (urlError) {
-        console.error('Error parsing URL:', urlError);
+        console.error('❌ Error parsing URL:', urlError);
+        console.error('Error message:', urlError.message);
+        console.error('Error stack:', urlError.stack);
         console.error('Request URL was:', req.url);
-        console.error('Headers host:', req.headers.host);
-        throw urlError;
+        console.error('Headers host:', req.headers?.host);
+        ws.close(1011, 'Invalid URL');
+        return;
       }
       
       // Only handle audio streaming paths
