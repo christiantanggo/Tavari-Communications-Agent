@@ -19,8 +19,10 @@ export const setupCallAudioWebSocket = (server) => {
     console.log(`[${connectionId}] WebSocket object exists:`, !!ws);
     process.stdout.write(`[${connectionId}] REQ_EXISTS: ${!!req}\n`);
     console.log(`[${connectionId}] Request object exists:`, !!req);
+    process.stdout.write(`[${connectionId}] AFTER_REQ_LOG\n`);
     process.stdout.write(`[${connectionId}] ENTERING_HANDLER\n`);
     console.log(`[${connectionId}] Entering connection handler...`);
+    process.stdout.write(`[${connectionId}] AFTER_ENTERING_LOG\n`);
     
     // Wrap everything in a try-catch to catch any unhandled errors
     process.stdout.write(`[${connectionId}] BEFORE_TRY\n`);
