@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { CallHandler, getCallHandler, setCallHandler, removeCallHandler } from '../services/callHandler.js';
 import { CallSession } from '../models/CallSession.js';
+import { supabaseClient } from '../config/database.js';
 
 const router = express.Router();
 
@@ -230,9 +231,8 @@ export const setupCallAudioWebSocket = (server) => {
           if (isUUID) {
             console.log(`[${connectionId}] callSessionId is a UUID, querying database directly...`);
             try {
-              console.log(`[${connectionId}] Importing Supabase client...`);
-              const { supabaseClient } = await import('../config/database.js');
-              console.log(`[${connectionId}] ✅ Supabase client imported`);
+              console.log(`[${connectionId}] Using pre-imported Supabase client...`);
+              console.log(`[${connectionId}] Supabase client exists:`, !!supabaseClient);
               console.log(`[${connectionId}] Querying call_sessions table...`);
               console.log(`[${connectionId}] Query: SELECT * FROM call_sessions WHERE id = '${callSessionId}'`);
               
