@@ -29,77 +29,75 @@ export class AIRealtimeService {
           return;
         }
         
-        // OpenAI Realtime API requires api_key in query parameter
-        // Format: wss://api.openai.com/v1/realtime?model=MODEL&api_key=KEY
-        const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01&api_key=${OPENAI_API_KEY}`;
+        // OpenAI Realtime API requires Authorization header with Bearer token
+        // Format: wss://api.openai.com/v1/realtime?model=MODEL
+        // Headers: Authorization: Bearer sk-...
+        const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
         
         console.log('🔵 Connecting to OpenAI Realtime API...');
         console.log('🔵 API Key present:', !!OPENAI_API_KEY);
         console.log('🔵 API Key length:', OPENAI_API_KEY?.length || 0);
         console.log('🔵 API Key starts with:', OPENAI_API_KEY?.substring(0, 7) || 'N/A');
-        console.log('🔵 Using api_key query parameter (OpenAI Realtime API standard)');
+        console.log('🔵 Using Authorization header (OpenAI Realtime API standard)');
         
-        this.ws = new WebSocket(url);
+        // Set Authorization header for WebSocket connection
+        this.ws = new WebSocket(url, {
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`
+          }
+        });
         
         this.ws.on('open', () => {
           process.stdout.write('\n✅ OPENAI WEBSOCKET CONNECTED\n');
           console.log('✅ Connected to OpenAI Realtime API');
           console.log('✅ OpenAI WebSocket readyState:', this.ws.readyState);
           
-          // Wait a moment before sending session configuration
-          setTimeout(() => {
-            try {
-              // Send session configuration
-              const sessionConfig = {
-                type: 'session.update',
-                session: {
-                  modalities: ['text', 'audio'],
-                  instructions: this.buildSystemInstructions(),
-                  voice: 'alloy',
-                  input_audio_format: 'pcm16',
-                  output_audio_format: 'pcm16',
-                  temperature: 0.8,
-                  max_response_output_tokens: 4096,
-                },
-              };
+          // Wait for session.created - session is automatically created by OpenAI
+          const sessionCreatedHandler = (message) => {
+            if (message.type === 'session.created') {
+              process.stdout.write('\n✅ OPENAI SESSION CREATED - Ready to receive audio\n');
+              console.log('✅ Session created by OpenAI');
+              console.log('✅ OpenAI session is ready');
+              this.sessionConfigured = true;
+              this.ws.removeListener('message', sessionCreatedHandler);
               
-              console.log('Sending session.update:', JSON.stringify(sessionConfig, null, 2));
-              this.ws.send(JSON.stringify(sessionConfig));
+              // Optionally update instructions (session already has good defaults)
+              try {
+                const sessionConfig = {
+                  type: 'session.update',
+                  session: {
+                    instructions: this.buildSystemInstructions(),
+                  },
+                };
+                
+                console.log('Updating session instructions...');
+                this.ws.send(JSON.stringify(sessionConfig));
+                // Don't wait for response - proceed immediately
+              } catch (error) {
+                console.warn('Could not update instructions, proceeding anyway:', error.message);
+              }
               
-              // Wait for session.updated event before resolving
-              // This ensures the session is configured before we start sending audio
-              const sessionUpdatedHandler = (message) => {
-                if (message.type === 'session.updated') {
-                  process.stdout.write('\n✅ OPENAI SESSION UPDATED - Ready to receive audio\n');
-                  console.log('✅ Session updated successfully');
-                  console.log('✅ OpenAI session is now configured and ready');
-                  this.sessionConfigured = true;
-                  this.ws.removeListener('message', sessionUpdatedHandler);
-                  resolve(true);
-                } else if (message.type === 'error') {
-                  console.error('Error during session update:', JSON.stringify(message, null, 2));
-                  this.ws.removeListener('message', sessionUpdatedHandler);
-                  reject(new Error('Session update failed: ' + JSON.stringify(message)));
-                }
-              };
-              
-              // Listen for session.updated or error
-              this.ws.on('message', sessionUpdatedHandler);
-              
-              // Timeout after 5 seconds if no response
-              setTimeout(() => {
-                this.ws.removeListener('message', sessionUpdatedHandler);
-                if (!this.sessionConfigured) {
-                  console.warn('Session update timeout - proceeding anyway');
-                  resolve(true); // Proceed even if we don't get confirmation
-                }
-              }, 5000);
-              
-            } catch (error) {
-              console.error('Error sending session.update:', error);
-              reject(error);
+              resolve(true);
+            } else if (message.type === 'error' && message.error?.code !== 'missing_required_parameter') {
+              // Ignore missing_required_parameter errors (from session.update attempts)
+              console.error('Error during session creation:', JSON.stringify(message, null, 2));
+              this.ws.removeListener('message', sessionCreatedHandler);
+              reject(new Error('Session creation failed: ' + JSON.stringify(message)));
             }
-          }, 100);
+          };
+          
+          // Listen for session.created
+          this.ws.on('message', sessionCreatedHandler);
+          
+          // Timeout after 5 seconds if no session.created
+          setTimeout(() => {
+            this.ws.removeListener('message', sessionCreatedHandler);
+            if (!this.sessionConfigured) {
+              console.warn('Session creation timeout - proceeding anyway');
+              this.sessionConfigured = true;
+              resolve(true);
+            }
+          }, 5000);
         });
         
         this.ws.on('message', (data) => {
