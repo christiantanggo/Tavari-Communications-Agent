@@ -29,8 +29,21 @@ export const setupCallAudioWebSocket = (server) => {
       
       if (!handler) {
         // Get call session to find business_id
-        const callSession = await CallSession.findByVoximplantCallId(callSessionId);
+        // Try both Voximplant and Telnyx call ID formats
+        let callSession = await CallSession.findByVoximplantCallId(callSessionId);
         if (!callSession) {
+          // Try finding by database ID if callSessionId is a UUID
+          const { supabaseClient } = await import('../config/database.js');
+          const { data } = await supabaseClient
+            .from('call_sessions')
+            .select('*')
+            .eq('id', callSessionId)
+            .single();
+          callSession = data;
+        }
+        
+        if (!callSession) {
+          console.error('Call session not found for:', callSessionId);
           ws.close(1008, 'Call session not found');
           return;
         }
