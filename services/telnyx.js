@@ -418,7 +418,7 @@ export class TelnyxService {
       let purchaseResult;
       let purchaseMethod = 'unknown';
       
-      // Method 1: Number Orders endpoint
+      // Method 1: Number Orders endpoint (with configuration in purchase request)
       try {
         console.log('Method 1: Trying Number Orders endpoint...');
         const numberOrderPayload = {
@@ -426,6 +426,18 @@ export class TelnyxService {
             phone_number: cleanNumber
           }]
         };
+        
+        // Set configuration DURING purchase (more reliable than updating after)
+        if (process.env.TELNYX_VOICE_APPLICATION_ID) {
+          numberOrderPayload.phone_numbers[0].voice_application_id = process.env.TELNYX_VOICE_APPLICATION_ID;
+          console.log('Setting voice_application_id in purchase request:', process.env.TELNYX_VOICE_APPLICATION_ID);
+        }
+        
+        if (process.env.TELNYX_MESSAGING_PROFILE_ID) {
+          numberOrderPayload.phone_numbers[0].messaging_profile_id = process.env.TELNYX_MESSAGING_PROFILE_ID;
+          console.log('Setting messaging_profile_id in purchase request:', process.env.TELNYX_MESSAGING_PROFILE_ID);
+        }
+        
         console.log('Number Order payload:', JSON.stringify(numberOrderPayload, null, 2));
         purchaseResult = await this.makeAPIRequest('POST', '/number_orders', numberOrderPayload);
         purchaseMethod = 'number_orders';
