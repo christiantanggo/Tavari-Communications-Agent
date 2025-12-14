@@ -63,59 +63,55 @@ export class AIRealtimeService {
           console.log('✅ Connected to OpenAI Realtime API');
           console.log('✅ OpenAI WebSocket readyState:', this.ws.readyState);
           
-          // Wait for session.created - session is automatically created by OpenAI
-          const sessionCreatedHandler = (message) => {
-            if (message.type === 'session.created') {
-              process.stdout.write('\n✅ OPENAI SESSION CREATED - Ready to receive audio\n');
-              console.log('✅ Session created by OpenAI');
-              console.log('✅ OpenAI session is ready');
+          // Configure session immediately - OpenAI creates session automatically on connect
+          // We'll wait for session.created OR session.updated to confirm it's ready
+          const sessionReadyHandler = (message) => {
+            if (message.type === 'session.created' || message.type === 'session.updated') {
+              process.stdout.write('\n✅ OPENAI SESSION READY - Ready to receive audio\n');
+              console.log('✅ OpenAI session is ready:', message.type);
               this.sessionConfigured = true;
-              this.ws.removeListener('message', sessionCreatedHandler);
-              
-              // Update session to accept G.711 μ-law directly (no conversion needed!)
-              try {
-                const sessionConfig = {
-                  type: 'session.update',
-                  session: {
-                    instructions: this.buildSystemInstructions(),
-                    input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law at 8kHz
-                    output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
-                    modalities: ['text', 'audio'],
-                    voice: 'alloy',
-                    temperature: 0.8,
-                    max_response_output_tokens: 4096,
-                  },
-                };
-                
-                console.log('🔵 Updating session to accept G.711 μ-law format...');
-                console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
-                this.ws.send(JSON.stringify(sessionConfig));
-                // Don't wait for response - proceed immediately
-              } catch (error) {
-                console.warn('Could not update session config, proceeding anyway:', error.message);
-              }
-              
+              this.ws.removeListener('message', sessionReadyHandler);
               resolve(true);
-            } else if (message.type === 'error' && message.error?.code !== 'missing_required_parameter') {
-              // Ignore missing_required_parameter errors (from session.update attempts)
-              console.error('Error during session creation:', JSON.stringify(message, null, 2));
-              this.ws.removeListener('message', sessionCreatedHandler);
-              reject(new Error('Session creation failed: ' + JSON.stringify(message)));
+            } else if (message.type === 'error') {
+              console.error('❌ OpenAI session error:', JSON.stringify(message, null, 2));
+              // Don't reject on error - might be recoverable
             }
           };
           
-          // Listen for session.created
-          this.ws.on('message', sessionCreatedHandler);
+          // Listen for session confirmation
+          this.ws.on('message', sessionReadyHandler);
           
-          // Timeout after 5 seconds if no session.created
+          // Send session.update immediately to configure the session
+          try {
+            const sessionConfig = {
+              type: 'session.update',
+              session: {
+                instructions: this.buildSystemInstructions(),
+                input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law at 8kHz
+                output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
+                modalities: ['text', 'audio'],
+                voice: 'alloy',
+                temperature: 0.8,
+                max_response_output_tokens: 4096,
+              },
+            };
+            
+            console.log('🔵 Configuring session to accept G.711 μ-law format...');
+            console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
+            this.ws.send(JSON.stringify(sessionConfig));
+          } catch (error) {
+            console.error('❌ Error sending session config:', error);
+          }
+          
+          // Timeout after 3 seconds - proceed anyway if no confirmation
           setTimeout(() => {
-            this.ws.removeListener('message', sessionCreatedHandler);
+            this.ws.removeListener('message', sessionReadyHandler);
             if (!this.sessionConfigured) {
-              console.warn('Session creation timeout - proceeding anyway');
+              console.warn('⚠️ Session confirmation timeout - proceeding anyway (session may still work)');
               this.sessionConfigured = true;
               resolve(true);
             }
-          }, 5000);
+          }, 3000);
         });
         
         this.ws.on('message', (data) => {
