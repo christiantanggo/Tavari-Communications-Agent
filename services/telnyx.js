@@ -354,80 +354,58 @@ export class TelnyxService {
   }
 
   // Purchase and assign phone number to business
-  // NEW APPROACH: Search for the number first to get the exact format, then purchase
+  // SIMPLIFIED: Number came from frontend search, so format is correct. Just purchase it.
   static async purchaseAndAssignPhoneNumber(businessId, phoneNumber, countryCode = 'US') {
     try {
-      console.log('=== NEW PURCHASE APPROACH ===');
-      console.log('Step 1: Searching for exact number format:', phoneNumber);
+      console.log('=== DIRECT PURCHASE ===');
+      console.log('Purchasing number (from frontend search):', phoneNumber);
       
-      // Clean the number for search (remove all formatting)
-      let searchNumber = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
-      if (searchNumber.length === 10) {
-        searchNumber = '1' + searchNumber; // Add country code for US
+      // Ensure number is in E.164 format (with +)
+      let cleanNumber = phoneNumber.trim();
+      if (!cleanNumber.startsWith('+')) {
+        cleanNumber = '+' + cleanNumber.replace(/^\+/, '');
       }
+      // Remove spaces, dashes, parentheses but keep +
+      cleanNumber = cleanNumber.replace(/[\s\-\(\)]/g, '');
       
-      // Search for the number to get exact format from Telnyx
-      const searchParams = new URLSearchParams({
-        'filter[phone_number]': searchNumber,
-        'filter[country_code]': countryCode,
-        'page[size]': '10',
-      });
+      console.log('Cleaned number:', cleanNumber);
       
-      const searchResult = await this.makeAPIRequest('GET', `/available_phone_numbers?${searchParams.toString()}`);
+      // Try both endpoints - Number Orders first, then direct
+      let purchaseResult;
+      let purchaseMethod = 'unknown';
       
-      if (!searchResult.data || searchResult.data.length === 0) {
-        throw new Error(`Phone number ${phoneNumber} not found in Telnyx available inventory. Please select a number from the search results.`);
+      // Method 1: Number Orders endpoint
+      try {
+        console.log('Method 1: Trying Number Orders endpoint...');
+        const numberOrderPayload = {
+          phone_numbers: [{
+            phone_number: cleanNumber
+          }]
+        };
+        console.log('Number Order payload:', JSON.stringify(numberOrderPayload, null, 2));
+        purchaseResult = await this.makeAPIRequest('POST', '/number_orders', numberOrderPayload);
+        purchaseMethod = 'number_orders';
+        console.log('SUCCESS with Number Orders');
+      } catch (orderError) {
+        console.log('Number Orders failed:', orderError.message);
+        console.log('Order error response:', JSON.stringify(orderError.response?.data, null, 2));
+        
+        // Method 2: Direct phone_numbers endpoint
+        try {
+          console.log('Method 2: Trying direct phone_numbers endpoint...');
+          const directPayload = {
+            phone_number: cleanNumber
+          };
+          console.log('Direct payload:', JSON.stringify(directPayload, null, 2));
+          purchaseResult = await this.makeAPIRequest('POST', '/phone_numbers', directPayload);
+          purchaseMethod = 'phone_numbers';
+          console.log('SUCCESS with direct phone_numbers');
+        } catch (directError) {
+          console.log('Direct purchase also failed:', directError.message);
+          console.log('Direct error response:', JSON.stringify(directError.response?.data, null, 2));
+          throw new Error(`Both purchase methods failed. Number Orders: ${orderError.message}. Direct: ${directError.message}`);
+        }
       }
-      
-      // Find exact match - be more flexible with matching
-      let exactMatch = searchResult.data.find(num => {
-        const numClean = num.phone_number?.replace(/[\s\-\(\)\+]/g, '') || '';
-        return numClean === searchNumber;
-      });
-      
-      // If no exact match, try matching the last 10 digits (for US numbers)
-      if (!exactMatch && searchNumber.length >= 10) {
-        const last10 = searchNumber.slice(-10);
-        exactMatch = searchResult.data.find(num => {
-          const numClean = num.phone_number?.replace(/[\s\-\(\)\+]/g, '') || '';
-          return numClean.slice(-10) === last10;
-        });
-      }
-      
-      // If still no match, just use the first result (it's from the search, so it should be close)
-      if (!exactMatch && searchResult.data.length > 0) {
-        console.log('No exact match found, using first search result');
-        exactMatch = searchResult.data[0];
-      }
-      
-      if (!exactMatch) {
-        throw new Error(`Could not find phone number ${phoneNumber} in Telnyx search results. Found ${searchResult.data.length} results but none matched.`);
-      }
-      
-      console.log('Step 2: Found exact match:', exactMatch.phone_number);
-      console.log('Step 3: Purchasing with exact format from Telnyx');
-      
-      // Use the EXACT phone_number format from Telnyx search results
-      const purchasePayload = {
-        phone_number: exactMatch.phone_number, // Use exact format from Telnyx
-      };
-      
-      console.log('Purchase payload:', JSON.stringify(purchasePayload, null, 2));
-      
-      // Telnyx recommends using Number Orders endpoint for purchasing
-      // Format: { phone_numbers: [{ phone_number: "+15199009119" }] }
-      const numberOrderPayload = {
-        phone_numbers: [{
-          phone_number: exactMatch.phone_number
-        }]
-      };
-      
-      console.log('Number Order payload:', JSON.stringify(numberOrderPayload, null, 2));
-      console.log('Using Number Orders endpoint: POST /number_orders');
-      console.log('Full URL:', `${TELNYX_API_URL}/number_orders`);
-      
-      // Purchase using Number Orders endpoint (recommended by Telnyx)
-      const purchaseResult = await this.makeAPIRequest('POST', '/number_orders', numberOrderPayload);
       
       console.log('Purchase result:', JSON.stringify(purchaseResult, null, 2));
       
