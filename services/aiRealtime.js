@@ -34,16 +34,26 @@ export class AIRealtimeService {
         // Headers: Authorization: Bearer sk-...
         const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
         
+        // Clean API key - remove any whitespace, newlines, or invalid characters
+        const cleanApiKey = OPENAI_API_KEY?.trim().replace(/\s+/g, '') || '';
+        
         console.log('🔵 Connecting to OpenAI Realtime API...');
-        console.log('🔵 API Key present:', !!OPENAI_API_KEY);
-        console.log('🔵 API Key length:', OPENAI_API_KEY?.length || 0);
-        console.log('🔵 API Key starts with:', OPENAI_API_KEY?.substring(0, 7) || 'N/A');
+        console.log('🔵 API Key present:', !!cleanApiKey);
+        console.log('🔵 API Key length:', cleanApiKey.length);
+        console.log('🔵 API Key starts with:', cleanApiKey.substring(0, 7) || 'N/A');
         console.log('🔵 Using Authorization header (OpenAI Realtime API standard)');
+        
+        if (!cleanApiKey) {
+          const error = new Error('OPENAI_API_KEY is empty after cleaning');
+          console.error('❌', error.message);
+          reject(error);
+          return;
+        }
         
         // Set Authorization header for WebSocket connection
         this.ws = new WebSocket(url, {
           headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`
+            'Authorization': `Bearer ${cleanApiKey}`
           }
         });
         
