@@ -309,9 +309,27 @@ export class TelnyxService {
         };
       }
 
-      throw new Error('Failed to purchase phone number');
+      throw new Error('Failed to purchase phone number - no data returned');
     } catch (error) {
       console.error('Purchase phone number error:', error);
+      console.error('Telnyx error response:', error.response?.data);
+      console.error('Telnyx error status:', error.response?.status);
+      
+      // Log the full error for debugging
+      if (error.response?.data) {
+        console.error('Full Telnyx error data:', JSON.stringify(error.response.data, null, 2));
+      }
+      
+      // Provide more helpful error messages
+      if (error.message?.includes('not found') || error.message?.includes('could not be found')) {
+        // Check if it's a 404 or specific Telnyx error
+        const telnyxError = error.response?.data?.errors?.[0];
+        if (telnyxError) {
+          throw new Error(`Telnyx error: ${telnyxError.title || telnyxError.detail || error.message}. Phone number: ${cleanNumber}`);
+        }
+        throw new Error(`Phone number ${cleanNumber} is not available for purchase. It may have already been purchased or is not in Telnyx's inventory. Please select a different number from the available list.`);
+      }
+      
       throw error;
     }
   }
