@@ -275,22 +275,50 @@ export class TelnyxService {
       // Just try to purchase it directly
       console.log('Attempting direct purchase of:', cleanNumber);
       
+      // Telnyx requires phone_number in the request body
+      // Make sure we're using the exact E.164 format
       const purchasePayload = {
-        phone_number: cleanNumber, // Use the cleaned E.164 format
+        phone_number: cleanNumber, // E.164 format with +
       };
-      console.log('Purchase request payload:', JSON.stringify(purchasePayload, null, 2));
       
-      const result = await this.makeAPIRequest('POST', '/phone_numbers', purchasePayload);
+      console.log('Purchase request payload:', JSON.stringify(purchasePayload, null, 2));
+      console.log('Purchase endpoint: POST /phone_numbers');
+      console.log('Full URL will be:', `${TELNYX_API_URL}/phone_numbers`);
+      
+      let result;
+      try {
+        result = await this.makeAPIRequest('POST', '/phone_numbers', purchasePayload);
+        console.log('Telnyx purchase response:', JSON.stringify(result, null, 2));
+      } catch (purchaseError) {
+        // Log the FULL error from Telnyx
+        console.error('=== TELNYX PURCHASE ERROR ===');
+        console.error('Error message:', purchaseError.message);
+        console.error('Error response status:', purchaseError.response?.status);
+        console.error('Error response data:', JSON.stringify(purchaseError.response?.data, null, 2));
+        console.error('Full error object:', purchaseError);
+        console.error('=== END TELNYX PURCHASE ERROR ===');
+        throw purchaseError; // Re-throw to be handled by outer catch
+      }
 
-      if (result.data) {
+      // Check if result has data property (Telnyx wraps responses in { data: {...} })
+      if (result && result.data) {
         return {
           success: true,
           phone_number: result.data.phone_number,
           phone_number_id: result.data.id,
         };
       }
+      
+      // Sometimes Telnyx returns the data directly, not wrapped
+      if (result && result.phone_number) {
+        return {
+          success: true,
+          phone_number: result.phone_number,
+          phone_number_id: result.id,
+        };
+      }
 
-      throw new Error('Failed to purchase phone number - no data returned');
+      throw new Error('Failed to purchase phone number - unexpected response format from Telnyx');
     } catch (error) {
       console.error('Purchase phone number error:', error);
       console.error('Telnyx error response:', error.response?.data);
