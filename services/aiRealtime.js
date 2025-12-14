@@ -105,10 +105,21 @@ export class AIRealtimeService {
         this.ws.on('message', (data) => {
           try {
             const message = JSON.parse(data.toString());
-            // Log all messages for debugging
+            // Log ALL messages from OpenAI for debugging
+            console.log('🔵 OpenAI message received:', JSON.stringify(message, null, 2));
+            
+            // Log errors prominently
             if (message.type === 'error' || message.type === 'error.event') {
-              console.error('OpenAI Realtime error message received:', JSON.stringify(message, null, 2));
+              process.stdout.write(`\n❌ OPENAI ERROR MESSAGE:\n`);
+              console.error('❌ OpenAI Realtime error message received:', JSON.stringify(message, null, 2));
             }
+            
+            // Log session.updated prominently
+            if (message.type === 'session.updated') {
+              process.stdout.write(`\n✅ OPENAI SESSION.UPDATED RECEIVED\n`);
+              console.log('✅ OpenAI session.updated event received:', JSON.stringify(message, null, 2));
+            }
+            
             this.handleMessage(message);
           } catch (error) {
             // Handle binary audio data
@@ -127,7 +138,10 @@ export class AIRealtimeService {
         
         this.ws.on('close', (code, reason) => {
           const reasonStr = reason?.toString() || 'No reason provided';
-          console.log('⚠️ OpenAI Realtime WebSocket closed', { code, reason: reasonStr });
+          process.stdout.write(`\n❌ OPENAI WEBSOCKET CLOSED - Code: ${code}, Reason: ${reasonStr}\n`);
+          console.error('❌ OpenAI Realtime WebSocket closed', { code, reason: reasonStr });
+          console.error('❌ WebSocket readyState:', this.ws.readyState);
+          console.error('❌ Session configured:', this.sessionConfigured);
           
           // Log specific error codes with helpful messages
           if (code === 3000) {
@@ -138,11 +152,16 @@ export class AIRealtimeService {
             console.error('   3. Connection URL format is incorrect');
             console.error('   4. Model name is incorrect or not available');
             console.error('   5. Account does not have billing enabled (Realtime API requires paid account)');
+          } else if (code === 4000) {
+            console.error('❌ ERROR CODE 4000: Invalid API Key');
+            console.error('❌ Your OpenAI API key is invalid or does not have Realtime API access');
           } else if (code === 1006) {
             console.error('❌ ERROR CODE 1006: Abnormal closure (no close frame)');
             console.error('❌ This usually means network/connection issue or server-side error');
+            console.error('❌ OpenAI may have rejected the connection immediately');
           } else if (code !== 1000) {
             console.error(`❌ ERROR CODE ${code}: Unexpected closure`);
+            console.error('❌ Check OpenAI API status and your account access');
           }
         });
         
