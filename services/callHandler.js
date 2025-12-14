@@ -108,21 +108,30 @@ export class CallHandler {
     }
     
     // Initialize AI Realtime service
-    console.log('Creating AIRealtimeService...');
+    console.log('🔵 Step: Creating AIRealtimeService...');
+    console.log('🔵 CallSessionDbId:', this.callSessionDbId);
+    console.log('🔵 BusinessId:', this.businessId);
+    console.log('🔵 AgentConfig exists:', !!this.agentConfig);
+    
     this.aiService = new AIRealtimeService(
       this.callSessionDbId,
       this.businessId,
       this.agentConfig
     );
+    console.log('✅ AIRealtimeService created');
     
     // Connect to OpenAI
-    console.log('Connecting to OpenAI Realtime API...');
+    console.log('🔵 Step: About to connect to OpenAI Realtime API...');
+    console.log('🔵 OPENAI_API_KEY check:', !!process.env.OPENAI_API_KEY);
     try {
+      console.log('🔵 Calling aiService.connect()...');
       await this.aiService.connect();
       console.log('✅ Successfully connected to OpenAI Realtime API');
     } catch (error) {
       console.error('❌ Failed to connect to OpenAI Realtime API:', error);
-      console.error('Error details:', error.message, error.stack);
+      console.error('❌ Error name:', error.name);
+      console.error('❌ Error message:', error.message);
+      console.error('❌ Error stack:', error.stack);
       throw error;
     }
     
