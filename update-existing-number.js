@@ -59,29 +59,45 @@ async function updateExistingNumber() {
   console.log(`  Current webhook_url: ${testNumber.webhook_url || 'NOT SET'}`);
   console.log('');
   
-  // Build update payload (same as what purchase would do)
-  const updatePayload = {
+  // Build update payloads (voice and messaging must be separate)
+  const voiceUpdatePayload = {
     webhook_url: webhookUrl,
     webhook_url_method: 'POST',
   };
   
   if (voiceAppId) {
-    updatePayload.voice_application_id = voiceAppId;
+    voiceUpdatePayload.voice_application_id = voiceAppId;
     console.log(`  Will set voice_application_id: ${voiceAppId}`);
-  }
-  
-  if (messagingProfileId) {
-    updatePayload.messaging_profile_id = messagingProfileId;
-    console.log(`  Will set messaging_profile_id: ${messagingProfileId}`);
   }
   
   console.log(`  Will set webhook_url: ${webhookUrl}`);
   console.log('');
   
+  if (messagingProfileId) {
+    console.log(`  Will set messaging_profile_id: ${messagingProfileId} (via separate endpoint)`);
+  }
+  console.log('');
+  
   // Actually update the number
   console.log('Updating number...');
   try {
-    const updateResult = await TelnyxService.makeAPIRequest('PATCH', `/phone_numbers/${testNumber.id}`, updatePayload);
+    // Step 1: Update voice settings
+    console.log('Step 1: Updating voice settings...');
+    const voiceResult = await TelnyxService.makeAPIRequest('PATCH', `/phone_numbers/${testNumber.id}`, voiceUpdatePayload);
+    console.log('✅ Voice settings updated');
+    
+    // Step 2: Update messaging settings (separate endpoint required by Telnyx)
+    let messagingResult = null;
+    if (messagingProfileId) {
+      console.log('Step 2: Updating messaging settings...');
+      const messagingUpdatePayload = {
+        messaging_profile_id: messagingProfileId,
+      };
+      messagingResult = await TelnyxService.makeAPIRequest('PATCH', `/phone_numbers/${testNumber.id}/messaging`, messagingUpdatePayload);
+      console.log('✅ Messaging settings updated');
+    }
+    
+    const updateResult = messagingResult || voiceResult;
     console.log('✅ Number updated successfully!');
     console.log('');
     console.log('Updated configuration:');
