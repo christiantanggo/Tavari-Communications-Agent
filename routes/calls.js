@@ -96,12 +96,23 @@ router.post('/webhook', async (req, res) => {
         }
         
         res.json({ status: 'ok' });
+      } else if (eventType === 'streaming.started') {
+        // Telnyx has started streaming and should connect to our WebSocket
+        console.log(`[${requestId}] Streaming started - Telnyx should connect to WebSocket now`);
+        const streamUrl = req.body.data?.payload?.stream_params?.stream_url;
+        console.log(`[${requestId}] Stream URL from Telnyx:`, streamUrl);
+        res.json({ status: 'ok' });
+      } else if (eventType === 'streaming.stopped') {
+        // Streaming stopped - call may be ending
+        console.log(`[${requestId}] Streaming stopped`);
+        res.json({ status: 'ok' });
       } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
         const callData = TelnyxService.parseInboundCall(req);
         const duration = req.body.data?.payload?.duration_seconds || 0;
         await TelnyxService.handleCallEnd(callData.telnyx_call_id, duration);
         res.json({ status: 'ok' });
       } else {
+        console.log(`[${requestId}] Unhandled Telnyx event:`, eventType);
         res.json({ status: 'ok', message: 'Event not handled' });
       }
     }
