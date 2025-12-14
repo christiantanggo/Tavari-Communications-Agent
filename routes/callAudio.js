@@ -54,14 +54,21 @@ export const setupCallAudioWebSocket = (server) => {
       }
       
       // Only handle audio streaming paths
+      console.log('Checking path validity...');
+      console.log('Path starts with /api/calls/?', url.pathname.startsWith('/api/calls/'));
+      console.log('Path ends with /audio?', url.pathname.endsWith('/audio'));
+      
       if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
-        console.log('Invalid path, closing connection:', url.pathname);
+        console.log('❌ Invalid path, closing connection:', url.pathname);
         ws.close(1008, 'Invalid path');
         return;
       }
       
-      const callSessionId = url.pathname.split('/')[3]; // /api/calls/{id}/audio
-      console.log(`Audio WebSocket connected for call: ${callSessionId}`);
+      console.log('✅ Path is valid, extracting callSessionId...');
+      const pathParts = url.pathname.split('/');
+      console.log('Path parts:', pathParts);
+      const callSessionId = pathParts[3]; // /api/calls/{id}/audio
+      console.log(`✅ Audio WebSocket connected for call: ${callSessionId}`);
       
       try {
       console.log('=== WebSocket connection handler ===');
