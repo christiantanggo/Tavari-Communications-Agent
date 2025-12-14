@@ -25,9 +25,11 @@ export class AIRealtimeService {
         // OpenAI Realtime API uses Authorization header, not query parameter
         const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
         
-        console.log('Connecting to OpenAI Realtime API with URL:', url.replace(OPENAI_API_KEY, '***'));
-        console.log('API Key present:', !!OPENAI_API_KEY);
-        console.log('API Key length:', OPENAI_API_KEY?.length || 0);
+        console.log('🔵 Connecting to OpenAI Realtime API...');
+        console.log('🔵 URL:', url);
+        console.log('🔵 API Key present:', !!OPENAI_API_KEY);
+        console.log('🔵 API Key length:', OPENAI_API_KEY?.length || 0);
+        console.log('🔵 Using Authorization header for authentication');
         
         // Use Authorization header instead of query parameter
         this.ws = new WebSocket(url, {
