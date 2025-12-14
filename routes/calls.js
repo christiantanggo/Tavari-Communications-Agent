@@ -80,7 +80,21 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Sending 200 OK response to Telnyx`);
         res.json({ status: 'ok' });
       } else if (eventType === 'call.answered') {
-        // Call was answered, WebSocket streaming will handle audio
+        // Call was answered - NOW start the media stream
+        // Telnyx may require the call to be answered before connecting to WebSocket
+        console.log(`[${requestId}] Call answered - starting media stream...`);
+        const callData = TelnyxService.parseInboundCall(req);
+        const callControlId = req.body.data?.payload?.call_control_id || 
+                             req.body.payload?.call_control_id ||
+                             callData.telnyx_call_id;
+        
+        if (callControlId) {
+          // Start streaming after call is answered
+          TelnyxService.startMediaStream(callControlId).catch(error => {
+            console.error(`[${requestId}] Failed to start media stream after call.answered:`, error);
+          });
+        }
+        
         res.json({ status: 'ok' });
       } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
         const callData = TelnyxService.parseInboundCall(req);

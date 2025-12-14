@@ -570,51 +570,11 @@ export class TelnyxService {
         console.log('Answering call via Call Control API, call_control_id:', callControlId);
         await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
         console.log('Call answered successfully');
+        // NOTE: We do NOT start streaming here - wait for call.answered webhook
+        // Telnyx may require the call to be fully answered before connecting to WebSocket
       } catch (error) {
         console.error('Failed to answer call:', error.message);
         // Don't throw - continue with call setup
-      }
-    }
-
-    // Start media stream for bidirectional audio (WebSocket streaming for speed)
-    // Telnyx uses Media Streams API for real-time audio
-    if (callControlId) {
-      try {
-        console.log('Starting media stream for call:', callControlId);
-        
-        // Get server URL for WebSocket
-        const serverUrl = process.env.SERVER_URL || process.env.WEBHOOK_BASE_URL || 'https://api.tavarios.com';
-        const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
-        const wsHost = serverUrl.replace(/^https?:\/\//, '');
-        const streamUrl = `${wsProtocol}://${wsHost}/api/calls/${callSession.id}/audio`;
-        
-        // Start media stream using Telnyx Call Control API
-        // This creates a bidirectional WebSocket connection for audio
-        const streamPayload = {
-          stream_url: streamUrl,
-          stream_track: 'both_tracks', // Send and receive audio
-        };
-        
-        console.log('🔵 Starting media stream for Telnyx...');
-        console.log('🔵 Stream URL:', streamUrl);
-        console.log('🔵 Stream payload:', JSON.stringify(streamPayload, null, 2));
-        console.log('🔵 Making streaming_start API call to Telnyx...');
-        
-        const streamResponse = await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/streaming_start`, streamPayload);
-        console.log('✅ Telnyx streaming_start API call successful');
-        console.log('🔵 Telnyx response:', JSON.stringify(streamResponse, null, 2));
-        console.log('⚠️  IMPORTANT: Telnyx should now connect to WebSocket URL:', streamUrl);
-        console.log('⚠️  If you don\'t see WebSocket connection logs, Telnyx cannot reach the WebSocket server');
-        
-        // Initialize call handler for audio processing
-        // This will be handled when the WebSocket connects
-        // Note: Handler will be created when WebSocket connects in callAudio.js
-        console.log('Call handler will be initialized when WebSocket connects');
-        
-      } catch (error) {
-        console.error('Failed to start media stream:', error.message);
-        console.error('Error details:', error.response?.data);
-        // Don't throw - call is answered, just no audio streaming
       }
     }
 
