@@ -413,11 +413,21 @@ export class TelnyxService {
       };
       
       console.log('Purchase payload:', JSON.stringify(purchasePayload, null, 2));
-      console.log('Purchase endpoint: POST /phone_numbers');
-      console.log('Full URL:', `${TELNYX_API_URL}/phone_numbers`);
       
-      // Purchase using exact format
-      const purchaseResult = await this.makeAPIRequest('POST', '/phone_numbers', purchasePayload);
+      // Telnyx recommends using Number Orders endpoint for purchasing
+      // Format: { phone_numbers: [{ phone_number: "+15199009119" }] }
+      const numberOrderPayload = {
+        phone_numbers: [{
+          phone_number: exactMatch.phone_number
+        }]
+      };
+      
+      console.log('Number Order payload:', JSON.stringify(numberOrderPayload, null, 2));
+      console.log('Using Number Orders endpoint: POST /number_orders');
+      console.log('Full URL:', `${TELNYX_API_URL}/number_orders`);
+      
+      // Purchase using Number Orders endpoint (recommended by Telnyx)
+      const purchaseResult = await this.makeAPIRequest('POST', '/number_orders', numberOrderPayload);
       
       console.log('Purchase result:', JSON.stringify(purchaseResult, null, 2));
       
