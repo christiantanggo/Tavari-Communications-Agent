@@ -418,7 +418,7 @@ export class TelnyxService {
       let purchaseResult;
       let purchaseMethod = 'unknown';
       
-      // Method 1: Number Orders endpoint (with configuration in purchase request)
+      // Method 1: Number Orders endpoint (recommended by Telnyx)
       try {
         console.log('Method 1: Trying Number Orders endpoint...');
         const numberOrderPayload = {
@@ -426,17 +426,6 @@ export class TelnyxService {
             phone_number: cleanNumber
           }]
         };
-        
-        // Set configuration DURING purchase (more reliable than updating after)
-        if (process.env.TELNYX_VOICE_APPLICATION_ID) {
-          numberOrderPayload.phone_numbers[0].voice_application_id = process.env.TELNYX_VOICE_APPLICATION_ID;
-          console.log('Setting voice_application_id in purchase request:', process.env.TELNYX_VOICE_APPLICATION_ID);
-        }
-        
-        if (process.env.TELNYX_MESSAGING_PROFILE_ID) {
-          numberOrderPayload.phone_numbers[0].messaging_profile_id = process.env.TELNYX_MESSAGING_PROFILE_ID;
-          console.log('Setting messaging_profile_id in purchase request:', process.env.TELNYX_MESSAGING_PROFILE_ID);
-        }
         
         console.log('Number Order payload:', JSON.stringify(numberOrderPayload, null, 2));
         purchaseResult = await this.makeAPIRequest('POST', '/number_orders', numberOrderPayload);
@@ -492,17 +481,26 @@ export class TelnyxService {
         throw new Error('Failed to extract phone number ID from purchase response');
       }
       
-      console.log('Step 4: Configuring webhook for number:', purchasedNumber, 'ID:', phoneNumberId);
+      console.log('Step 4: Configuring number (Voice API Application, Messaging Profile, and Webhook)...');
+      console.log('  Number:', purchasedNumber);
+      console.log('  ID:', phoneNumberId);
       
-      // Configure webhook URL - but don't fail if it doesn't work
+      // Configure Voice API Application, Messaging Profile, and Webhook URL
+      // This MUST happen after purchase - Telnyx doesn't support setting these during purchase
       const webhookUrl = process.env.WEBHOOK_URL || `${process.env.SERVER_URL || 'http://localhost:5001'}/api/calls/webhook`;
       try {
         await this.configurePhoneNumber(phoneNumberId, webhookUrl);
-        console.log('Webhook configured successfully');
-      } catch (webhookError) {
-        console.error('Webhook configuration failed (non-fatal):', webhookError.message);
-        console.error('Phone number purchased but webhook not configured. You can configure it manually in Telnyx dashboard.');
-        // Don't throw - the number was purchased successfully
+        console.log('✅ Number fully configured:');
+        console.log('   - Voice API Application:', process.env.TELNYX_VOICE_APPLICATION_ID || 'NOT SET');
+        console.log('   - Messaging Profile:', process.env.TELNYX_MESSAGING_PROFILE_ID || 'NOT SET');
+        console.log('   - Webhook URL:', webhookUrl);
+      } catch (configError) {
+        console.error('❌ Configuration failed:', configError.message);
+        console.error('   Phone number was purchased but configuration failed.');
+        console.error('   This means the number will NOT route calls/SMS automatically.');
+        console.error('   Error details:', JSON.stringify(configError.response?.data, null, 2));
+        // Don't throw - the number was purchased successfully, but log a warning
+        console.warn('⚠️  WARNING: Number purchased but not fully configured. Manual configuration may be required.');
       }
 
       // Update business record
