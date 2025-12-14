@@ -62,12 +62,37 @@ export class AIRealtimeService {
           console.log('✅ Connected to OpenAI Realtime API');
           console.log('✅ OpenAI WebSocket readyState:', this.ws.readyState);
           
-          // Configure session immediately - OpenAI creates session automatically on connect
-          // We'll wait for session.created OR session.updated to confirm it's ready
+          // Wait for session.created first, then send session.update
+          // OpenAI creates session automatically on connect, but we should wait for confirmation
           const sessionReadyHandler = (message) => {
-            if (message.type === 'session.created' || message.type === 'session.updated') {
+            if (message.type === 'session.created') {
+              process.stdout.write('\n✅ OPENAI SESSION CREATED - Configuring session...\n');
+              console.log('✅ OpenAI session.created event received');
+              
+              // Now send session.update to configure audio format
+              try {
+                const sessionConfig = {
+                  type: 'session.update',
+                  session: {
+                    instructions: this.buildSystemInstructions(),
+                    input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law (PCMU) - OpenAI supports this!
+                    output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
+                    modalities: ['text', 'audio'],
+                    voice: 'alloy',
+                    temperature: 0.8,
+                    max_response_output_tokens: 4096,
+                  },
+                };
+                
+                console.log('🔵 Configuring session to accept G.711 μ-law (PCMU) from Telnyx...');
+                console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
+                this.ws.send(JSON.stringify(sessionConfig));
+              } catch (error) {
+                console.error('❌ Error sending session config:', error);
+              }
+            } else if (message.type === 'session.updated') {
               process.stdout.write('\n✅ OPENAI SESSION READY - Ready to receive audio\n');
-              console.log('✅ OpenAI session is ready:', message.type);
+              console.log('✅ OpenAI session.updated event received - session configured');
               this.sessionConfigured = true;
               this.ws.removeListener('message', sessionReadyHandler);
               resolve(true);
@@ -77,32 +102,10 @@ export class AIRealtimeService {
             }
           };
           
-          // Listen for session confirmation
+          // Listen for session events
           this.ws.on('message', sessionReadyHandler);
           
-          // Send session.update immediately to configure the session
-          try {
-            const sessionConfig = {
-              type: 'session.update',
-              session: {
-                instructions: this.buildSystemInstructions(),
-                input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law (PCMU) - OpenAI supports this!
-                output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
-                modalities: ['text', 'audio'],
-                voice: 'alloy',
-                temperature: 0.8,
-                max_response_output_tokens: 4096,
-              },
-            };
-            
-            console.log('🔵 Configuring session to accept G.711 μ-law (PCMU) from Telnyx...');
-            console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
-            this.ws.send(JSON.stringify(sessionConfig));
-          } catch (error) {
-            console.error('❌ Error sending session config:', error);
-          }
-          
-          // Timeout after 3 seconds - proceed anyway if no confirmation
+          // Timeout after 5 seconds - proceed anyway if no confirmation
           setTimeout(() => {
             this.ws.removeListener('message', sessionReadyHandler);
             if (!this.sessionConfigured) {
@@ -110,7 +113,7 @@ export class AIRealtimeService {
               this.sessionConfigured = true;
               resolve(true);
             }
-          }, 3000);
+          }, 5000);
         });
         
         this.ws.on('message', (data) => {
