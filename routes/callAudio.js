@@ -22,8 +22,10 @@ export const setupCallAudioWebSocket = (server) => {
     try {
       // Log request info safely with extensive error handling
       console.log(`[${connectionId}] Step 0: Starting request info logging...`);
+      process.stdout.write(`[${connectionId}] STEP_0_START\n`);
       try {
         console.log(`[${connectionId}] Step 0: Logging request info...`);
+        process.stdout.write(`[${connectionId}] STEP_0_INSIDE_TRY\n`);
         console.log(`[${connectionId}] Request object exists:`, !!req);
         
         // Force flush and add delay to see if it's a timing issue
