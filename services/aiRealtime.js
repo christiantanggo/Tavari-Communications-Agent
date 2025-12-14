@@ -138,7 +138,14 @@ export class AIRealtimeService {
         
         this.ws.on('close', (code, reason) => {
           const reasonStr = reason?.toString() || 'No reason provided';
-          process.stdout.write(`\n❌ OPENAI WEBSOCKET CLOSED - Code: ${code}, Reason: ${reasonStr}\n`);
+          // Use multiple stdout writes to ensure it's not dropped
+          process.stdout.write(`\n\n\n`);
+          process.stdout.write(`❌❌❌ OPENAI WEBSOCKET CLOSED ❌❌❌\n`);
+          process.stdout.write(`CODE: ${code}\n`);
+          process.stdout.write(`REASON: ${reasonStr}\n`);
+          process.stdout.write(`READYSTATE: ${this.ws.readyState}\n`);
+          process.stdout.write(`SESSION_CONFIGURED: ${this.sessionConfigured}\n`);
+          process.stdout.write(`❌❌❌ END CLOSE EVENT ❌❌❌\n\n\n`);
           console.error('❌ OpenAI Realtime WebSocket closed', { code, reason: reasonStr });
           console.error('❌ WebSocket readyState:', this.ws.readyState);
           console.error('❌ Session configured:', this.sessionConfigured);
