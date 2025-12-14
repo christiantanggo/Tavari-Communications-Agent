@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { convertTelnyxToOpenAI } from '../utils/audioConverter.js';
 
 // In production (Railway), env vars are already available via process.env
 // dotenv.config() is only needed for local development
@@ -286,12 +287,30 @@ export class AIRealtimeService {
     }
     
     try {
-      // Convert audio to base64 if it's a buffer
-      const base64Audio = Buffer.isBuffer(audioData) 
-        ? audioData.toString('base64')
-        : audioData;
+      // Convert Telnyx PCMU (8kHz) to OpenAI PCM16 (24kHz)
+      let convertedAudio;
+      if (Buffer.isBuffer(audioData)) {
+        try {
+          convertedAudio = convertTelnyxToOpenAI(audioData);
+          console.log('🔵 Audio converted: PCMU 8kHz -> PCM16 24kHz');
+          console.log('🔵 Original size:', audioData.length, 'bytes, Converted size:', convertedAudio.length, 'bytes');
+        } catch (conversionError) {
+          console.error('❌ Audio conversion error:', conversionError);
+          // Fallback: try sending original (might not work, but worth trying)
+          convertedAudio = audioData;
+          console.warn('⚠️ Using original audio format (may fail)');
+        }
+      } else {
+        // Already a string (base64), use as-is
+        convertedAudio = audioData;
+      }
       
-      const audioSize = Buffer.isBuffer(audioData) ? audioData.length : (typeof audioData === 'string' ? audioData.length : 'unknown');
+      // Convert to base64
+      const base64Audio = Buffer.isBuffer(convertedAudio) 
+        ? convertedAudio.toString('base64')
+        : convertedAudio;
+      
+      const audioSize = Buffer.isBuffer(convertedAudio) ? convertedAudio.length : (typeof convertedAudio === 'string' ? convertedAudio.length : 'unknown');
       console.log('🔵 Sending audio to OpenAI Realtime API, size:', audioSize, 'bytes, base64 length:', base64Audio.length);
       
       this.ws.send(JSON.stringify({
