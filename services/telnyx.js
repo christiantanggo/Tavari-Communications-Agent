@@ -429,18 +429,45 @@ export class TelnyxService {
       
       console.log('Purchase result:', JSON.stringify(purchaseResult, null, 2));
       
-      if (!purchaseResult.data) {
-        throw new Error('Purchase succeeded but no data returned from Telnyx');
+      // Parse response based on which method succeeded
+      let phoneNumberId, purchasedNumber;
+      
+      if (purchaseMethod === 'number_orders') {
+        // Number Orders returns: { data: { phone_numbers: [{ id, phone_number }] } }
+        if (purchaseResult.data?.phone_numbers && purchaseResult.data.phone_numbers.length > 0) {
+          phoneNumberId = purchaseResult.data.phone_numbers[0].id;
+          purchasedNumber = purchaseResult.data.phone_numbers[0].phone_number;
+        } else {
+          throw new Error('Number Order succeeded but no phone numbers in response');
+        }
+      } else {
+        // Direct purchase returns: { data: { id, phone_number } }
+        if (purchaseResult.data?.id && purchaseResult.data?.phone_number) {
+          phoneNumberId = purchaseResult.data.id;
+          purchasedNumber = purchaseResult.data.phone_number;
+        } else {
+          throw new Error('Direct purchase succeeded but missing id or phone_number in response');
+        }
       }
       
-      const phoneNumberId = purchaseResult.data.id;
-      const purchasedNumber = purchaseResult.data.phone_number;
+      console.log('Extracted - ID:', phoneNumberId, 'Number:', purchasedNumber);
       
-      console.log('Step 4: Configuring webhook for number:', purchasedNumber);
+      if (!phoneNumberId) {
+        throw new Error('Failed to extract phone number ID from purchase response');
+      }
       
-      // Configure webhook URL
+      console.log('Step 4: Configuring webhook for number:', purchasedNumber, 'ID:', phoneNumberId);
+      
+      // Configure webhook URL - but don't fail if it doesn't work
       const webhookUrl = process.env.WEBHOOK_URL || `${process.env.SERVER_URL || 'http://localhost:5001'}/api/calls/webhook`;
-      await this.configurePhoneNumber(phoneNumberId, webhookUrl);
+      try {
+        await this.configurePhoneNumber(phoneNumberId, webhookUrl);
+        console.log('Webhook configured successfully');
+      } catch (webhookError) {
+        console.error('Webhook configuration failed (non-fatal):', webhookError.message);
+        console.error('Phone number purchased but webhook not configured. You can configure it manually in Telnyx dashboard.');
+        // Don't throw - the number was purchased successfully
+      }
 
       // Update business record
       await Business.setTelnyxNumber(businessId, purchasedNumber);
