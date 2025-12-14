@@ -143,6 +143,11 @@ export class AIRealtimeService {
         this.sessionConfigured = true;
         break;
         
+      case 'session.updated':
+        console.log('Session updated event received');
+        this.sessionConfigured = true;
+        break;
+        
       case 'response.done':
         this.isResponding = false;
         this.responseLock = false;
