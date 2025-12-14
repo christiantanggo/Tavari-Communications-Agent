@@ -413,6 +413,8 @@ export class TelnyxService {
       };
       
       console.log('Purchase payload:', JSON.stringify(purchasePayload, null, 2));
+      console.log('Purchase endpoint: POST /phone_numbers');
+      console.log('Full URL:', `${TELNYX_API_URL}/phone_numbers`);
       
       // Purchase using exact format
       const purchaseResult = await this.makeAPIRequest('POST', '/phone_numbers', purchasePayload);
