@@ -15,6 +15,7 @@ export class AIRealtimeService {
     this.transcript = '';
     this.isResponding = false;
     this.responseLock = false;
+    this.sessionConfigured = false;
   }
   
   // Connect to OpenAI Realtime API
