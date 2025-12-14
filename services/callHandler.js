@@ -38,18 +38,30 @@ export class CallHandler {
     
     if (isUUID) {
       // It's a database ID, fetch directly
-      const { supabaseClient } = await import('../config/database.js');
-      const { data, error } = await supabaseClient
-        .from('call_sessions')
-        .select('*')
-        .eq('id', this.voximplantCallId)
-        .single();
-      
-      if (!error && data) {
-        callSession = data;
-        console.log('Found call session by UUID:', callSession.id);
-      } else {
-        console.log('Not found by UUID, error:', error);
+      try {
+        console.log('Fetching call session by UUID from database...');
+        const { supabaseClient } = await import('../config/database.js');
+        const { data, error } = await supabaseClient
+          .from('call_sessions')
+          .select('*')
+          .eq('id', this.voximplantCallId)
+          .single();
+        
+        if (error) {
+          console.error('Database query error:', error);
+          console.error('Error code:', error.code);
+          console.error('Error message:', error.message);
+          console.error('Error details:', JSON.stringify(error, null, 2));
+        } else if (data) {
+          callSession = data;
+          console.log('✅ Found call session by UUID:', callSession.id);
+          console.log('Call session data:', JSON.stringify(callSession, null, 2));
+        } else {
+          console.log('⚠️ No data returned from database query (but no error)');
+        }
+      } catch (dbError) {
+        console.error('❌ Exception during database query:', dbError);
+        console.error('Exception stack:', dbError.stack);
       }
     }
     

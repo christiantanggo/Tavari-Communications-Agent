@@ -115,12 +115,26 @@ export class TelnyxService {
 
   // Create call session
   static async createCallSession(business_id, callData) {
-    return CallSession.create({
-      business_id,
-      voximplant_call_id: callData.telnyx_call_id, // Reusing field name for compatibility
-      caller_number: callData.caller_number,
-      status: 'ringing',
-    });
+    console.log('Creating call session for business:', business_id);
+    console.log('Call data:', JSON.stringify(callData, null, 2));
+    
+    try {
+      const session = await CallSession.create({
+        business_id,
+        voximplant_call_id: callData.telnyx_call_id, // Reusing field name for compatibility
+        caller_number: callData.caller_number,
+        status: 'ringing',
+      });
+      
+      console.log('✅ Call session created successfully:', session.id);
+      console.log('Call session data:', JSON.stringify(session, null, 2));
+      
+      return session;
+    } catch (error) {
+      console.error('❌ Failed to create call session:', error);
+      console.error('Error details:', JSON.stringify(error, null, 2));
+      throw error;
+    }
   }
 
   // Search for available phone numbers
