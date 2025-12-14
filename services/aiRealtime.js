@@ -72,20 +72,27 @@ export class AIRealtimeService {
               this.sessionConfigured = true;
               this.ws.removeListener('message', sessionCreatedHandler);
               
-              // Optionally update instructions (session already has good defaults)
+              // Update session to accept G.711 μ-law directly (no conversion needed!)
               try {
                 const sessionConfig = {
                   type: 'session.update',
                   session: {
                     instructions: this.buildSystemInstructions(),
+                    input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law at 8kHz
+                    output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
+                    modalities: ['text', 'audio'],
+                    voice: 'alloy',
+                    temperature: 0.8,
+                    max_response_output_tokens: 4096,
                   },
                 };
                 
-                console.log('Updating session instructions...');
+                console.log('🔵 Updating session to accept G.711 μ-law format...');
+                console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
                 this.ws.send(JSON.stringify(sessionConfig));
                 // Don't wait for response - proceed immediately
               } catch (error) {
-                console.warn('Could not update instructions, proceeding anyway:', error.message);
+                console.warn('Could not update session config, proceeding anyway:', error.message);
               }
               
               resolve(true);
@@ -194,20 +201,33 @@ export class AIRealtimeService {
       case 'response.audio_transcript.delta':
         if (message.delta) {
           this.transcript += message.delta;
+          console.log('🔵 OpenAI transcript delta:', message.delta);
         }
         break;
         
       case 'response.audio_transcript.done':
         this.isResponding = false;
         this.responseLock = false;
+        console.log('✅ OpenAI transcript done. Full transcript:', this.transcript);
         break;
         
       case 'response.audio.delta':
         // Audio chunks come as base64
         if (message.delta) {
+          console.log('🔵 OpenAI audio response received, size:', message.delta.length, 'bytes (base64)');
           const audioBuffer = Buffer.from(message.delta, 'base64');
           this.handleAudioOutput(audioBuffer);
         }
+        break;
+        
+      case 'response.audio.done':
+        console.log('✅ OpenAI audio response complete');
+        break;
+        
+      case 'response.done':
+        console.log('✅ OpenAI response complete');
+        this.isResponding = false;
+        this.responseLock = false;
         break;
         
       case 'session.updated':
@@ -287,31 +307,17 @@ export class AIRealtimeService {
     }
     
     try {
-      // Convert Telnyx PCMU (8kHz) to OpenAI PCM16 (24kHz)
-      let convertedAudio;
-      if (Buffer.isBuffer(audioData)) {
-        try {
-          convertedAudio = convertTelnyxToOpenAI(audioData);
-          console.log('🔵 Audio converted: PCMU 8kHz -> PCM16 24kHz');
-          console.log('🔵 Original size:', audioData.length, 'bytes, Converted size:', convertedAudio.length, 'bytes');
-        } catch (conversionError) {
-          console.error('❌ Audio conversion error:', conversionError);
-          // Fallback: try sending original (might not work, but worth trying)
-          convertedAudio = audioData;
-          console.warn('⚠️ Using original audio format (may fail)');
-        }
-      } else {
-        // Already a string (base64), use as-is
-        convertedAudio = audioData;
-      }
+      // OpenAI is configured to accept G.711 μ-law directly - no conversion needed!
+      // Just send the raw audio from Telnyx
+      let audioToSend = audioData;
       
       // Convert to base64
-      const base64Audio = Buffer.isBuffer(convertedAudio) 
-        ? convertedAudio.toString('base64')
-        : convertedAudio;
+      const base64Audio = Buffer.isBuffer(audioToSend) 
+        ? audioToSend.toString('base64')
+        : audioToSend;
       
-      const audioSize = Buffer.isBuffer(convertedAudio) ? convertedAudio.length : (typeof convertedAudio === 'string' ? convertedAudio.length : 'unknown');
-      console.log('🔵 Sending audio to OpenAI Realtime API, size:', audioSize, 'bytes, base64 length:', base64Audio.length);
+      const audioSize = Buffer.isBuffer(audioToSend) ? audioToSend.length : (typeof audioToSend === 'string' ? audioToSend.length : 'unknown');
+      console.log('🔵 Sending G.711 μ-law audio to OpenAI (no conversion needed), size:', audioSize, 'bytes, base64 length:', base64Audio.length);
       
       this.ws.send(JSON.stringify({
         type: 'input_audio_buffer.append',
