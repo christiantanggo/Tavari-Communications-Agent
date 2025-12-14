@@ -62,8 +62,8 @@ export class AIRealtimeService {
           reject(error);
         });
         
-        this.ws.on('close', () => {
-          console.log('OpenAI Realtime WebSocket closed');
+        this.ws.on('close', (code, reason) => {
+          console.log('OpenAI Realtime WebSocket closed', { code, reason: reason?.toString() });
         });
         
       } catch (error) {
@@ -101,7 +101,10 @@ export class AIRealtimeService {
         break;
         
       case 'error':
-        console.error('OpenAI Realtime error:', message);
+        console.error('OpenAI Realtime error:', JSON.stringify(message, null, 2));
+        if (message.error) {
+          console.error('Error details:', JSON.stringify(message.error, null, 2));
+        }
         break;
     }
   }

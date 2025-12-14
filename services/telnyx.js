@@ -587,10 +587,8 @@ export class TelnyxService {
         
         // Initialize call handler for audio processing
         // This will be handled when the WebSocket connects
-        const { CallHandler, setCallHandler } = await import('../services/callHandler.js');
-        const handler = new CallHandler(callSession.id, business.id);
-        await handler.initialize();
-        setCallHandler(callSession.id, handler);
+        // Note: Handler will be created when WebSocket connects in callAudio.js
+        console.log('Call handler will be initialized when WebSocket connects');
         
       } catch (error) {
         console.error('Failed to start media stream:', error.message);
