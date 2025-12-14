@@ -11,19 +11,25 @@ export const setupCallAudioWebSocket = (server) => {
   const wss = new WebSocketServer({ server });
   
   wss.on('connection', async (ws, req) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    
-    // Only handle audio streaming paths
-    if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
-      ws.close(1008, 'Invalid path');
-      return;
-    }
-    
-    const callSessionId = url.pathname.split('/')[3]; // /api/calls/{id}/audio
-    
-    console.log(`Audio WebSocket connected for call: ${callSessionId}`);
+    console.log('=== WebSocket connection received ===');
+    console.log('Request URL:', req.url);
+    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
     
     try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      console.log('Parsed URL pathname:', url.pathname);
+      
+      // Only handle audio streaming paths
+      if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
+        console.log('Invalid path, closing connection:', url.pathname);
+        ws.close(1008, 'Invalid path');
+        return;
+      }
+      
+      const callSessionId = url.pathname.split('/')[3]; // /api/calls/{id}/audio
+      console.log(`Audio WebSocket connected for call: ${callSessionId}`);
+      
+      try {
       console.log('=== WebSocket connection handler ===');
       console.log('callSessionId:', callSessionId);
       
@@ -113,9 +119,16 @@ export const setupCallAudioWebSocket = (server) => {
         console.error(`WebSocket error for call ${callSessionId}:`, error);
       });
       
-    } catch (error) {
-      console.error(`Error setting up call handler for ${callSessionId}:`, error);
-      ws.close(1011, 'Internal server error');
+      } catch (error) {
+        console.error(`Error setting up call handler for ${callSessionId}:`, error);
+        console.error('Error stack:', error.stack);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        ws.close(1011, 'Internal server error');
+      }
+    } catch (urlError) {
+      console.error('Error parsing URL or setting up WebSocket:', urlError);
+      console.error('URL error stack:', urlError.stack);
+      ws.close(1011, 'Invalid request');
     }
   });
   
