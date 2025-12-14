@@ -48,11 +48,17 @@ export class AIRealtimeService {
         this.ws.on('message', (data) => {
           try {
             const message = JSON.parse(data.toString());
+            // Log all messages for debugging
+            if (message.type === 'error' || message.type === 'error.event') {
+              console.error('OpenAI Realtime error message received:', JSON.stringify(message, null, 2));
+            }
             this.handleMessage(message);
           } catch (error) {
             // Handle binary audio data
             if (Buffer.isBuffer(data)) {
               this.handleAudioOutput(data);
+            } else {
+              console.error('Error parsing OpenAI message:', error, 'Data:', data.toString().substring(0, 200));
             }
           }
         });
@@ -105,6 +111,14 @@ export class AIRealtimeService {
         if (message.error) {
           console.error('Error details:', JSON.stringify(message.error, null, 2));
         }
+        if (message.message) {
+          console.error('Error message:', message.message);
+        }
+        if (message.code) {
+          console.error('Error code:', message.code);
+        }
+        // Log the full message object
+        console.error('Full error object:', message);
         break;
     }
   }
