@@ -121,7 +121,24 @@ export class AIRealtimeService {
         });
         
         this.ws.on('close', (code, reason) => {
-          console.log('OpenAI Realtime WebSocket closed', { code, reason: reason?.toString() });
+          const reasonStr = reason?.toString() || 'No reason provided';
+          console.log('⚠️ OpenAI Realtime WebSocket closed', { code, reason: reasonStr });
+          
+          // Log specific error codes with helpful messages
+          if (code === 3000) {
+            console.error('❌ ERROR CODE 3000: invalid_request_error');
+            console.error('❌ Possible causes:');
+            console.error('   1. API key is invalid, expired, or missing');
+            console.error('   2. API key does not have access to Realtime API (requires special access)');
+            console.error('   3. Connection URL format is incorrect');
+            console.error('   4. Model name is incorrect or not available');
+            console.error('   5. Account does not have billing enabled (Realtime API requires paid account)');
+          } else if (code === 1006) {
+            console.error('❌ ERROR CODE 1006: Abnormal closure (no close frame)');
+            console.error('❌ This usually means network/connection issue or server-side error');
+          } else if (code !== 1000) {
+            console.error(`❌ ERROR CODE ${code}: Unexpected closure`);
+          }
         });
         
       } catch (error) {
