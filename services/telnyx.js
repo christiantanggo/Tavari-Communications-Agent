@@ -351,10 +351,27 @@ export class TelnyxService {
         // Continue anyway - maybe the ID format is different
       }
       
-      const result = await this.makeAPIRequest('PATCH', `/phone_numbers/${phoneNumberId}`, {
+      // Configure webhook, connection, and messaging profile
+      const updatePayload = {
         webhook_url: webhookUrl,
         webhook_url_method: 'POST',
-      });
+      };
+      
+      // Set connection_id if available (for voice calls)
+      if (process.env.TELNYX_CONNECTION_ID) {
+        updatePayload.connection_id = process.env.TELNYX_CONNECTION_ID;
+        console.log('Setting connection_id:', process.env.TELNYX_CONNECTION_ID);
+      }
+      
+      // Set messaging_profile_id if available (for SMS/MMS)
+      if (process.env.TELNYX_MESSAGING_PROFILE_ID) {
+        updatePayload.messaging_profile_id = process.env.TELNYX_MESSAGING_PROFILE_ID;
+        console.log('Setting messaging_profile_id:', process.env.TELNYX_MESSAGING_PROFILE_ID);
+      }
+      
+      console.log('Update payload:', JSON.stringify(updatePayload, null, 2));
+      
+      const result = await this.makeAPIRequest('PATCH', `/phone_numbers/${phoneNumberId}`, updatePayload);
 
       console.log('Webhook configuration result:', JSON.stringify(result, null, 2));
 
