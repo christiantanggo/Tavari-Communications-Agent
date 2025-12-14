@@ -87,7 +87,7 @@ export class AIRealtimeService {
               type: 'session.update',
               session: {
                 instructions: this.buildSystemInstructions(),
-                input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law at 8kHz
+                input_audio_format: 'pcm16', // Convert to PCM16 at 24kHz (OpenAI requirement)
                 output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                 modalities: ['text', 'audio'],
                 voice: 'alloy',
@@ -96,7 +96,7 @@ export class AIRealtimeService {
               },
             };
             
-            console.log('🔵 Configuring session to accept G.711 μ-law format...');
+            console.log('🔵 Configuring session for PCM16 at 24kHz (will convert from G.711 μ-law)...');
             console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
             this.ws.send(JSON.stringify(sessionConfig));
           } catch (error) {
@@ -306,15 +306,43 @@ export class AIRealtimeService {
       return;
     }
     
+    // Don't send audio until session is configured
+    if (!this.sessionConfigured) {
+      // Only log first few times to avoid spam
+      if (!this._sessionWarningCount) this._sessionWarningCount = 0;
+      this._sessionWarningCount++;
+      if (this._sessionWarningCount <= 3) {
+        console.warn('⚠️ Session not configured yet, skipping audio (this is normal during startup)');
+      }
+      return;
+    }
+    
     try {
-      // OpenAI is configured to accept G.711 μ-law directly - no conversion needed!
-      // Just send the raw audio from Telnyx
-      let audioToSend = audioData;
+      // Convert Telnyx PCMU (G.711 μ-law at 8kHz) to OpenAI PCM16 (24kHz)
+      let convertedAudio;
+      if (Buffer.isBuffer(audioData)) {
+        try {
+          convertedAudio = convertTelnyxToOpenAI(audioData);
+          // Only log every 100th conversion to reduce noise
+          if (!this._conversionCount) this._conversionCount = 0;
+          this._conversionCount++;
+          if (this._conversionCount % 100 === 0) {
+            console.log(`🔵 Converted ${this._conversionCount} audio chunks: PCMU 8kHz -> PCM16 24kHz`);
+          }
+        } catch (conversionError) {
+          console.error('❌ Audio conversion error:', conversionError);
+          // Don't send invalid audio
+          return;
+        }
+      } else {
+        // Already converted or string, use as-is
+        convertedAudio = audioData;
+      }
       
       // Convert to base64
-      const base64Audio = Buffer.isBuffer(audioToSend) 
-        ? audioToSend.toString('base64')
-        : audioToSend;
+      const base64Audio = Buffer.isBuffer(convertedAudio) 
+        ? convertedAudio.toString('base64')
+        : convertedAudio;
       
       // Send audio to OpenAI (no per-chunk logging - too verbose)
       this.ws.send(JSON.stringify({
