@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { convertTelnyxToOpenAI } from '../utils/audioConverter.js';
 
 // In production (Railway), env vars are already available via process.env
 // dotenv.config() is only needed for local development
@@ -75,7 +76,7 @@ export class AIRealtimeService {
                   type: 'session.update',
                   session: {
                     instructions: this.buildSystemInstructions(),
-                    input_audio_format: 'g711_ulaw', // Telnyx sends G.711 μ-law (PCMU) - OpenAI supports this!
+                    input_audio_format: 'pcm16', // OpenAI REQUIRES PCM16 at 24kHz - we'll convert from Telnyx
                     output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                     modalities: ['text', 'audio'],
                     voice: 'alloy',
@@ -84,7 +85,7 @@ export class AIRealtimeService {
                   },
                 };
                 
-                console.log('🔵 Configuring session to accept G.711 μ-law (PCMU) from Telnyx...');
+                console.log('🔵 Configuring session for PCM16 at 24kHz (will convert from Telnyx G.711 μ-law)...');
                 console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
                 this.ws.send(JSON.stringify(sessionConfig));
               } catch (error) {
@@ -320,16 +321,24 @@ export class AIRealtimeService {
     }
     
     try {
-      // OpenAI is configured to accept G.711 μ-law (PCMU) directly from Telnyx
-      // No conversion needed - just send the raw audio
-      let audioToSend = audioData;
+      // OpenAI REQUIRES PCM16 at 24kHz - convert from Telnyx PCMU (G.711 μ-law at 8kHz)
+      let convertedAudio;
+      if (Buffer.isBuffer(audioData)) {
+        try {
+          convertedAudio = convertTelnyxToOpenAI(audioData);
+        } catch (conversionError) {
+          console.error('❌ Audio conversion error:', conversionError);
+          return; // Don't send invalid audio
+        }
+      } else {
+        console.error('❌ Audio data is not a Buffer, cannot convert');
+        return;
+      }
       
       // Convert to base64
-      const base64Audio = Buffer.isBuffer(audioToSend) 
-        ? audioToSend.toString('base64')
-        : audioToSend;
+      const base64Audio = convertedAudio.toString('base64');
       
-      // Send audio to OpenAI (no per-chunk logging - too verbose)
+      // Send audio to OpenAI
       this.ws.send(JSON.stringify({
         type: 'input_audio_buffer.append',
         audio: base64Audio,
