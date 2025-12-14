@@ -322,27 +322,49 @@ export class AIRealtimeService {
     
     try {
       // OpenAI REQUIRES PCM16 at 24kHz - convert from Telnyx PCMU (G.711 μ-law at 8kHz)
-      let convertedAudio;
-      if (Buffer.isBuffer(audioData)) {
-        try {
-          convertedAudio = convertTelnyxToOpenAI(audioData);
-        } catch (conversionError) {
-          console.error('❌ Audio conversion error:', conversionError);
-          return; // Don't send invalid audio
-        }
-      } else {
-        console.error('❌ Audio data is not a Buffer, cannot convert');
+      if (!Buffer.isBuffer(audioData)) {
+        console.error('❌ Audio data is not a Buffer, got type:', typeof audioData);
         return;
+      }
+      
+      // Log first conversion to verify it's working
+      if (!this._firstConversionLogged) {
+        console.log('🔵 Converting audio: Telnyx PCMU (G.711 μ-law) 8kHz → OpenAI PCM16 24kHz');
+        console.log('🔵 Input size:', audioData.length, 'bytes');
+        this._firstConversionLogged = true;
+      }
+      
+      let convertedAudio;
+      try {
+        convertedAudio = convertTelnyxToOpenAI(audioData);
+        if (!this._firstOutputLogged) {
+          console.log('🔵 Converted audio size:', convertedAudio.length, 'bytes (PCM16 24kHz)');
+          console.log('🔵 Expected size ratio: 6x (8kHz→24kHz, 1 byte→2 bytes)');
+          console.log('🔵 Actual ratio:', (convertedAudio.length / audioData.length).toFixed(2));
+          this._firstOutputLogged = true;
+        }
+      } catch (conversionError) {
+        console.error('❌ Audio conversion error:', conversionError);
+        console.error('Conversion error stack:', conversionError.stack);
+        return; // Don't send invalid audio
       }
       
       // Convert to base64
       const base64Audio = convertedAudio.toString('base64');
       
+      // Verify base64 is valid
+      if (!base64Audio || base64Audio.length === 0) {
+        console.error('❌ Base64 encoding produced empty string');
+        return;
+      }
+      
       // Send audio to OpenAI
-      this.ws.send(JSON.stringify({
+      const payload = {
         type: 'input_audio_buffer.append',
         audio: base64Audio,
-      }));
+      };
+      
+      this.ws.send(JSON.stringify(payload));
     } catch (error) {
       console.error('❌ Error sending audio to OpenAI:', error);
       console.error('Error stack:', error.stack);
