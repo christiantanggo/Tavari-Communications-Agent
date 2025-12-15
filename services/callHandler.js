@@ -180,10 +180,31 @@ export class CallHandler {
     this.aiService.sendAudio(audioData);
   }
   
-  // Send audio to Voximplant
+  // Send audio to Telnyx (via WebSocket)
+  // Converts OpenAI PCM16 24kHz → Telnyx PCMU 8kHz
   sendAudioToVoximplant(audioData) {
-    if (this.audioWebSocket && this.audioWebSocket.readyState === 1) {
-      this.audioWebSocket.send(audioData);
+    if (!this.audioWebSocket || this.audioWebSocket.readyState !== 1) {
+      console.warn('⚠️ Audio WebSocket not ready, cannot send audio to Telnyx');
+      return;
+    }
+    
+    try {
+      // Convert OpenAI PCM16 24kHz → Telnyx PCMU 8kHz
+      const { convertOpenAIToTelnyx } = await import('../utils/audioConverter.js');
+      const telnyxAudio = convertOpenAIToTelnyx(audioData);
+      
+      // Log first conversion to verify it's working
+      if (!this._firstOutputConversionLogged) {
+        console.log('🔵 Converting audio: OpenAI PCM16 24kHz → Telnyx PCMU 8kHz');
+        console.log('🔵 Input size:', audioData.length, 'bytes (PCM16 24kHz)');
+        console.log('🔵 Output size:', telnyxAudio.length, 'bytes (PCMU 8kHz)');
+        this._firstOutputConversionLogged = true;
+      }
+      
+      this.audioWebSocket.send(telnyxAudio);
+    } catch (error) {
+      console.error('❌ Error converting/sending audio to Telnyx:', error);
+      console.error('Error stack:', error.stack);
     }
   }
   

@@ -80,3 +80,82 @@ export function convertTelnyxToOpenAI(telnyxAudio) {
   }
 }
 
+/**
+ * Encode linear PCM16 to G.711 μ-law (PCMU)
+ * @param {Buffer} pcm16Buffer - Input linear PCM16 buffer
+ * @returns {Buffer} - μ-law encoded buffer
+ */
+export function encodeMulaw(pcm16Buffer) {
+  const mulawBuffer = Buffer.allocUnsafe(pcm16Buffer.length / 2);
+  for (let i = 0; i < mulawBuffer.length; i++) {
+    const sample = pcm16Buffer.readInt16LE(i * 2);
+    let sign = sample < 0 ? 0x80 : 0x00;
+    let magnitude = Math.abs(sample);
+    
+    // Clamp to 16-bit range
+    if (magnitude > 32635) magnitude = 32635;
+    
+    // Add bias
+    magnitude += 33;
+    
+    // Find exponent (0-7)
+    let exponent = 7;
+    for (let exp = 0; exp < 8; exp++) {
+      if (magnitude <= (0x1F << (exp + 2))) {
+        exponent = exp;
+        break;
+      }
+    }
+    
+    // Calculate mantissa (4 bits)
+    let mantissa = (magnitude >> (exponent + 3)) & 0x0F;
+    
+    // Combine into μ-law byte
+    mulawBuffer[i] = ~(sign | (exponent << 4) | mantissa);
+  }
+  return mulawBuffer;
+}
+
+/**
+ * Simple linear resampling from 24kHz to 8kHz (3x downsampling)
+ * Uses simple decimation (takes every 3rd sample)
+ * @param {Buffer} inputBuffer - Input PCM16 buffer at 24kHz
+ * @returns {Buffer} - Resampled PCM16 buffer at 8kHz
+ */
+export function resample24kTo8k(inputBuffer) {
+  // 3x downsampling: 24kHz -> 8kHz
+  const inputSamples = inputBuffer.length / 2; // 16-bit samples
+  const outputSamples = Math.floor(inputSamples / 3);
+  const outputBuffer = Buffer.allocUnsafe(outputSamples * 2);
+  
+  for (let i = 0; i < outputSamples; i++) {
+    const srcIndex = i * 3;
+    if (srcIndex < inputSamples) {
+      const sample = inputBuffer.readInt16LE(srcIndex * 2);
+      outputBuffer.writeInt16LE(sample, i * 2);
+    }
+  }
+  
+  return outputBuffer;
+}
+
+/**
+ * Convert OpenAI PCM16 audio to Telnyx PCMU format
+ * @param {Buffer} openAIAudio - OpenAI audio buffer (PCM16 at 24kHz)
+ * @returns {Buffer} - Telnyx-compatible audio buffer (PCMU at 8kHz)
+ */
+export function convertOpenAIToTelnyx(openAIAudio) {
+  try {
+    // Step 1: Resample from 24kHz to 8kHz
+    const pcm16_8k = resample24kTo8k(openAIAudio);
+    
+    // Step 2: Encode linear PCM16 to μ-law (PCMU)
+    const pcmu_8k = encodeMulaw(pcm16_8k);
+    
+    return pcmu_8k;
+  } catch (error) {
+    console.error('Error converting OpenAI audio to Telnyx format:', error);
+    throw error;
+  }
+}
+
