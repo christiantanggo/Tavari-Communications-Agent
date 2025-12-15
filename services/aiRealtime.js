@@ -105,19 +105,30 @@ export class AIRealtimeService {
               this.sessionConfigured = true;
               this.ws.removeListener('message', sessionReadyHandler);
               
-              // Send initial greeting to trigger AI to speak
-              // This helps ensure the AI is ready and will respond immediately
+              // Send initial greeting immediately - AI should greet the caller right away
               setTimeout(() => {
                 try {
-                  process.stdout.write(`\n🔵 SENDING INITIAL GREETING TRIGGER TO OPENAI\n`);
-                  console.log('🔵 Sending response.create to trigger initial greeting...');
-                  const greetingTrigger = { type: 'response.create' };
-                  console.log('🔵 Greeting trigger payload:', JSON.stringify(greetingTrigger));
-                  this.ws.send(JSON.stringify(greetingTrigger));
-                  process.stdout.write(`\n✅ INITIAL GREETING TRIGGER SENT\n`);
+                  const greetingText = this.agentConfig?.greeting_text || 'Hello! Thank you for calling. How can I help you today?';
+                  
+                  process.stdout.write(`\n🔵 SENDING INITIAL GREETING TO OPENAI: "${greetingText}"\n`);
+                  console.log('🔵 Sending initial greeting response...');
+                  console.log('🔵 Greeting text:', greetingText);
+                  
+                  // Create response with explicit greeting instructions
+                  // This ensures the AI speaks the greeting immediately when answering
+                  const greetingResponse = {
+                    type: 'response.create',
+                    response: {
+                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. Do not wait - greet them right now.`,
+                    },
+                  };
+                  
+                  console.log('🔵 Greeting response payload:', JSON.stringify(greetingResponse, null, 2));
+                  this.ws.send(JSON.stringify(greetingResponse));
+                  process.stdout.write(`\n✅ INITIAL GREETING SENT TO OPENAI\n`);
                 } catch (error) {
-                  process.stdout.write(`\n❌ ERROR SENDING GREETING TRIGGER\n`);
-                  console.error('❌ Error sending initial greeting trigger:', error);
+                  process.stdout.write(`\n❌ ERROR SENDING INITIAL GREETING\n`);
+                  console.error('❌ Error sending initial greeting:', error);
                   console.error('Error stack:', error.stack);
                 }
               }, 1000); // Wait 1 second after session is configured to ensure it's ready
@@ -362,10 +373,13 @@ export class AIRealtimeService {
   buildSystemInstructions() {
     const { greeting_text, faqs, business_hours, message_settings } = this.agentConfig;
     
-    let instructions = `You are a helpful AI phone assistant. `;
+    let instructions = `You are a helpful AI phone assistant answering calls for a business. `;
     
+    // Make greeting instruction more explicit and urgent
     if (greeting_text) {
-      instructions += `Start with this greeting: "${greeting_text}" `;
+      instructions += `\n\nIMPORTANT: When you first start speaking (when the call is answered), you MUST immediately greet the caller with this exact greeting: "${greeting_text}". Do not wait for the caller to speak first - you are answering the phone, so greet them immediately. `;
+    } else {
+      instructions += `\n\nIMPORTANT: When you first start speaking (when the call is answered), you MUST immediately greet the caller. Do not wait for the caller to speak first - you are answering the phone, so greet them immediately. `;
     }
     
     instructions += `\n\nBusiness hours: ${JSON.stringify(business_hours)}`;
