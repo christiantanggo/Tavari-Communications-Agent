@@ -145,21 +145,61 @@ router.post('/webhook', async (req, res) => {
         
         if (callControlId) {
           // Start streaming after call is answered
-          // This will find the call session and start streaming with the correct session ID
-          process.stdout.write(`\n🔵 [${requestId}] Calling TelnyxService.startMediaStream()...\n`);
+          // NOTE: Session might not exist yet if call.answered arrives before handleCallStart completes
+          // So we'll retry with exponential backoff, or create the session if it doesn't exist
+          process.stdout.write(`\n🔵 [${requestId}] Attempting to start media stream...\n`);
           console.log(`[${requestId}] Starting media stream for call_control_id:`, callControlId);
           
-          try {
-            await TelnyxService.startMediaStream(callControlId);
-            process.stdout.write(`\n✅ [${requestId}] Media stream started successfully\n`);
-            console.log(`[${requestId}] ✅ Media stream started successfully`);
-          } catch (error) {
-            process.stdout.write(`\n❌ [${requestId}] Failed to start media stream\n`);
-            console.error(`[${requestId}] ❌ Failed to start media stream after call.answered:`, error);
-            console.error(`[${requestId}] Error message:`, error.message);
-            console.error(`[${requestId}] Error stack:`, error.stack);
-            console.error(`[${requestId}] Error response:`, error.response?.data || error.response || 'No response data');
-            // Don't throw - still return 200 to Telnyx, but log the error
+          let retries = 0;
+          const maxRetries = 5;
+          let success = false;
+          
+          while (retries < maxRetries && !success) {
+            try {
+              await TelnyxService.startMediaStream(callControlId);
+              process.stdout.write(`\n✅ [${requestId}] Media stream started successfully\n`);
+              console.log(`[${requestId}] ✅ Media stream started successfully`);
+              success = true;
+            } catch (error) {
+              if (error.message?.includes('Call session not found')) {
+                // Session doesn't exist yet - wait and retry, or create it
+                retries++;
+                if (retries < maxRetries) {
+                  const waitTime = Math.min(1000 * Math.pow(2, retries - 1), 5000); // Exponential backoff, max 5s
+                  process.stdout.write(`\n⚠️ [${requestId}] Session not found, retrying in ${waitTime}ms (attempt ${retries}/${maxRetries})...\n`);
+                  console.log(`[${requestId}] ⚠️ Session not found, waiting ${waitTime}ms before retry ${retries}/${maxRetries}`);
+                  await new Promise(resolve => setTimeout(resolve, waitTime));
+                } else {
+                  // Last retry failed - try to create the session now
+                  process.stdout.write(`\n⚠️ [${requestId}] Session still not found after ${maxRetries} retries, creating session now...\n`);
+                  console.log(`[${requestId}] ⚠️ Session still not found, creating it now...`);
+                  try {
+                    const result = await TelnyxService.handleCallStart(callData, callControlId);
+                    process.stdout.write(`\n✅ [${requestId}] Session created: ${result.callSession?.id}\n`);
+                    console.log(`[${requestId}] ✅ Session created:`, result.callSession?.id);
+                    // Now try starting the stream again
+                    await TelnyxService.startMediaStream(callControlId);
+                    process.stdout.write(`\n✅ [${requestId}] Media stream started successfully after creating session\n`);
+                    console.log(`[${requestId}] ✅ Media stream started successfully`);
+                    success = true;
+                  } catch (createError) {
+                    process.stdout.write(`\n❌ [${requestId}] Failed to create session and start stream\n`);
+                    console.error(`[${requestId}] ❌ Failed to create session:`, createError.message);
+                    // Fall through to error handling
+                  }
+                }
+              } else {
+                // Different error - don't retry
+                process.stdout.write(`\n❌ [${requestId}] Failed to start media stream: ${error.message}\n`);
+                console.error(`[${requestId}] ❌ Failed to start media stream:`, error.message);
+                break;
+              }
+            }
+          }
+          
+          if (!success) {
+            process.stdout.write(`\n❌ [${requestId}] Failed to start media stream after ${maxRetries} retries\n`);
+            console.error(`[${requestId}] ❌ Failed to start media stream after all retries`);
           }
         } else {
           console.error(`[${requestId}] ❌ No callControlId found in call.answered event`);
