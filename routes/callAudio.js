@@ -194,8 +194,11 @@ export const setupCallAudioWebSocket = (server) => {
       
       ws.on('message', async (data) => {
         audioChunkCount++;
-        if (audioChunkCount % 100 === 0) {
-          console.log(`[${connectionId}] 📥 Received ${audioChunkCount} audio chunks (handler ready: ${!!handler}, AI ready: ${handler?.aiService?.ws?.readyState === 1})`);
+        
+        // CRITICAL: Log EVERY audio chunk to confirm continuous streaming
+        if (audioChunkCount <= 10 || audioChunkCount % 50 === 0) {
+          process.stdout.write(`\n🎧 AUDIO RECEIVED #${audioChunkCount} (size: ${data.length} bytes)\n`);
+          console.log(`[${connectionId}] 🎧 AUDIO RECEIVED #${audioChunkCount} (size: ${data.length} bytes, handler ready: ${!!handler}, AI ready: ${handler?.aiService?.ws?.readyState === 1})`);
         }
         
         if (handler && handler.aiService && handler.aiService.ws && handler.aiService.ws.readyState === 1) {

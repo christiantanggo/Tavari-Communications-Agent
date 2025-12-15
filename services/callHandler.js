@@ -166,6 +166,15 @@ export class CallHandler {
   
   // Handle incoming audio from Telnyx
   handleIncomingAudio(audioData) {
+    // CRITICAL: Log to confirm continuous audio processing
+    if (!this._audioProcessCount) this._audioProcessCount = 0;
+    this._audioProcessCount++;
+    
+    if (this._audioProcessCount <= 10 || this._audioProcessCount % 100 === 0) {
+      process.stdout.write(`\n🎧 PROCESSING AUDIO #${this._audioProcessCount} (size: ${audioData.length} bytes)\n`);
+      console.log(`🎧 Processing audio chunk #${this._audioProcessCount} (size: ${audioData.length} bytes)`);
+    }
+    
     if (!this.aiService) {
       console.warn('⚠️ AI service not initialized, cannot send audio to OpenAI');
       return;
@@ -177,7 +186,7 @@ export class CallHandler {
       return;
     }
     
-    // Send audio to OpenAI (no logging per chunk - too verbose)
+    // Send audio to OpenAI continuously (this should never stop)
     this.aiService.sendAudio(audioData);
   }
   

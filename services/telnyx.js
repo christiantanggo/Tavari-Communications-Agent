@@ -664,6 +664,14 @@ export class TelnyxService {
       console.log('⚠️  IMPORTANT: Telnyx should now connect to WebSocket URL:', streamUrl);
       console.log('⚠️  If you don\'t see WebSocket connection logs, Telnyx cannot reach the WebSocket server');
       
+      // CRITICAL: This stream must stay open continuously for bidirectional audio
+      // DO NOT call streaming_stop - the stream should remain open for the entire call
+      // The WebSocket will handle continuous audio in both directions:
+      // - Inbound: User speaks → Telnyx → WebSocket → OpenAI
+      // - Outbound: OpenAI → WebSocket → Telnyx → User hears
+      console.log('⚠️  CRITICAL: Media stream must stay open continuously - do not stop it');
+      console.log('⚠️  The stream will handle all audio bidirectionally until the call ends');
+      
       // Call handler will be initialized when WebSocket connects in callAudio.js
       console.log('Call handler will be initialized when WebSocket connects');
       

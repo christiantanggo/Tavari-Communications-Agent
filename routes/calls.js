@@ -93,30 +93,14 @@ router.post('/webhook', async (req, res) => {
           return;
         }
         
-        // STEP 2: Test audio with speak (to confirm audio works)
-        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Testing audio with speak...\n`);
-        console.log(`[${requestId}] STEP 2: Testing audio with speak action`);
-        try {
-          const encodedCallControlId = encodeURIComponent(callControlId);
-          const speakResponse = await TelnyxService.makeAPIRequest('POST', `/calls/${encodedCallControlId}/actions/speak`, {
-            payload: "Hello, this is Tavari AI. Can you hear me?",
-            voice: 'female',
-            language: 'en-US'
-          });
-          process.stdout.write(`\n✅ [${requestId}] STEP 2 COMPLETE: Speak test sent\n`);
-          console.log(`[${requestId}] ✅ Speak test sent:`, JSON.stringify(speakResponse, null, 2));
-        } catch (speakError) {
-          process.stdout.write(`\n⚠️ [${requestId}] WARNING: Speak test failed (non-critical)\n`);
-          console.warn(`[${requestId}] ⚠️ Speak test failed:`, speakError.message);
-          // Don't fail the whole webhook if speak fails
-        }
-        
-        // STEP 3: Create call session and handle business logic
-        process.stdout.write(`\n🔵 [${requestId}] STEP 3: Creating call session...\n`);
-        console.log(`[${requestId}] STEP 3: Creating call session and handling business logic`);
+        // STEP 2: Create call session and handle business logic (BEFORE starting stream)
+        // NOTE: We removed the speak test because it interferes with bidirectional media streaming
+        // The AI will greet via the media stream instead
+        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Creating call session...\n`);
+        console.log(`[${requestId}] STEP 2: Creating call session and handling business logic`);
         try {
           const result = await TelnyxService.handleCallStart(callData, callControlId);
-          process.stdout.write(`\n✅ [${requestId}] STEP 3 COMPLETE: Call session created: ${result.callSession?.id}\n`);
+          process.stdout.write(`\n✅ [${requestId}] STEP 2 COMPLETE: Call session created: ${result.callSession?.id}\n`);
           console.log(`[${requestId}] ✅ Call session created:`, result.callSession?.id);
           console.log(`[${requestId}] ✅ Waiting for call.answered event to start streaming...`);
         } catch (sessionError) {
