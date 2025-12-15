@@ -1,139 +1,439 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import dotenv from 'dotenv';
-import rateLimit from 'express-rate-limit';
-import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
-import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
-import authRoutes from './routes/auth.js';
-import callRoutes from './routes/calls.js';
-import agentRoutes from './routes/agents.js';
-import messageRoutes from './routes/messages.js';
-import usageRoutes from './routes/usage.js';
-import setupRoutes from './routes/setup.js';
-import billingRoutes from './routes/billing.js';
-import phoneNumberRoutes from './routes/phoneNumbers.js';
-import telnyxPhoneNumberRoutes from './routes/telnyxPhoneNumbers.js';
-import { setupCallAudioWebSocket } from './routes/callAudio.js';
-import logger from './utils/logger.js';
+// server.js
+// Tavari Voice Agent - Telnyx Media Streaming (bidirectional) + OpenAI Realtime (g711_ulaw)
 
-console.log('✅ All routes imported successfully');
+import express from "express";
+import axios from "axios";
+import dotenv from "dotenv";
+import http from "http";
+import WebSocket, { WebSocketServer } from "ws";
+import { URL } from "url";
 
-// Load environment variables
 dotenv.config();
 
-// Debug: Check if database config loads
-console.log('✅ Environment variables loaded');
-console.log('✅ SUPABASE_URL:', process.env.SUPABASE_URL ? 'SET' : 'NOT SET');
-console.log('✅ SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'NOT SET');
+const PORT = Number(process.env.PORT || 5001);
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+
+// IMPORTANT: set this in Railway as either:
+//   tavari-voice-agent-server-production.up.railway.app
+// or
+//   https://tavari-voice-agent-server-production.up.railway.app
+const RAILWAY_PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN;
+
+if (!OPENAI_API_KEY || !TELNYX_API_KEY) {
+  console.error("❌ Missing required env vars: OPENAI_API_KEY, TELNYX_API_KEY");
+  process.exit(1);
+}
+
+function normalizeHttpsBase(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function httpsToWss(url) {
+  return url.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://");
+}
+
+const PUBLIC_HTTPS_BASE = normalizeHttpsBase(RAILWAY_PUBLIC_DOMAIN) || `http://localhost:${PORT}`;
+const PUBLIC_WSS_BASE = httpsToWss(PUBLIC_HTTPS_BASE);
 
 const app = express();
-const PORT = process.env.PORT || 5001;
-console.log('✅ Express app created, PORT:', PORT);
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-// Trust proxy (needed for Railway and rate limiting)
-app.set('trust proxy', 1);
-
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: [
-    'https://tavarios.com',
-    'https://www.tavarios.com',
-    'http://localhost:3000',
-    'http://localhost:3001'
-  ],
-  credentials: true
-}));
-// Log all incoming requests (for debugging)
-app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  process.stdout.write(`\n📥 [${timestamp}] ${req.method} ${req.url}\n`);
-  console.log(`📥 [${timestamp}] ${req.method} ${req.url}`);
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-});
-app.use('/api/', limiter);
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
+app.get("/health", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
+    service: "tavari-voice-agent",
   });
 });
 
-// API routes
-app.get('/api', (req, res) => {
-  res.json({ message: 'Tavari AI Phone Agent API' });
-});
+// callId -> session
+// session: { callControlId, openaiWs, telnyxWs, streamId, ready }
+const sessions = new Map();
 
-// Route handlers
-app.use('/api/auth', authRoutes);
-app.use('/api/calls', callRoutes);
-app.use('/api/agents', agentRoutes);
-app.use('/api/messages', messageRoutes);
-app.use('/api/usage', usageRoutes);
-app.use('/api/setup', setupRoutes);
-app.use('/api/billing', billingRoutes);
-app.use('/api/phone-numbers', phoneNumberRoutes);
-app.use('/api/telnyx-phone-numbers', telnyxPhoneNumberRoutes);
+/**
+ * TELNYX WEBHOOK
+ */
+app.post("/webhook", async (req, res) => {
+  try {
+    // Telnyx sends { data: { event_type, payload } } (common format)
+    const data = req.body?.data;
+    const eventType = data?.event_type;
+    const payload = data?.payload || data?.data?.payload || data?.payload;
 
-// Create HTTP server
-const server = createServer(app);
+    const callControlId = payload?.call_control_id;
+    const callSessionId = payload?.call_session_id;
+    const callId = callControlId || callSessionId;
 
-// Setup call audio WebSocket server
-setupCallAudioWebSocket(server);
+    console.log(`📞 Telnyx event: ${eventType} for call ${callId}`);
 
-// Error handling middleware (must be last)
-app.use(notFoundHandler);
-app.use(errorHandler);
+    // Always 200 to Telnyx
+    res.status(200).send("OK");
 
-// Start server
-console.log('🔵 About to start server on port:', PORT);
-server.listen(PORT, () => {
-  console.log(`🚀 Tavari AI Phone Agent server running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/health`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`🚀 Tavari AI Phone Agent server running on port ${PORT}`);
-  logger.info(`📍 Health check: http://localhost:${PORT}/health`);
-  logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-}).on('error', (error) => {
-  console.error('❌ Server error:', error);
-  logger.error('Server error:', error);
-  if (error.code === 'EADDRINUSE') {
-    logger.error(`Port ${PORT} is already in use. Please stop the other process or change the PORT in .env`);
+    if (!callId) return;
+
+    switch (eventType) {
+      case "call.initiated":
+        await handleCallInitiated(payload, callId);
+        break;
+
+      case "call.answered":
+        await handleCallAnswered(payload, callId);
+        break;
+
+      case "call.hangup":
+      case "call.bridged":
+      case "call.ended":
+        await handleCallHangup(callId);
+        break;
+
+      default:
+        break;
+    }
+  } catch (err) {
+    console.error("❌ Error handling webhook:", err?.response?.data || err);
+    // still respond 200 already attempted; nothing else to do
   }
-  process.exit(1);
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+async function handleCallInitiated(payload, callId) {
+  const callControlId = payload?.call_control_id;
+  if (!callControlId) return;
+
+  console.log(`📞 Call initiated: ${callControlId}`);
+
+  // Create/update session
+  sessions.set(callId, {
+    callControlId,
+    openaiWs: null,
+    telnyxWs: null,
+    streamId: null,
+    ready: false,
+  });
+
+  // Answer immediately
+  await telnyxAnswer(callControlId);
+
+  // Start OpenAI session now
+  await startOpenAIRealtime(callId);
+}
+
+async function handleCallAnswered(payload, callId) {
+  const callControlId = payload?.call_control_id;
+  if (!callControlId) return;
+
+  console.log(`✅ Call answered: ${callControlId}`);
+
+  // Ensure session exists
+  if (!sessions.has(callId)) {
+    sessions.set(callId, {
+      callControlId,
+      openaiWs: null,
+      telnyxWs: null,
+      streamId: null,
+      ready: false,
+    });
+  }
+
+  // Start media stream (bidirectional) once OpenAI is connected (or start now; Telnyx will connect anyway)
+  await startTelnyxBidirectionalMediaStream(callId, callControlId);
+}
+
+async function handleCallHangup(callId) {
+  console.log(`📴 Call hangup: ${callId}`);
+  const s = sessions.get(callId);
+  if (!s) return;
+
+  try {
+    if (s.telnyxWs && s.telnyxWs.readyState === WebSocket.OPEN) s.telnyxWs.close();
+  } catch {}
+  try {
+    if (s.openaiWs && s.openaiWs.readyState === WebSocket.OPEN) s.openaiWs.close();
+  } catch {}
+
+  sessions.delete(callId);
+  console.log(`🗑️  Removed session for ${callId}`);
+}
+
+/**
+ * TELNYX API HELPERS
+ */
+async function telnyxAnswer(callControlId) {
+  await axios.post(
+    `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`,
+    {},
+    { headers: telnyxHeaders() }
+  );
+  console.log(`✅ Call answered: ${callControlId}`);
+}
+
+function telnyxHeaders() {
+  return {
+    Authorization: `Bearer ${TELNYX_API_KEY}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+}
+
+async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
+  // Telnyx will open a WebSocket to THIS URL:
+  const streamUrl = `${PUBLIC_WSS_BASE}/media-stream-ws?call_id=${encodeURIComponent(callId)}`;
+
+  console.log(`🚀 Starting Telnyx media streaming (bidirectional)`);
+  console.log(`🚀 Using media stream URL: ${streamUrl}`);
+
+  try {
+    await axios.post(
+      `https://api.telnyx.com/v2/calls/${callControlId}/actions/streaming_start`,
+      {
+        stream_url: streamUrl,
+        stream_track: "both_tracks",
+        // Bidirectional RTP (per Telnyx docs)
+        stream_bidirectional_mode: "rtp",
+        // Use PCMU (G.711 ulaw) to match OpenAI g711_ulaw
+        stream_bidirectional_codec: "PCMU",
+      },
+      { headers: telnyxHeaders() }
+    );
+
+    console.log(`🎵 Media streaming started: ${callControlId}`);
+  } catch (err) {
+    console.error(
+      "❌ Telnyx streaming_start error:",
+      err?.response?.status,
+      err?.response?.data || err?.message
+    );
+  }
+}
+
+/**
+ * OPENAI REALTIME (WebSocket) — g711_ulaw in/out
+ */
+async function startOpenAIRealtime(callId) {
+  console.log(`🤖 Starting OpenAI Realtime session for ${callId}...`);
+
+  const ws = new WebSocket(
+    "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
+    {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "OpenAI-Beta": "realtime=v1",
+      },
+    }
+  );
+
+  const s = sessions.get(callId) || {
+    callControlId: null,
+    openaiWs: null,
+    telnyxWs: null,
+    streamId: null,
+    ready: false,
+  };
+  s.openaiWs = ws;
+  sessions.set(callId, s);
+
+  ws.on("open", () => {
+    console.log(`✅ OpenAI Realtime WebSocket connected for ${callId}`);
+
+    // Configure session for ulaw
+    ws.send(
+      JSON.stringify({
+        type: "session.update",
+        session: {
+          modalities: ["audio", "text"],
+          instructions:
+            "You are Tavari's phone receptionist. Be concise, friendly, and ask one question at a time.",
+          voice: "alloy",
+          input_audio_format: "g711_ulaw",
+          output_audio_format: "g711_ulaw",
+          input_audio_transcription: { model: "whisper-1" },
+          turn_detection: {
+            type: "server_vad",
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 500,
+          },
+          temperature: 0.7,
+          max_response_output_tokens: 800,
+        },
+      })
+    );
+
+    s.ready = true;
+    sessions.set(callId, s);
+
+    // Make the AI speak FIRST (audio)
+    ws.send(
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["audio", "text"],
+          instructions: "Hello! Thanks for calling Tavari. How can I help you today?",
+        },
+      })
+    );
+
+    console.log(`🎤 Sent greeting for ${callId}`);
+  });
+
+  ws.on("message", (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+
+    // Audio from OpenAI -> send to Telnyx WS
+    if (msg.type === "response.audio.delta" && msg.delta) {
+      const session = sessions.get(callId);
+      const telnyxWs = session?.telnyxWs;
+
+      if (telnyxWs && telnyxWs.readyState === WebSocket.OPEN) {
+        telnyxWs.send(
+          JSON.stringify({
+            event: "media",
+            media: { payload: msg.delta },
+          })
+        );
+      }
+      return;
+    }
+
+    if (msg.type === "error") {
+      console.error(`❌ OpenAI error for ${callId}:`, msg);
+    }
+  });
+
+  ws.on("close", () => {
+    console.log(`🔌 OpenAI WebSocket closed for ${callId}`);
+  });
+
+  ws.on("error", (e) => {
+    console.error(`❌ OpenAI WebSocket error for ${callId}:`, e?.message || e);
+  });
+}
+
+/**
+ * TELNYX MEDIA STREAM WEBSOCKET ENDPOINT
+ * Telnyx connects to wss://YOUR_DOMAIN/media-stream-ws?call_id=...
+ * We receive JSON:
+ *  - { event: "connected" }
+ *  - { event: "start", start: {...}, stream_id: "...", ... }
+ *  - { event: "media", media: { payload: "base64 RTP payload" } }
+ *  - { event: "stop" }
+ */
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: "/media-stream-ws" });
+
+wss.on("connection", (socket, req) => {
+  console.log("🔌 Telnyx WebSocket connection established");
+  console.log(`🔍 WebSocket URL: ${req.url}`);
+
+  const url = new URL(req.url, "http://localhost");
+  const callId = url.searchParams.get("call_id");
+
+  console.log(`🔍 Extracted call_id from URL: ${callId}`);
+
+  if (!callId) {
+    console.error("❌ Missing call_id in WebSocket URL, closing");
+    socket.close();
+    return;
+  }
+
+  // Attach ws to session
+  const s = sessions.get(callId) || {
+    callControlId: null,
+    openaiWs: null,
+    telnyxWs: null,
+    streamId: null,
+    ready: false,
+  };
+  s.telnyxWs = socket;
+  sessions.set(callId, s);
+
+  console.log(`🎵 Telnyx media stream WebSocket connected (call: ${callId})`);
+
+  socket.on("message", (data) => {
+    // Telnyx sends JSON text frames (not binary) for media streaming
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+
+    const event = msg.event;
+
+    if (event === "start") {
+      s.streamId = msg.stream_id;
+      sessions.set(callId, s);
+      return;
+    }
+
+    if (event === "media" && msg.media?.payload) {
+      // Forward inbound audio to OpenAI
+      const session = sessions.get(callId);
+      const openaiWs = session?.openaiWs;
+
+      if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.send(
+          JSON.stringify({
+            type: "input_audio_buffer.append",
+            audio: msg.media.payload, // already base64
+          })
+        );
+      }
+      return;
+    }
+
+    if (event === "stop") {
+      console.log(`🛑 Telnyx stop event for ${callId}`);
+    }
+  });
+
+  socket.on("close", () => {
+    console.log(`🔌 Telnyx WebSocket closed (call: ${callId})`);
+    const session = sessions.get(callId);
+    if (session && session.telnyxWs === socket) session.telnyxWs = null;
+  });
+
+  socket.on("error", (e) => {
+    console.error(`❌ Telnyx WebSocket error (call: ${callId}):`, e?.message || e);
+  });
 });
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
-  process.exit(1);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Tavari Voice Agent server running on port ${PORT}`);
+  console.log(`🔧 Environment: RAILWAY_PUBLIC_DOMAIN=${RAILWAY_PUBLIC_DOMAIN || "(not set)"}`);
+  console.log(`📞 Webhook: POST ${PUBLIC_HTTPS_BASE}/webhook`);
+  console.log(`🎵 Media stream WebSocket: ${PUBLIC_WSS_BASE}/media-stream-ws`);
+  console.log(`❤️  Health check: GET ${PUBLIC_HTTPS_BASE}/health`);
+  console.log("\n✅ Ready to receive calls!");
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+function shutdown() {
+  console.log("🛑 Shutting down...");
+  sessions.forEach((s) => {
+    try {
+      if (s.telnyxWs && s.telnyxWs.readyState === WebSocket.OPEN) s.telnyxWs.close();
+    } catch {}
+    try {
+      if (s.openaiWs && s.openaiWs.readyState === WebSocket.OPEN) s.openaiWs.close();
+    } catch {}
   });
-});
+  process.exit(0);
+}
 
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
