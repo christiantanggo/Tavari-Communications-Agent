@@ -12,7 +12,9 @@
     "dev": "node --watch server.js",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "auto-commit": "node -e \"require('child_process').execSync('git add -A && git commit -m \\\"Auto-commit: Update files\\\" && git push origin main', {stdio: 'inherit'})\"",
+    "deploy": "npm run auto-commit"
   },
   "keywords": [
     "ai",
