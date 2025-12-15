@@ -67,31 +67,65 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Call initiated, call_control_id:`, callControlId);
         console.log(`[${requestId}] Webhook payload:`, JSON.stringify(req.body, null, 2));
         
-        // Handle call start (this will answer the call via API)
-        // Streaming will be started when call.answered event is received
-        process.stdout.write(`\n🔵 [${requestId}] Calling TelnyxService.handleCallStart()...\n`);
-        console.log(`[${requestId}] Calling TelnyxService.handleCallStart()...`);
+        if (!callControlId) {
+          process.stdout.write(`\n❌ [${requestId}] CRITICAL: No call_control_id found! Cannot answer call.\n`);
+          console.error(`[${requestId}] ❌ CRITICAL: No call_control_id found in webhook payload`);
+          res.status(200).json({ status: 'error', message: 'No call_control_id' });
+          return;
+        }
+        
+        // STEP 1: Answer the call IMMEDIATELY
+        process.stdout.write(`\n🔵 [${requestId}] STEP 1: Answering call IMMEDIATELY...\n`);
+        console.log(`[${requestId}] STEP 1: Answering call via POST /calls/${callControlId}/actions/answer`);
+        try {
+          const encodedCallControlId = encodeURIComponent(callControlId);
+          const answerResponse = await TelnyxService.makeAPIRequest('POST', `/calls/${encodedCallControlId}/actions/answer`, {});
+          process.stdout.write(`\n✅ [${requestId}] STEP 1 COMPLETE: Call answered successfully\n`);
+          console.log(`[${requestId}] ✅ Call answered successfully:`, JSON.stringify(answerResponse, null, 2));
+        } catch (answerError) {
+          process.stdout.write(`\n❌ [${requestId}] CRITICAL ERROR: Failed to answer call\n`);
+          process.stdout.write(`❌ [${requestId}] Error: ${answerError.message}\n`);
+          console.error(`[${requestId}] ❌ CRITICAL ERROR: Failed to answer call`);
+          console.error(`[${requestId}] Error message:`, answerError.message);
+          console.error(`[${requestId}] Error response:`, answerError.response?.data || answerError.response || 'No response data');
+          // Still return 200 to acknowledge webhook, but log the error
+          res.status(200).json({ status: 'error', message: answerError.message });
+          return;
+        }
+        
+        // STEP 2: Test audio with speak (to confirm audio works)
+        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Testing audio with speak...\n`);
+        console.log(`[${requestId}] STEP 2: Testing audio with speak action`);
+        try {
+          const encodedCallControlId = encodeURIComponent(callControlId);
+          const speakResponse = await TelnyxService.makeAPIRequest('POST', `/calls/${encodedCallControlId}/actions/speak`, {
+            payload: "Hello, this is Tavari AI. Can you hear me?",
+            voice: 'female',
+            language: 'en-US'
+          });
+          process.stdout.write(`\n✅ [${requestId}] STEP 2 COMPLETE: Speak test sent\n`);
+          console.log(`[${requestId}] ✅ Speak test sent:`, JSON.stringify(speakResponse, null, 2));
+        } catch (speakError) {
+          process.stdout.write(`\n⚠️ [${requestId}] WARNING: Speak test failed (non-critical)\n`);
+          console.warn(`[${requestId}] ⚠️ Speak test failed:`, speakError.message);
+          // Don't fail the whole webhook if speak fails
+        }
+        
+        // STEP 3: Create call session and handle business logic
+        process.stdout.write(`\n🔵 [${requestId}] STEP 3: Creating call session...\n`);
+        console.log(`[${requestId}] STEP 3: Creating call session and handling business logic`);
         try {
           const result = await TelnyxService.handleCallStart(callData, callControlId);
-          process.stdout.write(`\n✅ [${requestId}] TelnyxService.handleCallStart() completed\n`);
-          console.log(`[${requestId}] TelnyxService.handleCallStart() completed`);
-          console.log(`[${requestId}] Result:`, JSON.stringify(result, null, 2));
-          process.stdout.write(`\n✅ [${requestId}] Call session created: ${result.callSession?.id}\n`);
-          process.stdout.write(`\n✅ [${requestId}] Call answered, waiting for call.answered event...\n`);
-        } catch (error) {
-          process.stdout.write(`\n❌ [${requestId}] CRITICAL ERROR in handleCallStart\n`);
-          console.error(`[${requestId}] ❌ ERROR in handleCallStart:`, error);
-          console.error(`[${requestId}] Error message:`, error.message);
-          console.error(`[${requestId}] Error stack:`, error.stack);
-          console.error(`[${requestId}] Error response:`, error.response?.data || error.response || 'No response data');
-          process.stdout.write(`\n❌ [${requestId}] Error message: ${error.message}\n`);
-          process.stdout.write(`\n❌ [${requestId}] Error response: ${JSON.stringify(error.response?.data || {}, null, 2)}\n`);
-          // Don't throw - still return 200 to Telnyx to acknowledge webhook
-          // But log extensively so we can see what went wrong
+          process.stdout.write(`\n✅ [${requestId}] STEP 3 COMPLETE: Call session created: ${result.callSession?.id}\n`);
+          console.log(`[${requestId}] ✅ Call session created:`, result.callSession?.id);
+          console.log(`[${requestId}] ✅ Waiting for call.answered event to start streaming...`);
+        } catch (sessionError) {
+          process.stdout.write(`\n⚠️ [${requestId}] WARNING: Call session creation failed (non-critical)\n`);
+          console.warn(`[${requestId}] ⚠️ Call session creation failed:`, sessionError.message);
+          // Don't fail the whole webhook if session creation fails
         }
         
         // Return 200 OK - Telnyx just needs acknowledgment
-        // The actual answer command is sent via Call Control API
         process.stdout.write(`\n✅ [${requestId}] Sending 200 OK response to Telnyx\n`);
         console.log(`[${requestId}] Sending 200 OK response to Telnyx`);
         res.json({ status: 'ok' });
