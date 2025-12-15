@@ -112,8 +112,8 @@ export class AIRealtimeService {
               
               // Now send session.update to configure audio format
               try {
-                // MINIMAL CONFIGURATION - Only what's absolutely required
-                // Removed input_audio_transcription - it's causing errors and semantic_vad doesn't need it
+                // ABSOLUTE MINIMUM - Only parameters valid for session.update
+                // temperature and max_output_tokens are NOT valid for session.update (only for session creation)
                 const sessionConfig = {
                   type: 'session.update',
                   session: {
@@ -129,8 +129,6 @@ export class AIRealtimeService {
                         },
                       },
                     },
-                    temperature: 0.8,
-                    max_output_tokens: 4096,
                   },
                 };
                 
