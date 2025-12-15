@@ -120,14 +120,16 @@ export class AIRealtimeService {
                     output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                     turn_detection: {
                       type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
-                      eagerness: 0.7, // Increased from 0.5 to be more responsive (0.0-1.0, higher = respond faster)
+                      eagerness: 'high', // Valid values: "auto", "low", "medium", "high" (NOT a number!)
+                      create_response: true, // Automatically generate response when speech ends
+                      interrupt_response: true, // Interrupt ongoing response if new speech detected
                     },
                     input_audio_transcription: {
                       model: 'whisper-1', // Enable transcription to help with speech detection
                     },
-                    // temperature and max_response_output_tokens must be INSIDE session object
+                    // temperature and max_output_tokens must be INSIDE session object
                     temperature: 0.8,
-                    max_response_output_tokens: 4096,
+                    max_output_tokens: 4096, // CORRECT parameter name (NOT max_response_output_tokens)
                   },
                 };
                 
