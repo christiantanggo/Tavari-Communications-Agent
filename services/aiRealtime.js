@@ -96,6 +96,8 @@ export class AIRealtimeService {
                     voice: 'alloy',
                     temperature: 0.8,
                     max_response_output_tokens: 4096,
+                    input_audio_format: 'pcm16', // Audio format must be INSIDE session object
+                    output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                     turn_detection: {
                       type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
                       eagerness: 0.7, // Increased from 0.5 to be more responsive (0.0-1.0, higher = respond faster)
@@ -104,9 +106,6 @@ export class AIRealtimeService {
                       model: 'whisper-1', // Enable transcription to help with speech detection
                     },
                   },
-                  // Audio format parameters must be at TOP LEVEL, not inside session object
-                  input_audio_format: 'pcm16', // OpenAI REQUIRES PCM16 at 24kHz - we'll convert from Telnyx
-                  output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                 };
                 
                 console.log('🔵 Configuring session for PCM16 at 24kHz (will convert from Telnyx G.711 μ-law)...');
