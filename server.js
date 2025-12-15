@@ -123,6 +123,7 @@ async function handleCallInitiated(payload, callId) {
     audioFrameCount: 0,
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
+    messageCount: 0,
   });
 
   // Answer immediately
@@ -260,6 +261,7 @@ async function startOpenAIRealtime(callId) {
     audioFrameCount: 0,
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
+    messageCount: 0,
   };
   s.openaiWs = ws;
   sessions.set(callId, s);
@@ -316,6 +318,13 @@ async function startOpenAIRealtime(callId) {
       return;
     }
 
+    // Log first few messages to see what we're getting
+    if (!s.messageCount) s.messageCount = 0;
+    s.messageCount++;
+    if (s.messageCount <= 10) {
+      console.log(`📨 [${callId}] OpenAI message #${s.messageCount}: type=${msg.type}`);
+    }
+
     // Audio from OpenAI -> send to Telnyx WS
     if (msg.type === "response.audio.delta" && msg.delta) {
       const session = sessions.get(callId);
@@ -355,6 +364,24 @@ async function startOpenAIRealtime(callId) {
     
     if (msg.type === "response.audio_transcript.done") {
       console.log(`✅ [${callId}] Response complete: ${msg.transcript || "(no transcript)"}`);
+    }
+    
+    // Log response creation/start events
+    if (msg.type === "response.created") {
+      console.log(`🎬 [${callId}] OpenAI response created`);
+    }
+    
+    if (msg.type === "response.audio_started") {
+      console.log(`🔊 [${callId}] OpenAI audio started`);
+    }
+    
+    if (msg.type === "response.done") {
+      console.log(`✅ [${callId}] OpenAI response done`);
+    }
+    
+    // Log any errors or unexpected types
+    if (msg.type === "error") {
+      console.error(`❌ [${callId}] OpenAI error:`, JSON.stringify(msg));
     }
 
     if (msg.type === "error") {
@@ -408,6 +435,7 @@ wss.on("connection", (socket, req) => {
     audioFrameCount: 0,
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
+    messageCount: 0,
   };
   s.telnyxWs = socket;
   sessions.set(callId, s);
