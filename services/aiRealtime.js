@@ -222,7 +222,12 @@ export class AIRealtimeService {
       case 'response.audio.delta':
         // Audio chunks come as base64
         if (message.delta) {
-          console.log('🔵 OpenAI audio response received, size:', message.delta.length, 'bytes (base64)');
+          // Log first few to verify responses are coming
+          if (!this._firstAudioResponseLogged) {
+            process.stdout.write(`\n🔵 OPENAI AUDIO RESPONSE RECEIVED\n`);
+            console.log('🔵 OpenAI audio response received, size:', message.delta.length, 'bytes (base64)');
+            this._firstAudioResponseLogged = true;
+          }
           const audioBuffer = Buffer.from(message.delta, 'base64');
           this.handleAudioOutput(audioBuffer);
         }
@@ -233,6 +238,7 @@ export class AIRealtimeService {
         break;
         
       case 'response.done':
+        process.stdout.write(`\n✅ OPENAI RESPONSE COMPLETE\n`);
         console.log('✅ OpenAI response complete');
         this.isResponding = false;
         this.responseLock = false;
