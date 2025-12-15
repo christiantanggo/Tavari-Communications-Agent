@@ -99,10 +99,29 @@ export class AIRealtimeService {
                 console.error('❌ Error sending session config:', error);
               }
             } else if (message.type === 'session.updated') {
-              process.stdout.write('\n✅ OPENAI SESSION READY - Ready to receive audio\n');
+              process.stdout.write('\n✅✅✅ OPENAI SESSION.updated RECEIVED - SESSION FULLY CONFIGURED ✅✅✅\n');
               console.log('✅ OpenAI session.updated event received - session configured');
+              console.log('✅ Session config response:', JSON.stringify(message, null, 2));
               this.sessionConfigured = true;
               this.ws.removeListener('message', sessionReadyHandler);
+              
+              // Send initial greeting to trigger AI to speak
+              // This helps ensure the AI is ready and will respond immediately
+              setTimeout(() => {
+                try {
+                  process.stdout.write(`\n🔵 SENDING INITIAL GREETING TRIGGER TO OPENAI\n`);
+                  console.log('🔵 Sending response.create to trigger initial greeting...');
+                  const greetingTrigger = { type: 'response.create' };
+                  console.log('🔵 Greeting trigger payload:', JSON.stringify(greetingTrigger));
+                  this.ws.send(JSON.stringify(greetingTrigger));
+                  process.stdout.write(`\n✅ INITIAL GREETING TRIGGER SENT\n`);
+                } catch (error) {
+                  process.stdout.write(`\n❌ ERROR SENDING GREETING TRIGGER\n`);
+                  console.error('❌ Error sending initial greeting trigger:', error);
+                  console.error('Error stack:', error.stack);
+                }
+              }, 1000); // Wait 1 second after session is configured to ensure it's ready
+              
               resolve(true);
             } else if (message.type === 'error') {
               console.error('❌ OpenAI session error:', JSON.stringify(message, null, 2));
@@ -113,20 +132,35 @@ export class AIRealtimeService {
           // Listen for session events
           this.ws.on('message', sessionReadyHandler);
           
-          // Timeout after 5 seconds - proceed anyway if no confirmation
+          // Timeout after 15 seconds - but log warning if no confirmation
           setTimeout(() => {
             this.ws.removeListener('message', sessionReadyHandler);
             if (!this.sessionConfigured) {
-              console.warn('⚠️ Session confirmation timeout - proceeding anyway (session may still work)');
-              this.sessionConfigured = true;
+              process.stdout.write(`\n⚠️⚠️⚠️ SESSION CONFIGURATION TIMEOUT - NO session.updated RECEIVED ⚠️⚠️⚠️\n`);
+              console.warn('⚠️ Session confirmation timeout after 15 seconds');
+              console.warn('⚠️ WARNING: OpenAI may not be ready to receive audio without session.updated confirmation');
+              console.warn('⚠️ Proceeding anyway - session might still work, but audio may be ignored');
+              // Set a flag to indicate we're proceeding without confirmation
+              this._sessionTimeoutProceeded = true;
+              // Still resolve so initialization doesn't hang
               resolve(true);
             }
-          }, 5000);
+          }, 15000);
         });
         
         this.ws.on('message', (data) => {
           try {
             const message = JSON.parse(data.toString());
+            
+            // Log ALL message types for debugging (we can filter later)
+            if (!this._messageTypeCounts) this._messageTypeCounts = {};
+            if (!this._messageTypeCounts[message.type]) {
+              this._messageTypeCounts[message.type] = 0;
+              // Log first occurrence of each message type
+              process.stdout.write(`\n🔵 OPENAI MESSAGE TYPE: ${message.type}\n`);
+              console.log(`🔵 OpenAI message type received: ${message.type}`);
+            }
+            this._messageTypeCounts[message.type]++;
             
             // Log only important messages (reduce noise)
             if (message.type === 'error' || message.type === 'error.event') {
@@ -368,15 +402,24 @@ export class AIRealtimeService {
       return;
     }
     
-    // Don't send audio until session is configured
-    if (!this.sessionConfigured) {
+    // Don't send audio until session is configured (unless we timed out and are proceeding anyway)
+    if (!this.sessionConfigured && !this._sessionTimeoutProceeded) {
       // Only log first few times to avoid spam
       if (!this._sessionWarningCount) this._sessionWarningCount = 0;
       this._sessionWarningCount++;
-      if (this._sessionWarningCount <= 3) {
-        console.warn('⚠️ Session not configured yet, skipping audio (this is normal during startup)');
+      if (this._sessionWarningCount <= 5) {
+        process.stdout.write(`\n⚠️ SESSION NOT CONFIGURED - SKIPPING AUDIO #${this._sessionWarningCount}\n`);
+        console.warn(`⚠️ Session not configured yet, skipping audio chunk #${this._sessionWarningCount} (this is normal during startup)`);
       }
       return;
+    }
+    
+    // If we proceeded without session confirmation, log a warning on first audio send
+    if (this._sessionTimeoutProceeded && !this._timeoutWarningLogged) {
+      process.stdout.write(`\n⚠️ SENDING AUDIO WITHOUT session.updated CONFIRMATION (proceeding after timeout)\n`);
+      console.warn('⚠️ WARNING: Sending audio to OpenAI without session.updated confirmation');
+      console.warn('⚠️ OpenAI may ignore this audio if session is not fully configured');
+      this._timeoutWarningLogged = true;
     }
     
     try {
@@ -422,6 +465,14 @@ export class AIRealtimeService {
         type: 'input_audio_buffer.append',
         audio: base64Audio,
       };
+      
+      // Log first few sends to verify audio is being transmitted
+      if (!this._audioSendCount) this._audioSendCount = 0;
+      this._audioSendCount++;
+      if (this._audioSendCount <= 5 || this._audioSendCount % 50 === 0) {
+        process.stdout.write(`\n🔵 SENDING AUDIO TO OPENAI #${this._audioSendCount} (${base64Audio.length} base64 bytes)\n`);
+        console.log(`🔵 Sending audio chunk #${this._audioSendCount} to OpenAI (${base64Audio.length} base64 bytes, ${convertedAudio.length} raw bytes)`);
+      }
       
       this.ws.send(JSON.stringify(payload));
     } catch (error) {
