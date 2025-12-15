@@ -220,20 +220,21 @@ export const setupCallAudioWebSocket = (server) => {
       ws.on('message', async (data) => {
         audioChunkCount++;
         if (audioChunkCount % 100 === 0) {
-          console.log(`[${connectionId}] 📥 Received ${audioChunkCount} audio chunks (handler ready: ${!!handler})`);
+          console.log(`[${connectionId}] 📥 Received ${audioChunkCount} audio chunks (handler ready: ${!!handler}, AI ready: ${handler?.aiService?.ws?.readyState === 1})`);
         }
         
-        if (handler) {
+        if (handler && handler.aiService && handler.aiService.ws && handler.aiService.ws.readyState === 1) {
+          // Handler and AI service are ready, process immediately
           try {
             handler.handleIncomingAudio(data);
           } catch (audioError) {
             console.error(`[${connectionId}] ❌ Error processing audio:`, audioError);
           }
         } else {
-          // Buffer audio until handler is ready
+          // Buffer audio until handler and AI service are ready
           audioBuffer.push(data);
           if (audioBuffer.length === 1) {
-            console.log(`[${connectionId}] ⏳ Buffering audio until handler is ready...`);
+            console.log(`[${connectionId}] ⏳ Buffering audio (handler: ${!!handler}, AI: ${handler?.aiService ? 'exists' : 'none'})...`);
           }
         }
       });
@@ -426,18 +427,31 @@ export const setupCallAudioWebSocket = (server) => {
         
         console.log('✅ CallHandler fully set up and ready');
         
-        // Process any buffered audio
-        if (audioBuffer.length > 0) {
-          console.log(`[${connectionId}] 🔵 Processing ${audioBuffer.length} buffered audio chunks...`);
+        // Process any buffered audio (only if AI service is ready)
+        const bufferLength = audioBuffer.length;
+        if (bufferLength > 0) {
+          console.log(`[${connectionId}] 🔵 Processing ${bufferLength} buffered audio chunks...`);
+          console.log(`[${connectionId}] Checking if AI service is ready...`);
+          console.log(`[${connectionId}] AI service exists:`, !!handler.aiService);
+          console.log(`[${connectionId}] AI service WebSocket ready:`, handler.aiService?.ws?.readyState === 1);
+          
+          let processedCount = 0;
           for (const bufferedData of audioBuffer) {
             try {
-              handler.handleIncomingAudio(bufferedData);
+              // Only process if AI service is ready
+              if (handler.aiService && handler.aiService.ws && handler.aiService.ws.readyState === 1) {
+                handler.handleIncomingAudio(bufferedData);
+                processedCount++;
+              } else {
+                // If not ready, keep buffering (will be processed by real-time handler)
+                console.log(`[${connectionId}] ⏳ AI service not ready yet, skipping buffered chunk`);
+              }
             } catch (audioError) {
               console.error(`[${connectionId}] ❌ Error processing buffered audio:`, audioError);
             }
           }
           audioBuffer.length = 0; // Clear buffer
-          console.log(`[${connectionId}] ✅ Buffered audio processed`);
+          console.log(`[${connectionId}] ✅ Processed ${processedCount} of ${bufferLength} buffered audio chunks`);
         }
       } else {
         console.log('✅ Existing handler found, reusing it...');
@@ -448,18 +462,30 @@ export const setupCallAudioWebSocket = (server) => {
           handler.setAudioWebSocket(ws);
           console.log('✅ Audio WebSocket set on existing handler');
           
-          // Process any buffered audio
-          if (audioBuffer.length > 0) {
-            console.log(`[${connectionId}] 🔵 Processing ${audioBuffer.length} buffered audio chunks...`);
+          // Process any buffered audio (only if AI service is ready)
+          const bufferLength = audioBuffer.length;
+          if (bufferLength > 0) {
+            console.log(`[${connectionId}] 🔵 Processing ${bufferLength} buffered audio chunks...`);
+            console.log(`[${connectionId}] Checking if AI service is ready...`);
+            console.log(`[${connectionId}] AI service exists:`, !!handler.aiService);
+            console.log(`[${connectionId}] AI service WebSocket ready:`, handler.aiService?.ws?.readyState === 1);
+            
+            let processedCount = 0;
             for (const bufferedData of audioBuffer) {
               try {
-                handler.handleIncomingAudio(bufferedData);
+                // Only process if AI service is ready
+                if (handler.aiService && handler.aiService.ws && handler.aiService.ws.readyState === 1) {
+                  handler.handleIncomingAudio(bufferedData);
+                  processedCount++;
+                } else {
+                  console.log(`[${connectionId}] ⏳ AI service not ready yet, skipping buffered chunk`);
+                }
               } catch (audioError) {
                 console.error(`[${connectionId}] ❌ Error processing buffered audio:`, audioError);
               }
             }
             audioBuffer.length = 0; // Clear buffer
-            console.log(`[${connectionId}] ✅ Buffered audio processed`);
+            console.log(`[${connectionId}] ✅ Processed ${processedCount} of ${bufferLength} buffered audio chunks`);
           }
         } catch (setWsError) {
           console.error('❌ Error setting audio WebSocket on existing handler:', setWsError);
