@@ -135,13 +135,25 @@ router.post('/webhook', async (req, res) => {
         res.json({ status: 'ok' });
       } else if (eventType === 'streaming.started') {
         // Telnyx has started streaming and should connect to our WebSocket
+        process.stdout.write(`\n🔵 [${requestId}] STREAMING.STARTED EVENT - Telnyx should connect to WebSocket now\n`);
         console.log(`[${requestId}] Streaming started - Telnyx should connect to WebSocket now`);
         const streamUrl = req.body.data?.payload?.stream_params?.stream_url;
+        const callControlId = req.body.data?.payload?.call_control_id;
         console.log(`[${requestId}] Stream URL from Telnyx:`, streamUrl);
+        console.log(`[${requestId}] Call Control ID:`, callControlId);
+        process.stdout.write(`\n🔵 [${requestId}] Expected WebSocket URL: ${streamUrl}\n`);
+        process.stdout.write(`\n⚠️  [${requestId}] If you don't see WebSocket connection logs next, Telnyx cannot reach the WebSocket server\n`);
         res.json({ status: 'ok' });
       } else if (eventType === 'streaming.stopped') {
         // Streaming stopped - call may be ending
+        process.stdout.write(`\n🔴 [${requestId}] STREAMING.STOPPED EVENT\n`);
         console.log(`[${requestId}] Streaming stopped`);
+        const streamUrl = req.body.data?.payload?.stream_params?.stream_url;
+        const reason = req.body.data?.payload?.reason || 'unknown';
+        console.log(`[${requestId}] Stream URL:`, streamUrl);
+        console.log(`[${requestId}] Reason:`, reason);
+        process.stdout.write(`\n🔴 [${requestId}] Streaming stopped - Reason: ${reason}\n`);
+        process.stdout.write(`\n⚠️  [${requestId}] If this happened immediately after streaming.started, Telnyx likely couldn't connect to WebSocket\n`);
         res.json({ status: 'ok' });
       } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
         const callData = TelnyxService.parseInboundCall(req);
