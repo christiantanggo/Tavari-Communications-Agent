@@ -67,12 +67,20 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Call initiated, call_control_id:`, callControlId);
         console.log(`[${requestId}] Webhook payload:`, JSON.stringify(req.body, null, 2));
         
-        // Handle call start (this will answer the call via API)
+        // Handle call start (this will answer the call via API and start streaming)
         process.stdout.write(`\n🔵 [${requestId}] Calling TelnyxService.handleCallStart()...\n`);
         console.log(`[${requestId}] Calling TelnyxService.handleCallStart()...`);
-        await TelnyxService.handleCallStart(callData, callControlId);
-        process.stdout.write(`\n✅ [${requestId}] TelnyxService.handleCallStart() completed\n`);
-        console.log(`[${requestId}] TelnyxService.handleCallStart() completed`);
+        try {
+          const result = await TelnyxService.handleCallStart(callData, callControlId);
+          process.stdout.write(`\n✅ [${requestId}] TelnyxService.handleCallStart() completed\n`);
+          console.log(`[${requestId}] TelnyxService.handleCallStart() completed`);
+          console.log(`[${requestId}] Result:`, result);
+        } catch (error) {
+          console.error(`[${requestId}] ❌ ERROR in handleCallStart:`, error);
+          console.error(`[${requestId}] Error message:`, error.message);
+          console.error(`[${requestId}] Error stack:`, error.stack);
+          // Don't throw - still return 200 to Telnyx
+        }
         
         // Return 200 OK - Telnyx just needs acknowledgment
         // The actual answer command is sent via Call Control API

@@ -553,35 +553,54 @@ export class TelnyxService {
 
   // Handle call start (webhook response)
   static async handleCallStart(callData, callControlId) {
+    console.log('🔵 handleCallStart() called');
+    console.log('🔵 callData:', JSON.stringify(callData, null, 2));
+    console.log('🔵 callControlId:', callControlId);
+    
     // Find business by called number
+    console.log('🔵 Finding business by number:', callData.called_number);
     const business = await this.findBusinessByNumber(callData.called_number);
 
     if (!business) {
+      console.error('❌ Business not found for number:', callData.called_number);
       throw new Error('Business not found for this number');
     }
+    console.log('✅ Business found:', business.id);
 
     // Create call session
+    console.log('🔵 Creating call session...');
     const callSession = await this.createCallSession(business.id, callData);
+    console.log('✅ Call session created:', callSession.id);
 
     // Answer the call using Telnyx Call Control API
     // Telnyx requires a separate API call to answer, not a webhook response
-    if (callControlId) {
-      try {
-        console.log('🔵 Step 1: Answering call via Call Control API, call_control_id:', callControlId);
-        await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
-        console.log('✅ Call answered successfully');
-        
-        // Step 2: Start streaming IMMEDIATELY after answering
-        // Don't wait for call.answered webhook - start streaming right away
-        console.log('🔵 Step 2: Starting media stream immediately after answering...');
-        console.log('🔵 Using call session ID:', callSession.id);
-        await this.startMediaStreamWithSessionId(callControlId, callSession.id);
-        console.log('✅ Media stream started');
-      } catch (error) {
-        console.error('❌ Failed to answer call or start streaming:', error.message);
-        console.error('Error details:', error.response?.data || error);
-        // Don't throw - continue with call setup
-      }
+    if (!callControlId) {
+      console.error('❌ callControlId is missing! Cannot answer call.');
+      throw new Error('callControlId is required to answer call');
+    }
+    
+    console.log('🔵 callControlId exists, proceeding to answer and stream...');
+    
+    try {
+      // Step 1: Answer the call
+      console.log('🔵 Step 1: Answering call via Call Control API');
+      console.log('🔵 POST /calls/' + callControlId + '/actions/answer');
+      const answerResponse = await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
+      console.log('✅ Call answered successfully');
+      console.log('✅ Answer response:', JSON.stringify(answerResponse, null, 2));
+      
+      // Step 2: Start streaming IMMEDIATELY after answering
+      console.log('🔵 Step 2: Starting media stream immediately after answering...');
+      console.log('🔵 Using call session ID:', callSession.id);
+      await this.startMediaStreamWithSessionId(callControlId, callSession.id);
+      console.log('✅ Media stream started');
+    } catch (error) {
+      console.error('❌ CRITICAL ERROR: Failed to answer call or start streaming');
+      console.error('❌ Error message:', error.message);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Error response:', error.response?.data || error.response || 'No response data');
+      // RE-THROW so we can see the error in the webhook handler
+      throw error;
     }
 
     return {
