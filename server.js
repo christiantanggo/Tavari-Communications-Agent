@@ -7,7 +7,6 @@ import dotenv from "dotenv";
 import http from "http";
 import WebSocket, { WebSocketServer } from "ws";
 import { URL } from "url";
-import { convertOpenAIToTelnyx } from "./utils/audioConverter.js";
 
 dotenv.config();
 
@@ -125,6 +124,7 @@ async function handleCallInitiated(payload, callId) {
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
     messageCount: 0,
+    transcriptText: "", // For collecting transcript for Telnyx TTS
   });
 
   // Answer immediately
@@ -280,10 +280,7 @@ async function startOpenAIRealtime(callId) {
             "You are Tavari's phone receptionist. Greet callers warmly and help them. Be concise, friendly, and ask one question at a time.",
           voice: "alloy",
           input_audio_format: "g711_ulaw",
-          output_audio_format: "pcm16", // Use pcm16 for output (supported), convert to g711_ulaw for Telnyx
-          output_audio_format_details: {
-            sample_rate: 24000, // OpenAI pcm16 is 24kHz
-          },
+          output_audio_format: "g711_ulaw", // Use same format as Telnyx to avoid conversion issues
           input_audio_transcription: { model: "whisper-1" },
           turn_detection: {
             type: "server_vad",
@@ -339,18 +336,12 @@ async function startOpenAIRealtime(callId) {
         }
         
         try {
-          // OpenAI sends pcm16 audio as base64 string
-          // Decode base64 to get pcm16 buffer
-          const pcm16Buffer = Buffer.from(msg.delta, "base64");
-          
-          // Convert pcm16 to g711_ulaw for Telnyx
-          const g711Buffer = convertOpenAIToTelnyx(pcm16Buffer);
-          
-          // Encode as base64 for Telnyx
-          const telnyxPayload = g711Buffer.toString("base64");
+          // OpenAI sends g711_ulaw audio as base64 string (same format as Telnyx)
+          // No conversion needed - send directly to Telnyx
+          const telnyxPayload = msg.delta; // Already base64 g711_ulaw
           
           if (session.audioOutFrameCount <= 3) {
-            console.log(`📤 [${callId}] Converted to g711_ulaw (${g711Buffer.length} bytes), sending to Telnyx`);
+            console.log(`📤 [${callId}] Sending g711_ulaw audio to Telnyx (${msg.delta.length} bytes base64)`);
           }
           
           telnyxWs.send(
@@ -360,7 +351,7 @@ async function startOpenAIRealtime(callId) {
             })
           );
         } catch (error) {
-          console.error(`❌ [${callId}] Error converting/sending audio:`, error?.message || error);
+          console.error(`❌ [${callId}] Error sending audio:`, error?.message || error);
         }
       } else {
         if (!session.audioOutFrameCount || session.audioOutFrameCount === 0) {
@@ -380,17 +371,54 @@ async function startOpenAIRealtime(callId) {
       }
     }
     
+    // Collect transcript text for Telnyx TTS
+    if (msg.type === "response.audio_transcript.delta" && msg.delta) {
+      const session = sessions.get(callId);
+      if (session) {
+        if (!session.transcriptText) session.transcriptText = "";
+        session.transcriptText += msg.delta;
+      }
+    }
+    
     if (msg.type === "response.audio_transcript.done") {
-      console.log(`✅ [${callId}] Response complete: ${msg.transcript || "(no transcript)"}`);
+      const session = sessions.get(callId);
+      const transcript = msg.transcript || session?.transcriptText || "";
+      console.log(`✅ [${callId}] Response complete: ${transcript}`);
+      
+      // Use Telnyx /actions/speak for audio output (hybrid approach)
+      if (transcript && session?.callControlId) {
+        console.log(`🔊 [${callId}] Sending text to Telnyx TTS: "${transcript}"`);
+        try {
+          await axios.post(
+            `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
+            {
+              payload: transcript,
+              voice: "Polly.Joanna", // You can make this configurable
+              language: "en-US",
+              premium: true,
+            },
+            { headers: telnyxHeaders() }
+          );
+          console.log(`✅ [${callId}] Telnyx TTS started`);
+        } catch (error) {
+          console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
+        }
+      }
+      
+      // Clear transcript for next response
+      if (session) session.transcriptText = "";
     }
     
     // Log response creation/start events
     if (msg.type === "response.created") {
       console.log(`🎬 [${callId}] OpenAI response created`);
+      // Initialize transcript text
+      const session = sessions.get(callId);
+      if (session) session.transcriptText = "";
     }
     
     if (msg.type === "response.audio_started") {
-      console.log(`🔊 [${callId}] OpenAI audio started`);
+      console.log(`🔊 [${callId}] OpenAI audio started (but we'll use Telnyx TTS instead)`);
     }
     
     if (msg.type === "response.done") {
