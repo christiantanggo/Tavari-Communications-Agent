@@ -302,7 +302,7 @@ async function startOpenAIRealtime(callId) {
     console.log(`✅ OpenAI session ready for ${callId} - waiting for user input`);
   });
 
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw.toString());
@@ -361,22 +361,18 @@ async function startOpenAIRealtime(callId) {
       return;
     }
     
-    // Log other important OpenAI events
-    if (msg.type === "response.audio_transcript.delta") {
-      // Transcript updates - log first few
-      if (!s.transcriptLogCount) s.transcriptLogCount = 0;
-      s.transcriptLogCount++;
-      if (s.transcriptLogCount <= 1 && msg.delta) {
-        console.log(`💬 [${callId}] Transcript: ${msg.delta}`);
-      }
-    }
-    
     // Collect transcript text for Telnyx TTS
     if (msg.type === "response.audio_transcript.delta" && msg.delta) {
       const session = sessions.get(callId);
       if (session) {
         if (!session.transcriptText) session.transcriptText = "";
         session.transcriptText += msg.delta;
+        // Log first transcript chunk
+        if (!s.transcriptLogCount) s.transcriptLogCount = 0;
+        s.transcriptLogCount++;
+        if (s.transcriptLogCount <= 1) {
+          console.log(`💬 [${callId}] Transcript: ${msg.delta}`);
+        }
       }
     }
     
