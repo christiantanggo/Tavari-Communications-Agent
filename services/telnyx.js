@@ -567,13 +567,19 @@ export class TelnyxService {
     // Telnyx requires a separate API call to answer, not a webhook response
     if (callControlId) {
       try {
-        console.log('Answering call via Call Control API, call_control_id:', callControlId);
+        console.log('🔵 Step 1: Answering call via Call Control API, call_control_id:', callControlId);
         await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
-        console.log('Call answered successfully');
-        // NOTE: We do NOT start streaming here - wait for call.answered webhook
-        // Telnyx may require the call to be fully answered before connecting to WebSocket
+        console.log('✅ Call answered successfully');
+        
+        // Step 2: Start streaming IMMEDIATELY after answering
+        // Don't wait for call.answered webhook - start streaming right away
+        console.log('🔵 Step 2: Starting media stream immediately after answering...');
+        console.log('🔵 Using call session ID:', callSession.id);
+        await this.startMediaStreamWithSessionId(callControlId, callSession.id);
+        console.log('✅ Media stream started');
       } catch (error) {
-        console.error('Failed to answer call:', error.message);
+        console.error('❌ Failed to answer call or start streaming:', error.message);
+        console.error('Error details:', error.response?.data || error);
         // Don't throw - continue with call setup
       }
     }
@@ -601,20 +607,41 @@ export class TelnyxService {
         return;
       }
       
+      await this.startMediaStreamWithSessionId(callControlId, callSession.id);
+    } catch (error) {
+      console.error('❌ Failed to start media stream:', error.message);
+      console.error('Error details:', error.response?.data || error);
+      throw error;
+    }
+  }
+
+  // Start media stream with explicit call session ID (used when we already have the session)
+  static async startMediaStreamWithSessionId(callControlId, callSessionId) {
+    if (!callControlId) {
+      console.error('Cannot start media stream: callControlId is required');
+      return;
+    }
+    
+    if (!callSessionId) {
+      console.error('Cannot start media stream: callSessionId is required');
+      return;
+    }
+    
+    try {
       console.log('🔵 Starting media stream for call:', callControlId);
-      console.log('🔵 Call session ID:', callSession.id);
+      console.log('🔵 Call session ID:', callSessionId);
       
       // Get server URL for WebSocket
       const serverUrl = process.env.SERVER_URL || process.env.WEBHOOK_BASE_URL || 'https://api.tavarios.com';
       const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
       const wsHost = serverUrl.replace(/^https?:\/\//, '');
-      const streamUrl = `${wsProtocol}://${wsHost}/api/calls/${callSession.id}/audio`;
+      const streamUrl = `${wsProtocol}://${wsHost}/api/calls/${callSessionId}/audio`;
       
       // Start media stream using Telnyx Call Control API
       // This creates a bidirectional WebSocket connection for audio
       const streamPayload = {
         stream_url: streamUrl,
-        stream_track: 'both_tracks', // Send and receive audio
+        stream_track: 'both', // Send and receive audio (Telnyx expects 'both', not 'both_tracks')
       };
       
       console.log('🔵 Starting media stream for Telnyx...');
