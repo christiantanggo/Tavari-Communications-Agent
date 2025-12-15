@@ -11,8 +11,8 @@ import { URL } from "url";
 dotenv.config();
 
 const PORT = Number(process.env.PORT || 5001);
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || "").trim();
+const TELNYX_API_KEY = (process.env.TELNYX_API_KEY || "").trim();
 
 // IMPORTANT: set this in Railway as either:
 //   tavari-voice-agent-server-production.up.railway.app
@@ -22,6 +22,8 @@ const RAILWAY_PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN;
 
 if (!OPENAI_API_KEY || !TELNYX_API_KEY) {
   console.error("❌ Missing required env vars: OPENAI_API_KEY, TELNYX_API_KEY");
+  console.error(`   OPENAI_API_KEY: ${OPENAI_API_KEY ? "SET" : "NOT SET"}`);
+  console.error(`   TELNYX_API_KEY: ${TELNYX_API_KEY ? "SET" : "NOT SET"}`);
   process.exit(1);
 }
 
@@ -168,17 +170,29 @@ async function handleCallHangup(callId) {
  * TELNYX API HELPERS
  */
 async function telnyxAnswer(callControlId) {
-  await axios.post(
-    `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`,
-    {},
-    { headers: telnyxHeaders() }
-  );
-  console.log(`✅ Call answered: ${callControlId}`);
+  try {
+    await axios.post(
+      `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`,
+      {},
+      { headers: telnyxHeaders() }
+    );
+    console.log(`✅ Call answered: ${callControlId}`);
+  } catch (err) {
+    console.error(`❌ Failed to answer call ${callControlId}:`, err?.response?.status, err?.response?.data || err?.message);
+    throw err;
+  }
 }
 
 function telnyxHeaders() {
+  // Sanitize API key - remove any whitespace, newlines, or invalid characters
+  const apiKey = (TELNYX_API_KEY || "").trim().replace(/[\r\n]/g, "");
+  
+  if (!apiKey) {
+    throw new Error("TELNYX_API_KEY is not set or is empty");
+  }
+  
   return {
-    Authorization: `Bearer ${TELNYX_API_KEY}`,
+    Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
     Accept: "application/json",
   };
