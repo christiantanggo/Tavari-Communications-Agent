@@ -208,12 +208,43 @@ export const setupCallAudioWebSocket = (server) => {
       console.log(`[${connectionId}] ✅ Extracted callSessionId:`, callSessionId);
       console.log(`[${connectionId}] ✅ Audio WebSocket connected for call: ${callSessionId}`);
       
+      // CRITICAL: Set up message handler IMMEDIATELY to receive audio from Telnyx
+      // This must happen BEFORE any async operations to avoid missing early audio chunks
+      console.log(`[${connectionId}] 🔵 CRITICAL: Setting up message handler IMMEDIATELY...`);
+      process.stdout.write(`[${connectionId}] SETUP_MESSAGE_HANDLER_IMMEDIATE\n`);
+      
+      let handler = null; // Will be set later
+      let audioChunkCount = 0;
+      const audioBuffer = []; // Buffer audio until handler is ready
+      
+      ws.on('message', async (data) => {
+        audioChunkCount++;
+        if (audioChunkCount % 100 === 0) {
+          console.log(`[${connectionId}] 📥 Received ${audioChunkCount} audio chunks (handler ready: ${!!handler})`);
+        }
+        
+        if (handler) {
+          try {
+            handler.handleIncomingAudio(data);
+          } catch (audioError) {
+            console.error(`[${connectionId}] ❌ Error processing audio:`, audioError);
+          }
+        } else {
+          // Buffer audio until handler is ready
+          audioBuffer.push(data);
+          if (audioBuffer.length === 1) {
+            console.log(`[${connectionId}] ⏳ Buffering audio until handler is ready...`);
+          }
+        }
+      });
+      console.log(`[${connectionId}] ✅ Message handler registered (will process audio once handler is ready)`);
+      
       try {
       console.log(`[${connectionId}] === WebSocket connection handler ===`);
       console.log(`[${connectionId}] callSessionId:`, callSessionId);
       
-      // Get or create call handler
-      let handler = getCallHandler(callSessionId);
+      // Get or create call handler (handler variable already declared above)
+      handler = getCallHandler(callSessionId);
       console.log('Existing handler found?', !!handler);
       
       if (!handler) {
@@ -394,6 +425,20 @@ export const setupCallAudioWebSocket = (server) => {
         }
         
         console.log('✅ CallHandler fully set up and ready');
+        
+        // Process any buffered audio
+        if (audioBuffer.length > 0) {
+          console.log(`[${connectionId}] 🔵 Processing ${audioBuffer.length} buffered audio chunks...`);
+          for (const bufferedData of audioBuffer) {
+            try {
+              handler.handleIncomingAudio(bufferedData);
+            } catch (audioError) {
+              console.error(`[${connectionId}] ❌ Error processing buffered audio:`, audioError);
+            }
+          }
+          audioBuffer.length = 0; // Clear buffer
+          console.log(`[${connectionId}] ✅ Buffered audio processed`);
+        }
       } else {
         console.log('✅ Existing handler found, reusing it...');
         console.log(`Handler callSessionId: ${handler.voximplantCallId || 'N/A'}`);
@@ -402,35 +447,25 @@ export const setupCallAudioWebSocket = (server) => {
         try {
           handler.setAudioWebSocket(ws);
           console.log('✅ Audio WebSocket set on existing handler');
+          
+          // Process any buffered audio
+          if (audioBuffer.length > 0) {
+            console.log(`[${connectionId}] 🔵 Processing ${audioBuffer.length} buffered audio chunks...`);
+            for (const bufferedData of audioBuffer) {
+              try {
+                handler.handleIncomingAudio(bufferedData);
+              } catch (audioError) {
+                console.error(`[${connectionId}] ❌ Error processing buffered audio:`, audioError);
+              }
+            }
+            audioBuffer.length = 0; // Clear buffer
+            console.log(`[${connectionId}] ✅ Buffered audio processed`);
+          }
         } catch (setWsError) {
           console.error('❌ Error setting audio WebSocket on existing handler:', setWsError);
           throw setWsError;
         }
       }
-      
-      // Handle incoming audio from Telnyx
-      console.log('Setting up WebSocket message handler...');
-      let audioChunkCount = 0;
-      ws.on('message', async (data) => {
-        audioChunkCount++;
-        // Only log every 100th chunk to reduce noise
-        if (audioChunkCount % 100 === 0) {
-          console.log(`📥 Received ${audioChunkCount} audio chunks from Telnyx for call: ${callSessionId}`);
-        }
-        
-        if (handler) {
-          try {
-            handler.handleIncomingAudio(data);
-          } catch (audioError) {
-            console.error('❌ Error processing incoming audio:', audioError);
-            console.error('Audio error message:', audioError.message);
-            console.error('Audio error stack:', audioError.stack);
-          }
-        } else {
-          console.warn('⚠️ No handler available for incoming audio');
-        }
-      });
-      console.log('✅ Message handler registered');
       
       // Handle WebSocket close
       console.log('Setting up WebSocket close handler...');
