@@ -7,6 +7,9 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// SIMPLE TEST MODE: Set to true to test basic call flow without streaming/AI
+const SIMPLE_TEST_MODE = process.env.SIMPLE_TEST_MODE === 'true';
+
 // Test endpoint to verify webhook URL is accessible
 router.get('/webhook/test', (req, res) => {
   const timestamp = new Date().toISOString();
@@ -54,22 +57,16 @@ router.post('/webhook', async (req, res) => {
       console.log(`[${requestId}] Telnyx webhook event:`, eventType);
       
       if (eventType === 'call.initiated') {
-        // CRITICAL: On call.initiated, we ONLY answer the call and create the session
-        // We do NOT start the media stream or AI here - that happens on call.answered
-        // Starting AI/stream too early causes Telnyx to never stream mic audio back
-        process.stdout.write(`\n🔵 [${requestId}] CALL.INITIATED EVENT - Answering call only (NO AI/STREAM)\n`);
+        process.stdout.write(`\n🔵 [${requestId}] CALL.INITIATED EVENT\n`);
         console.log(`[${requestId}] Call initiated event received`);
-        console.log(`[${requestId}] ⚠️ CRITICAL: NOT starting AI or stream here - waiting for call.answered`);
         
         const callData = TelnyxService.parseInboundCall(req);
-        // Extract call_control_id from webhook payload
         const callControlId = req.body.data?.payload?.call_control_id || 
                              req.body.payload?.call_control_id ||
                              callData.telnyx_call_id;
         
         process.stdout.write(`\n🔵 [${requestId}] Call Control ID: ${callControlId}\n`);
         console.log(`[${requestId}] Call initiated, call_control_id:`, callControlId);
-        console.log(`[${requestId}] Webhook payload:`, JSON.stringify(req.body, null, 2));
         
         if (!callControlId) {
           process.stdout.write(`\n❌ [${requestId}] CRITICAL: No call_control_id found! Cannot answer call.\n`);
@@ -79,7 +76,6 @@ router.post('/webhook', async (req, res) => {
         }
         
         // STEP 1: Answer the call IMMEDIATELY
-        // This is the ONLY action we take on call.initiated
         process.stdout.write(`\n🔵 [${requestId}] STEP 1: Answering call IMMEDIATELY...\n`);
         console.log(`[${requestId}] STEP 1: Answering call via POST /calls/${callControlId}/actions/answer`);
         try {
@@ -93,26 +89,20 @@ router.post('/webhook', async (req, res) => {
           console.error(`[${requestId}] ❌ CRITICAL ERROR: Failed to answer call`);
           console.error(`[${requestId}] Error message:`, answerError.message);
           console.error(`[${requestId}] Error response:`, answerError.response?.data || answerError.response || 'No response data');
-          // Still return 200 to acknowledge webhook, but log the error
           res.status(200).json({ status: 'error', message: answerError.message });
           return;
         }
         
-        // STEP 2: Create call session and handle business logic (BEFORE starting stream)
-        // CRITICAL: We do NOT start media stream or AI here - that happens on call.answered
-        // Starting stream/AI on call.initiated causes Telnyx to never stream mic audio back
-        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Creating call session (NO STREAM/AI YET)...\n`);
+        // STEP 2: Create call session
+        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Creating call session...\n`);
         console.log(`[${requestId}] STEP 2: Creating call session and handling business logic`);
-        console.log(`[${requestId}] ⚠️ NOT starting media stream or AI - waiting for call.answered event`);
         try {
           const result = await TelnyxService.handleCallStart(callData, callControlId);
           process.stdout.write(`\n✅ [${requestId}] STEP 2 COMPLETE: Call session created: ${result.callSession?.id}\n`);
           console.log(`[${requestId}] ✅ Call session created:`, result.callSession?.id);
-          console.log(`[${requestId}] ✅ Waiting for call.answered event to start streaming and AI...`);
         } catch (sessionError) {
           process.stdout.write(`\n⚠️ [${requestId}] WARNING: Call session creation failed (non-critical)\n`);
           console.warn(`[${requestId}] ⚠️ Call session creation failed:`, sessionError.message);
-          // Don't fail the whole webhook if session creation fails
         }
         
         // Return 200 OK - Telnyx just needs acknowledgment
@@ -120,13 +110,8 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Sending 200 OK response to Telnyx`);
         res.json({ status: 'ok' });
       } else if (eventType === 'call.answered') {
-        // CRITICAL: This is where we start the media stream and AI
-        // We MUST wait for call.answered - starting on call.initiated causes Telnyx to never stream mic audio
-        // Call was answered - NOW start the media stream
-        // Telnyx requires the call to be in "answered" state before streaming can start
-        process.stdout.write(`\n🔵 [${requestId}] CALL.ANSWERED EVENT - Starting media stream and AI NOW...\n`);
-        console.log(`[${requestId}] Call answered - starting media stream and AI...`);
-        console.log(`[${requestId}] ✅ This is the correct event to start streaming - call.initiated was too early`);
+        process.stdout.write(`\n🔵 [${requestId}] CALL.ANSWERED EVENT\n`);
+        console.log(`[${requestId}] Call answered event received`);
         
         const callData = TelnyxService.parseInboundCall(req);
         const callControlId = req.body.data?.payload?.call_control_id || 
@@ -136,72 +121,84 @@ router.post('/webhook', async (req, res) => {
         process.stdout.write(`\n🔵 [${requestId}] Call Control ID: ${callControlId}\n`);
         console.log(`[${requestId}] Call answered, call_control_id:`, callControlId);
         
-        if (callControlId) {
-          // Start streaming after call is answered
-          // NOTE: Session might not exist yet if call.answered arrives before handleCallStart completes
-          // So we'll retry with exponential backoff, or create the session if it doesn't exist
-          process.stdout.write(`\n🔵 [${requestId}] Attempting to start media stream...\n`);
-          console.log(`[${requestId}] Starting media stream for call_control_id:`, callControlId);
+        if (SIMPLE_TEST_MODE) {
+          // SIMPLE TEST MODE: Just speak a greeting, no streaming, no AI
+          process.stdout.write(`\n🧪 [${requestId}] SIMPLE TEST MODE: Speaking greeting only (NO STREAMING, NO AI)\n`);
+          console.log(`[${requestId}] 🧪 SIMPLE TEST MODE: Just speaking greeting to test basic call flow`);
           
-          let retries = 0;
-          const maxRetries = 5;
-          let success = false;
-          
-          while (retries < maxRetries && !success) {
-            try {
-              await TelnyxService.startMediaStream(callControlId);
-              process.stdout.write(`\n✅ [${requestId}] Media stream started successfully\n`);
-              console.log(`[${requestId}] ✅ Media stream started successfully`);
-              success = true;
-            } catch (error) {
-              if (error.message?.includes('Call session not found')) {
-                // Session doesn't exist yet - wait and retry, or create it
-                retries++;
-                if (retries < maxRetries) {
-                  const waitTime = Math.min(1000 * Math.pow(2, retries - 1), 5000); // Exponential backoff, max 5s
-                  process.stdout.write(`\n⚠️ [${requestId}] Session not found, retrying in ${waitTime}ms (attempt ${retries}/${maxRetries})...\n`);
-                  console.log(`[${requestId}] ⚠️ Session not found, waiting ${waitTime}ms before retry ${retries}/${maxRetries}`);
-                  await new Promise(resolve => setTimeout(resolve, waitTime));
-                } else {
-                  // Last retry failed - try to create the session now
-                  process.stdout.write(`\n⚠️ [${requestId}] Session still not found after ${maxRetries} retries, creating session now...\n`);
-                  console.log(`[${requestId}] ⚠️ Session still not found, creating it now...`);
-                  try {
-                    const result = await TelnyxService.handleCallStart(callData, callControlId);
-                    process.stdout.write(`\n✅ [${requestId}] Session created: ${result.callSession?.id}\n`);
-                    console.log(`[${requestId}] ✅ Session created:`, result.callSession?.id);
-                    // Now try starting the stream again
-                    await TelnyxService.startMediaStream(callControlId);
-                    process.stdout.write(`\n✅ [${requestId}] Media stream started successfully after creating session\n`);
-                    console.log(`[${requestId}] ✅ Media stream started successfully`);
-                    success = true;
-                  } catch (createError) {
-                    process.stdout.write(`\n❌ [${requestId}] Failed to create session and start stream\n`);
-                    console.error(`[${requestId}] ❌ Failed to create session:`, createError.message);
-                    // Fall through to error handling
-                  }
-                }
-              } else {
-                // Different error - don't retry
-                process.stdout.write(`\n❌ [${requestId}] Failed to start media stream: ${error.message}\n`);
-                console.error(`[${requestId}] ❌ Failed to start media stream:`, error.message);
-                break;
-              }
-            }
-          }
-          
-          if (!success) {
-            process.stdout.write(`\n❌ [${requestId}] Failed to start media stream after ${maxRetries} retries\n`);
-            console.error(`[${requestId}] ❌ Failed to start media stream after all retries`);
+          try {
+            const encodedCallControlId = encodeURIComponent(callControlId);
+            await TelnyxService.makeAPIRequest('POST', `/calls/${encodedCallControlId}/actions/speak`, {
+              payload: 'Hello! This is a test. Can you hear me? If you can hear this, the basic call flow is working.',
+              voice: 'female',
+              language: 'en-US'
+            });
+            process.stdout.write(`\n✅ [${requestId}] SIMPLE TEST: Greeting spoken successfully\n`);
+            console.log(`[${requestId}] ✅ SIMPLE TEST: Greeting spoken - if caller hears this, basic call flow works!`);
+          } catch (speakError) {
+            process.stdout.write(`\n❌ [${requestId}] SIMPLE TEST: Failed to speak greeting\n`);
+            console.error(`[${requestId}] ❌ SIMPLE TEST: Failed to speak:`, speakError.message);
           }
         } else {
-          console.error(`[${requestId}] ❌ No callControlId found in call.answered event`);
-          process.stdout.write(`\n❌ [${requestId}] No callControlId found\n`);
+          // NORMAL MODE: Start media stream and AI
+          process.stdout.write(`\n🔵 [${requestId}] Starting media stream and AI...\n`);
+          console.log(`[${requestId}] Call answered - starting media stream and AI...`);
+          
+          if (callControlId) {
+            let retries = 0;
+            const maxRetries = 5;
+            let success = false;
+            
+            while (retries < maxRetries && !success) {
+              try {
+                await TelnyxService.startMediaStream(callControlId);
+                process.stdout.write(`\n✅ [${requestId}] Media stream started successfully\n`);
+                console.log(`[${requestId}] ✅ Media stream started successfully`);
+                success = true;
+              } catch (error) {
+                if (error.message?.includes('Call session not found')) {
+                  retries++;
+                  if (retries < maxRetries) {
+                    const waitTime = Math.min(1000 * Math.pow(2, retries - 1), 5000);
+                    process.stdout.write(`\n⚠️ [${requestId}] Session not found, retrying in ${waitTime}ms (attempt ${retries}/${maxRetries})...\n`);
+                    console.log(`[${requestId}] ⚠️ Session not found, waiting ${waitTime}ms before retry ${retries}/${maxRetries}`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                  } else {
+                    process.stdout.write(`\n⚠️ [${requestId}] Session still not found after ${maxRetries} retries, creating session now...\n`);
+                    console.log(`[${requestId}] ⚠️ Session still not found, creating it now...`);
+                    try {
+                      const result = await TelnyxService.handleCallStart(callData, callControlId);
+                      process.stdout.write(`\n✅ [${requestId}] Session created: ${result.callSession?.id}\n`);
+                      console.log(`[${requestId}] ✅ Session created:`, result.callSession?.id);
+                      await TelnyxService.startMediaStream(callControlId);
+                      process.stdout.write(`\n✅ [${requestId}] Media stream started successfully after creating session\n`);
+                      console.log(`[${requestId}] ✅ Media stream started successfully`);
+                      success = true;
+                    } catch (createError) {
+                      process.stdout.write(`\n❌ [${requestId}] Failed to create session and start stream\n`);
+                      console.error(`[${requestId}] ❌ Failed to create session:`, createError.message);
+                    }
+                  }
+                } else {
+                  process.stdout.write(`\n❌ [${requestId}] Failed to start media stream: ${error.message}\n`);
+                  console.error(`[${requestId}] ❌ Failed to start media stream:`, error.message);
+                  break;
+                }
+              }
+            }
+            
+            if (!success) {
+              process.stdout.write(`\n❌ [${requestId}] Failed to start media stream after ${maxRetries} retries\n`);
+              console.error(`[${requestId}] ❌ Failed to start media stream after all retries`);
+            }
+          } else {
+            console.error(`[${requestId}] ❌ No callControlId found in call.answered event`);
+            process.stdout.write(`\n❌ [${requestId}] No callControlId found\n`);
+          }
         }
         
         res.json({ status: 'ok' });
       } else if (eventType === 'streaming.started') {
-        // Telnyx has started streaming and should connect to our WebSocket
         process.stdout.write(`\n🔵 [${requestId}] STREAMING.STARTED EVENT - Telnyx should connect to WebSocket now\n`);
         console.log(`[${requestId}] Streaming started - Telnyx should connect to WebSocket now`);
         const streamUrl = req.body.data?.payload?.stream_params?.stream_url;
@@ -212,7 +209,6 @@ router.post('/webhook', async (req, res) => {
         process.stdout.write(`\n⚠️  [${requestId}] If you don't see WebSocket connection logs next, Telnyx cannot reach the WebSocket server\n`);
         res.json({ status: 'ok' });
       } else if (eventType === 'streaming.stopped') {
-        // Streaming stopped - call may be ending
         process.stdout.write(`\n🔴 [${requestId}] STREAMING.STOPPED EVENT\n`);
         console.log(`[${requestId}] Streaming stopped`);
         const streamUrl = req.body.data?.payload?.stream_params?.stream_url;
@@ -220,7 +216,6 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Stream URL:`, streamUrl);
         console.log(`[${requestId}] Reason:`, reason);
         process.stdout.write(`\n🔴 [${requestId}] Streaming stopped - Reason: ${reason}\n`);
-        process.stdout.write(`\n⚠️  [${requestId}] If this happened immediately after streaming.started, Telnyx likely couldn't connect to WebSocket\n`);
         res.json({ status: 'ok' });
       } else if (eventType === 'call.hangup' || eventType === 'call.ended') {
         const callData = TelnyxService.parseInboundCall(req);
@@ -295,4 +290,3 @@ router.get('/:callId', authenticate, async (req, res) => {
 });
 
 export default router;
-
