@@ -60,12 +60,35 @@ export class AIRealtimeService {
         
         // Set Authorization header for WebSocket connection
         process.stdout.write('\n🔵 Creating WebSocket connection...\n');
-        this.ws = new WebSocket(url, {
-          headers: {
-            'Authorization': `Bearer ${cleanApiKey}`
-          }
+        
+        // Create WebSocket with error handling BEFORE connection attempt
+        try {
+          this.ws = new WebSocket(url, {
+            headers: {
+              'Authorization': `Bearer ${cleanApiKey}`
+            },
+            // Add connection timeout at WebSocket level
+            handshakeTimeout: 15000, // 15 seconds for handshake
+          });
+          process.stdout.write('\n🔵 WebSocket object created, waiting for connection...\n');
+          process.stdout.write(`🔵 Initial readyState: ${this.ws.readyState} (0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)\n`);
+        } catch (createError) {
+          process.stdout.write('\n❌❌❌ FAILED TO CREATE WEBSOCKET OBJECT ❌❌❌\n');
+          console.error('❌ Error creating WebSocket:', createError);
+          reject(createError);
+          return;
+        }
+        
+        // Set up error handler IMMEDIATELY after creation
+        this.ws.on('error', (error) => {
+          process.stdout.write('\n❌❌❌ OPENAI WEBSOCKET ERROR (IMMEDIATE) ❌❌❌\n');
+          console.error('❌❌❌ OpenAI Realtime WebSocket error:', error);
+          console.error('❌ Error name:', error.name);
+          console.error('❌ Error message:', error.message);
+          console.error('❌ Error stack:', error.stack);
+          console.error('❌ WebSocket readyState at error:', this.ws?.readyState);
+          reject(error);
         });
-        process.stdout.write('\n🔵 WebSocket object created, waiting for connection...\n');
         
         this.ws.on('open', () => {
           process.stdout.write('\n\n\n✅✅✅ OPENAI WEBSOCKET CONNECTED ✅✅✅\n\n\n');
@@ -293,29 +316,51 @@ export class AIRealtimeService {
           }
         });
         
-        this.ws.on('error', (error) => {
-          process.stdout.write('\n❌❌❌ OPENAI WEBSOCKET ERROR ❌❌❌\n');
-          console.error('❌❌❌ OpenAI Realtime WebSocket error:', error);
-          console.error('❌ Error name:', error.name);
-          console.error('❌ Error message:', error.message);
-          console.error('❌ Error stack:', error.stack);
-          reject(error);
-        });
-        
-        // Add connection timeout
+        // Add connection timeout with periodic state checks
+        let stateCheckCount = 0;
         const connectionTimeout = setTimeout(() => {
           if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            process.stdout.write('\n❌❌❌ OPENAI CONNECTION TIMEOUT (10 seconds) ❌❌❌\n');
-            console.error('❌ OpenAI WebSocket connection timeout after 10 seconds');
+            process.stdout.write('\n❌❌❌ OPENAI CONNECTION TIMEOUT (15 seconds) ❌❌❌\n');
+            console.error('❌ OpenAI WebSocket connection timeout after 15 seconds');
             console.error('❌ WebSocket readyState:', this.ws?.readyState);
+            console.error('❌ State check count:', stateCheckCount);
+            
+            // Try to get more info about why it failed
+            if (this.ws) {
+              console.error('❌ WebSocket URL attempted:', url);
+              console.error('❌ WebSocket protocol:', this.ws.protocol);
+              console.error('❌ WebSocket extensions:', this.ws.extensions);
+            }
+            
             this.ws?.close();
-            reject(new Error('OpenAI WebSocket connection timeout'));
+            reject(new Error('OpenAI WebSocket connection timeout - connection never opened'));
           }
-        }, 10000);
+        }, 15000); // Increased to 15 seconds to match handshakeTimeout
         
-        // Clear timeout on successful connection
+        // Monitor connection state periodically
+        const stateCheckInterval = setInterval(() => {
+          stateCheckCount++;
+          if (this.ws) {
+            const state = this.ws.readyState;
+            const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+            process.stdout.write(`🔵 Connection state check #${stateCheckCount}: ${state} (${stateNames[state]})\n`);
+            
+            if (state === WebSocket.OPEN) {
+              clearInterval(stateCheckInterval);
+              clearTimeout(connectionTimeout);
+            } else if (state === WebSocket.CLOSED) {
+              clearInterval(stateCheckInterval);
+              clearTimeout(connectionTimeout);
+              process.stdout.write('\n❌❌❌ WEBSOCKET CLOSED BEFORE OPENING ❌❌❌\n');
+              reject(new Error('WebSocket closed before connection could be established'));
+            }
+          }
+        }, 1000); // Check every second
+        
+        // Clear timeout and interval on successful connection
         this.ws.once('open', () => {
           clearTimeout(connectionTimeout);
+          clearInterval(stateCheckInterval);
         });
         
         this.ws.on('close', (code, reason) => {
