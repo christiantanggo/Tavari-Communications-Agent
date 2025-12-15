@@ -277,10 +277,13 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"],
           instructions:
-            "You are Tavari's phone receptionist. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time.",
+            "You are Tavari's phone receptionist. Greet callers warmly and help them. Be concise, friendly, and ask one question at a time.",
           voice: "alloy",
           input_audio_format: "g711_ulaw",
           output_audio_format: "pcm16", // Use pcm16 for output (supported), convert to g711_ulaw for Telnyx
+          output_audio_format_details: {
+            sample_rate: 24000, // OpenAI pcm16 is 24kHz
+          },
           input_audio_transcription: { model: "whisper-1" },
           turn_detection: {
             type: "server_vad",
@@ -297,43 +300,9 @@ async function startOpenAIRealtime(callId) {
     s.ready = true;
     sessions.set(callId, s);
 
-    // Wait a moment for session to be fully ready, then make the AI speak
-    // Add a system message to trigger the greeting, then create a response
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        // Add a conversation item to trigger the AI to speak
-        ws.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "system",
-              content: [
-                {
-                  type: "input_text",
-                  text: "The caller has just connected. Greet them now.",
-                },
-              ],
-            },
-          })
-        );
-        
-        // Then create a response - this should generate audio
-        setTimeout(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
-                type: "response.create",
-                response: {
-                  modalities: ["audio", "text"],
-                },
-              })
-            );
-            console.log(`🎤 Sent response.create for ${callId} - AI should generate audio`);
-          }
-        }, 100);
-      }
-    }, 200);
+    // Don't try to make AI speak first - let it respond naturally to user input
+    // The AI will greet when it receives audio input from the caller
+    console.log(`✅ OpenAI session ready for ${callId} - waiting for user input`);
   });
 
   ws.on("message", (raw) => {
@@ -347,8 +316,13 @@ async function startOpenAIRealtime(callId) {
     // Log first few messages to see what we're getting
     if (!s.messageCount) s.messageCount = 0;
     s.messageCount++;
-    if (s.messageCount <= 10) {
+    if (s.messageCount <= 20) {
       console.log(`📨 [${callId}] OpenAI message #${s.messageCount}: type=${msg.type}`);
+    }
+    
+    // Always log audio-related messages
+    if (msg.type && msg.type.includes("audio")) {
+      console.log(`🔊 [${callId}] Audio event: ${msg.type}`, msg.delta ? `(${msg.delta.length} bytes)` : "");
     }
 
     // Audio from OpenAI -> send to Telnyx WS
