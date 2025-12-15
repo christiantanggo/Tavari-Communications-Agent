@@ -12,8 +12,8 @@ export const setupCallAudioWebSocket = (server) => {
   console.log('🔵 Setting up WebSocket server for audio streaming...');
   const wss = new WebSocketServer({ 
     server,
-    path: '/api/calls/:callSessionId/audio', // This won't work - WebSocketServer doesn't support path patterns
-    // Instead, we'll accept all connections and validate path in handler
+    // No path option - WebSocketServer doesn't support path patterns
+    // We'll accept all connections and validate path in handler
   });
   console.log('✅ WebSocket server created and attached to HTTP server');
   console.log('🔵 WebSocket server will accept all connections, path validation happens in handler');
