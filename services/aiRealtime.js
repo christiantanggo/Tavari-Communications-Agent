@@ -443,6 +443,26 @@ export class AIRealtimeService {
           console.log('🔵 Converted audio size:', convertedAudio.length, 'bytes (PCM16 24kHz)');
           console.log('🔵 Expected size ratio: 6x (8kHz→24kHz, 1 byte→2 bytes)');
           console.log('🔵 Actual ratio:', (convertedAudio.length / audioData.length).toFixed(2));
+          
+          // Check if audio is silence (all zeros or very low amplitude)
+          let maxAmplitude = 0;
+          let nonZeroSamples = 0;
+          for (let i = 0; i < convertedAudio.length; i += 2) {
+            const sample = Math.abs(convertedAudio.readInt16LE(i));
+            if (sample > 0) nonZeroSamples++;
+            if (sample > maxAmplitude) maxAmplitude = sample;
+          }
+          const silenceRatio = 1 - (nonZeroSamples / (convertedAudio.length / 2));
+          console.log('🔵 Audio statistics:');
+          console.log('   - Max amplitude:', maxAmplitude);
+          console.log('   - Non-zero samples:', nonZeroSamples, 'of', convertedAudio.length / 2);
+          console.log('   - Silence ratio:', (silenceRatio * 100).toFixed(1) + '%');
+          if (silenceRatio > 0.95) {
+            process.stdout.write(`\n⚠️⚠️⚠️ WARNING: AUDIO APPEARS TO BE SILENCE (${(silenceRatio * 100).toFixed(1)}% zeros) ⚠️⚠️⚠️\n`);
+            console.warn('⚠️ WARNING: Converted audio appears to be mostly silence');
+            console.warn('⚠️ OpenAI may not detect speech if audio is silence');
+          }
+          
           this._firstOutputLogged = true;
         }
       } catch (conversionError) {
