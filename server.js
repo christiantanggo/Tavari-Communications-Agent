@@ -120,6 +120,9 @@ async function handleCallInitiated(payload, callId) {
     telnyxWs: null,
     streamId: null,
     ready: false,
+    audioFrameCount: 0,
+    audioOutFrameCount: 0,
+    transcriptLogCount: 0,
   });
 
   // Answer immediately
@@ -143,6 +146,9 @@ async function handleCallAnswered(payload, callId) {
       telnyxWs: null,
       streamId: null,
       ready: false,
+      audioFrameCount: 0,
+      audioOutFrameCount: 0,
+      transcriptLogCount: 0,
     });
   }
 
@@ -251,6 +257,9 @@ async function startOpenAIRealtime(callId) {
     telnyxWs: null,
     streamId: null,
     ready: false,
+    audioFrameCount: 0,
+    audioOutFrameCount: 0,
+    transcriptLogCount: 0,
   };
   s.openaiWs = ws;
   sessions.set(callId, s);
@@ -313,14 +322,39 @@ async function startOpenAIRealtime(callId) {
       const telnyxWs = session?.telnyxWs;
 
       if (telnyxWs && telnyxWs.readyState === WebSocket.OPEN) {
+        // Log first few audio frames for debugging
+        if (!session.audioOutFrameCount) session.audioOutFrameCount = 0;
+        session.audioOutFrameCount++;
+        if (session.audioOutFrameCount <= 3) {
+          console.log(`📤 [${callId}] Sending audio frame #${session.audioOutFrameCount} to Telnyx (${msg.delta.length} bytes)`);
+        }
+        
         telnyxWs.send(
           JSON.stringify({
             event: "media",
             media: { payload: msg.delta },
           })
         );
+      } else {
+        if (!session.audioOutFrameCount || session.audioOutFrameCount === 0) {
+          console.log(`⚠️ [${callId}] OpenAI sent audio but Telnyx WS not ready (state: ${telnyxWs?.readyState})`);
+        }
       }
       return;
+    }
+    
+    // Log other important OpenAI events
+    if (msg.type === "response.audio_transcript.delta") {
+      // Transcript updates - log first few
+      if (!s.transcriptLogCount) s.transcriptLogCount = 0;
+      s.transcriptLogCount++;
+      if (s.transcriptLogCount <= 1 && msg.delta) {
+        console.log(`💬 [${callId}] Transcript: ${msg.delta}`);
+      }
+    }
+    
+    if (msg.type === "response.audio_transcript.done") {
+      console.log(`✅ [${callId}] Response complete: ${msg.transcript || "(no transcript)"}`);
     }
 
     if (msg.type === "error") {
@@ -371,6 +405,9 @@ wss.on("connection", (socket, req) => {
     telnyxWs: null,
     streamId: null,
     ready: false,
+    audioFrameCount: 0,
+    audioOutFrameCount: 0,
+    transcriptLogCount: 0,
   };
   s.telnyxWs = socket;
   sessions.set(callId, s);
@@ -400,12 +437,23 @@ wss.on("connection", (socket, req) => {
       const openaiWs = session?.openaiWs;
 
       if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        // Log first few audio frames for debugging
+        if (!s.audioFrameCount) s.audioFrameCount = 0;
+        s.audioFrameCount++;
+        if (s.audioFrameCount <= 3) {
+          console.log(`📥 [${callId}] Received audio frame #${s.audioFrameCount} from Telnyx (${msg.media.payload.length} bytes)`);
+        }
+        
         openaiWs.send(
           JSON.stringify({
             type: "input_audio_buffer.append",
             audio: msg.media.payload, // already base64
           })
         );
+      } else {
+        if (s.audioFrameCount === 0 || s.audioFrameCount === undefined) {
+          console.log(`⚠️ [${callId}] Received audio from Telnyx but OpenAI WS not ready (state: ${openaiWs?.readyState})`);
+        }
       }
       return;
     }
