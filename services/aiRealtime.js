@@ -22,9 +22,13 @@ export class AIRealtimeService {
   async connect() {
     return new Promise((resolve, reject) => {
       try {
+        process.stdout.write('\n\n\n🔵🔵🔵 STARTING OPENAI CONNECTION 🔵🔵🔵\n\n\n');
+        console.log('🔵🔵🔵 STARTING OPENAI CONNECTION 🔵🔵🔵');
+        
         // Verify API key is set
         if (!OPENAI_API_KEY) {
           const error = new Error('OPENAI_API_KEY environment variable is not set');
+          process.stdout.write('\n❌❌❌ OPENAI API KEY NOT SET ❌❌❌\n');
           console.error('❌', error.message);
           reject(error);
           return;
@@ -38,35 +42,46 @@ export class AIRealtimeService {
         // Clean API key - remove any whitespace, newlines, or invalid characters
         const cleanApiKey = OPENAI_API_KEY?.trim().replace(/\s+/g, '') || '';
         
+        process.stdout.write('\n🔵🔵🔵 CONNECTING TO OPENAI REALTIME API 🔵🔵🔵\n');
         console.log('🔵 Connecting to OpenAI Realtime API...');
         console.log('🔵 API Key present:', !!cleanApiKey);
         console.log('🔵 API Key length:', cleanApiKey.length);
         console.log('🔵 API Key starts with:', cleanApiKey.substring(0, 7) || 'N/A');
         console.log('🔵 Using Authorization header (OpenAI Realtime API standard)');
+        console.log('🔵 URL:', url);
         
         if (!cleanApiKey) {
           const error = new Error('OPENAI_API_KEY is empty after cleaning');
+          process.stdout.write('\n❌❌❌ OPENAI API KEY EMPTY ❌❌❌\n');
           console.error('❌', error.message);
           reject(error);
           return;
         }
         
         // Set Authorization header for WebSocket connection
+        process.stdout.write('\n🔵 Creating WebSocket connection...\n');
         this.ws = new WebSocket(url, {
           headers: {
             'Authorization': `Bearer ${cleanApiKey}`
           }
         });
+        process.stdout.write('\n🔵 WebSocket object created, waiting for connection...\n');
         
         this.ws.on('open', () => {
-          process.stdout.write('\n✅ OPENAI WEBSOCKET CONNECTED\n');
-          console.log('✅ Connected to OpenAI Realtime API');
+          process.stdout.write('\n\n\n✅✅✅ OPENAI WEBSOCKET CONNECTED ✅✅✅\n\n\n');
+          console.log('✅✅✅ Connected to OpenAI Realtime API ✅✅✅');
           console.log('✅ OpenAI WebSocket readyState:', this.ws.readyState);
+          console.log('✅ About to wait for session.created...');
           
           // Wait for session.created first, then send session.update
           // OpenAI creates session automatically on connect, but we should wait for confirmation
-          const sessionReadyHandler = (message) => {
-            if (message.type === 'session.created') {
+          const sessionReadyHandler = (data) => {
+            try {
+              const message = JSON.parse(data.toString());
+              process.stdout.write(`\n🔵 SESSION HANDLER: ${message.type}\n`);
+              console.log('🔵 Session handler received:', message.type);
+              
+              if (message.type === 'session.created') {
               process.stdout.write('\n✅ OPENAI SESSION CREATED - Configuring session...\n');
               console.log('✅ OpenAI session.created event received');
               
@@ -134,34 +149,79 @@ export class AIRealtimeService {
               }, 1000); // Wait 1 second after session is configured to ensure it's ready
               
               resolve(true);
-            } else if (message.type === 'error') {
-              console.error('❌ OpenAI session error:', JSON.stringify(message, null, 2));
-              // Don't reject on error - might be recoverable
+              } else if (message.type === 'error') {
+                process.stdout.write(`\n❌ SESSION HANDLER ERROR: ${message.type}\n`);
+                console.error('❌ OpenAI session error:', JSON.stringify(message, null, 2));
+                // Don't reject on error - might be recoverable
+              }
+            } catch (error) {
+              console.error('❌ Error in sessionReadyHandler:', error);
+              console.error('❌ Error parsing message:', error.message);
+              console.error('❌ Data type:', typeof data);
+              console.error('❌ Data preview:', data.toString().substring(0, 200));
             }
           };
           
-          // Listen for session events
+          // Listen for session events - use 'message' event directly
+          // We'll remove this handler once session is configured
           this.ws.on('message', sessionReadyHandler);
+          process.stdout.write('\n🔵 Session handler registered, waiting for session.created...\n');
           
-          // Timeout after 15 seconds - but log warning if no confirmation
+          // Timeout after 10 seconds - if no confirmation, assume session is ready anyway
+          // This is a workaround for cases where session.updated doesn't arrive
           setTimeout(() => {
             this.ws.removeListener('message', sessionReadyHandler);
             if (!this.sessionConfigured) {
-              process.stdout.write(`\n⚠️⚠️⚠️ SESSION CONFIGURATION TIMEOUT - NO session.updated RECEIVED ⚠️⚠️⚠️\n`);
-              console.warn('⚠️ Session confirmation timeout after 15 seconds');
-              console.warn('⚠️ WARNING: OpenAI may not be ready to receive audio without session.updated confirmation');
-              console.warn('⚠️ Proceeding anyway - session might still work, but audio may be ignored');
-              // Set a flag to indicate we're proceeding without confirmation
+              process.stdout.write(`\n⚠️⚠️⚠️ SESSION CONFIGURATION TIMEOUT - PROCEEDING ANYWAY ⚠️⚠️⚠️\n`);
+              console.warn('⚠️ Session confirmation timeout after 10 seconds');
+              console.warn('⚠️ WARNING: Did not receive session.updated confirmation');
+              console.warn('⚠️ PROCEEDING ANYWAY - Setting sessionConfigured=true to allow audio');
+              console.warn('⚠️ This may cause issues if OpenAI is not actually ready');
+              // Set sessionConfigured anyway so audio can be sent
+              // This is a workaround - ideally we'd wait for confirmation
+              this.sessionConfigured = true;
               this._sessionTimeoutProceeded = true;
+              
+              // Try to send greeting anyway
+              setTimeout(() => {
+                try {
+                  const greetingText = this.agentConfig?.greeting_text || 'Hello! Thank you for calling. How can I help you today?';
+                  process.stdout.write(`\n🔵 SENDING GREETING AFTER TIMEOUT: "${greetingText}"\n`);
+                  const greetingResponse = {
+                    type: 'response.create',
+                    response: {
+                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. Do not wait - greet them right now.`,
+                    },
+                  };
+                  this.ws.send(JSON.stringify(greetingResponse));
+                  process.stdout.write(`\n✅ GREETING SENT AFTER TIMEOUT\n`);
+                } catch (error) {
+                  console.error('❌ Error sending greeting after timeout:', error);
+                }
+              }, 500);
+              
               // Still resolve so initialization doesn't hang
               resolve(true);
             }
-          }, 15000);
+          }, 10000);
         });
         
+        // Main message handler - processes all messages after session is configured
+        // NOTE: session.created/updated are handled by sessionReadyHandler above
         this.ws.on('message', (data) => {
           try {
             const message = JSON.parse(data.toString());
+            
+            // Skip session events in main handler - they're handled by sessionReadyHandler
+            if (message.type === 'session.created' || message.type === 'session.updated') {
+              // These are handled by sessionReadyHandler, but log here too for visibility
+              if (message.type === 'session.updated' && !this.sessionConfigured) {
+                // This shouldn't happen, but if it does, configure session
+                process.stdout.write(`\n🔵 MAIN HANDLER: Got session.updated, configuring...\n`);
+                this.sessionConfigured = true;
+              }
+              return; // Don't process further in main handler
+            }
             
             // Log ALL message types for debugging (we can filter later)
             if (!this._messageTypeCounts) this._messageTypeCounts = {};
@@ -225,8 +285,28 @@ export class AIRealtimeService {
         });
         
         this.ws.on('error', (error) => {
-          console.error('OpenAI Realtime WebSocket error:', error);
+          process.stdout.write('\n❌❌❌ OPENAI WEBSOCKET ERROR ❌❌❌\n');
+          console.error('❌❌❌ OpenAI Realtime WebSocket error:', error);
+          console.error('❌ Error name:', error.name);
+          console.error('❌ Error message:', error.message);
+          console.error('❌ Error stack:', error.stack);
           reject(error);
+        });
+        
+        // Add connection timeout
+        const connectionTimeout = setTimeout(() => {
+          if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            process.stdout.write('\n❌❌❌ OPENAI CONNECTION TIMEOUT (10 seconds) ❌❌❌\n');
+            console.error('❌ OpenAI WebSocket connection timeout after 10 seconds');
+            console.error('❌ WebSocket readyState:', this.ws?.readyState);
+            this.ws?.close();
+            reject(new Error('OpenAI WebSocket connection timeout'));
+          }
+        }, 10000);
+        
+        // Clear timeout on successful connection
+        this.ws.once('open', () => {
+          clearTimeout(connectionTimeout);
         });
         
         this.ws.on('close', (code, reason) => {
