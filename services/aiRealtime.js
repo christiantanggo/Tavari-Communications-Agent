@@ -124,10 +124,11 @@ export class AIRealtimeService {
                           create_response: true, // Automatically generate response when speech ends
                           interrupt_response: true, // Interrupt ongoing response if new speech detected
                         },
-                        transcription: {
-                          model: 'whisper-1', // Enable transcription to help with speech detection
-                        },
                       },
+                    },
+                    // input_audio_transcription goes directly under session, NOT under audio.input
+                    input_audio_transcription: {
+                      model: 'whisper-1', // Enable transcription to help with speech detection
                     },
                     // temperature and max_output_tokens must be INSIDE session object
                     temperature: 0.8,
