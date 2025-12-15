@@ -67,19 +67,27 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Call initiated, call_control_id:`, callControlId);
         console.log(`[${requestId}] Webhook payload:`, JSON.stringify(req.body, null, 2));
         
-        // Handle call start (this will answer the call via API and start streaming)
+        // Handle call start (this will answer the call via API)
+        // Streaming will be started when call.answered event is received
         process.stdout.write(`\n🔵 [${requestId}] Calling TelnyxService.handleCallStart()...\n`);
         console.log(`[${requestId}] Calling TelnyxService.handleCallStart()...`);
         try {
           const result = await TelnyxService.handleCallStart(callData, callControlId);
           process.stdout.write(`\n✅ [${requestId}] TelnyxService.handleCallStart() completed\n`);
           console.log(`[${requestId}] TelnyxService.handleCallStart() completed`);
-          console.log(`[${requestId}] Result:`, result);
+          console.log(`[${requestId}] Result:`, JSON.stringify(result, null, 2));
+          process.stdout.write(`\n✅ [${requestId}] Call session created: ${result.callSession?.id}\n`);
+          process.stdout.write(`\n✅ [${requestId}] Call answered, waiting for call.answered event...\n`);
         } catch (error) {
+          process.stdout.write(`\n❌ [${requestId}] CRITICAL ERROR in handleCallStart\n`);
           console.error(`[${requestId}] ❌ ERROR in handleCallStart:`, error);
           console.error(`[${requestId}] Error message:`, error.message);
           console.error(`[${requestId}] Error stack:`, error.stack);
-          // Don't throw - still return 200 to Telnyx
+          console.error(`[${requestId}] Error response:`, error.response?.data || error.response || 'No response data');
+          process.stdout.write(`\n❌ [${requestId}] Error message: ${error.message}\n`);
+          process.stdout.write(`\n❌ [${requestId}] Error response: ${JSON.stringify(error.response?.data || {}, null, 2)}\n`);
+          // Don't throw - still return 200 to Telnyx to acknowledge webhook
+          // But log extensively so we can see what went wrong
         }
         
         // Return 200 OK - Telnyx just needs acknowledgment
@@ -89,18 +97,39 @@ router.post('/webhook', async (req, res) => {
         res.json({ status: 'ok' });
       } else if (eventType === 'call.answered') {
         // Call was answered - NOW start the media stream
-        // Telnyx may require the call to be answered before connecting to WebSocket
+        // Telnyx requires the call to be in "answered" state before streaming can start
+        process.stdout.write(`\n🔵 [${requestId}] CALL.ANSWERED EVENT - Starting media stream...\n`);
         console.log(`[${requestId}] Call answered - starting media stream...`);
+        
         const callData = TelnyxService.parseInboundCall(req);
         const callControlId = req.body.data?.payload?.call_control_id || 
                              req.body.payload?.call_control_id ||
                              callData.telnyx_call_id;
         
+        process.stdout.write(`\n🔵 [${requestId}] Call Control ID: ${callControlId}\n`);
+        console.log(`[${requestId}] Call answered, call_control_id:`, callControlId);
+        
         if (callControlId) {
           // Start streaming after call is answered
-          TelnyxService.startMediaStream(callControlId).catch(error => {
-            console.error(`[${requestId}] Failed to start media stream after call.answered:`, error);
-          });
+          // This will find the call session and start streaming with the correct session ID
+          process.stdout.write(`\n🔵 [${requestId}] Calling TelnyxService.startMediaStream()...\n`);
+          console.log(`[${requestId}] Starting media stream for call_control_id:`, callControlId);
+          
+          try {
+            await TelnyxService.startMediaStream(callControlId);
+            process.stdout.write(`\n✅ [${requestId}] Media stream started successfully\n`);
+            console.log(`[${requestId}] ✅ Media stream started successfully`);
+          } catch (error) {
+            process.stdout.write(`\n❌ [${requestId}] Failed to start media stream\n`);
+            console.error(`[${requestId}] ❌ Failed to start media stream after call.answered:`, error);
+            console.error(`[${requestId}] Error message:`, error.message);
+            console.error(`[${requestId}] Error stack:`, error.stack);
+            console.error(`[${requestId}] Error response:`, error.response?.data || error.response || 'No response data');
+            // Don't throw - still return 200 to Telnyx, but log the error
+          }
+        } else {
+          console.error(`[${requestId}] ❌ No callControlId found in call.answered event`);
+          process.stdout.write(`\n❌ [${requestId}] No callControlId found\n`);
         }
         
         res.json({ status: 'ok' });

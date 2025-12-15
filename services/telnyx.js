@@ -552,6 +552,8 @@ export class TelnyxService {
   }
 
   // Handle call start (webhook response)
+  // This should ONLY create the call session and answer the call
+  // Streaming will be started in call.answered event handler
   static async handleCallStart(callData, callControlId) {
     console.log('🔵 handleCallStart() called');
     console.log('🔵 callData:', JSON.stringify(callData, null, 2));
@@ -579,23 +581,20 @@ export class TelnyxService {
       throw new Error('callControlId is required to answer call');
     }
     
-    console.log('🔵 callControlId exists, proceeding to answer and stream...');
+    console.log('🔵 callControlId exists, proceeding to answer call...');
+    console.log('🔵 NOTE: Streaming will be started when call.answered event is received');
     
     try {
-      // Step 1: Answer the call
+      // Step 1: Answer the call ONLY
+      // DO NOT start streaming here - wait for call.answered event
       console.log('🔵 Step 1: Answering call via Call Control API');
       console.log('🔵 POST /calls/' + callControlId + '/actions/answer');
       const answerResponse = await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
       console.log('✅ Call answered successfully');
       console.log('✅ Answer response:', JSON.stringify(answerResponse, null, 2));
-      
-      // Step 2: Start streaming IMMEDIATELY after answering
-      console.log('🔵 Step 2: Starting media stream immediately after answering...');
-      console.log('🔵 Using call session ID:', callSession.id);
-      await this.startMediaStreamWithSessionId(callControlId, callSession.id);
-      console.log('✅ Media stream started');
+      console.log('✅ Waiting for call.answered event to start streaming...');
     } catch (error) {
-      console.error('❌ CRITICAL ERROR: Failed to answer call or start streaming');
+      console.error('❌ CRITICAL ERROR: Failed to answer call');
       console.error('❌ Error message:', error.message);
       console.error('❌ Error stack:', error.stack);
       console.error('❌ Error response:', error.response?.data || error.response || 'No response data');
@@ -613,23 +612,32 @@ export class TelnyxService {
   // Start media stream for a call (called after call.answered)
   static async startMediaStream(callControlId) {
     if (!callControlId) {
-      console.error('Cannot start media stream: callControlId is required');
-      return;
+      console.error('❌ Cannot start media stream: callControlId is required');
+      throw new Error('callControlId is required to start media stream');
     }
+    
+    console.log('🔵 startMediaStream() called with callControlId:', callControlId);
     
     try {
       // Find the call session by call_control_id (stored in voximplant_call_id field)
       // Note: For Telnyx, we store call_control_id in the voximplant_call_id field
+      console.log('🔵 Looking up call session by call_control_id:', callControlId);
       const callSession = await CallSession.findByVoximplantCallId(callControlId);
+      
       if (!callSession) {
-        console.error('Cannot start media stream: call session not found for call_control_id:', callControlId);
-        return;
+        console.error('❌ Cannot start media stream: call session not found for call_control_id:', callControlId);
+        throw new Error(`Call session not found for call_control_id: ${callControlId}`);
       }
       
+      console.log('✅ Call session found:', callSession.id);
+      console.log('🔵 Starting media stream with session ID:', callSession.id);
+      
       await this.startMediaStreamWithSessionId(callControlId, callSession.id);
+      console.log('✅ Media stream started successfully');
     } catch (error) {
       console.error('❌ Failed to start media stream:', error.message);
-      console.error('Error details:', error.response?.data || error);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Error details:', error.response?.data || error);
       throw error;
     }
   }
@@ -660,7 +668,7 @@ export class TelnyxService {
       // This creates a bidirectional WebSocket connection for audio
       const streamPayload = {
         stream_url: streamUrl,
-        stream_track: 'both', // Send and receive audio (Telnyx expects 'both', not 'both_tracks')
+        stream_track: 'both_tracks', // Send and receive audio (Telnyx API requires 'both_tracks', not 'both')
       };
       
       console.log('🔵 Starting media stream for Telnyx...');

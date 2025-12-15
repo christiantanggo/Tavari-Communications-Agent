@@ -151,6 +151,8 @@ See `PROJECT_SUMMARY.md` for complete API documentation.
 
 - `PROJECT_SUMMARY.md` - Complete project overview
 - `DEPLOYMENT.md` - Deployment guide and production checklist
+- `DEPLOYMENT_AUTOMATION.md` - Automatic deployment setup (GitHub → Railway/Vercel)
+- `.github/workflows/README.md` - GitHub Actions workflows documentation
 
 ## License
 

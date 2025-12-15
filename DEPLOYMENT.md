@@ -74,7 +74,46 @@ npm run dev
 npm start
 ```
 
-## Frontend Deployment
+## Automatic Deployment (CI/CD)
+
+This project includes GitHub Actions workflows for automatic deployment:
+
+### Setup Automatic Deployment
+
+#### Option 1: Native Platform Integrations (Recommended - Easiest)
+
+**Railway (Backend):**
+1. Go to Railway dashboard → New Project → Deploy from GitHub
+2. Select your repository
+3. Railway will automatically deploy on every push to main/master
+4. Add environment variables in Railway dashboard
+
+**Vercel (Frontend):**
+1. Go to Vercel dashboard → Add New Project
+2. Import your GitHub repository
+3. Set root directory to `frontend`
+4. Vercel will automatically deploy on every push to main/master
+5. Add environment variables in Vercel dashboard
+
+#### Option 2: GitHub Actions Workflows
+
+The project includes GitHub Actions workflows in `.github/workflows/`:
+
+1. **Add GitHub Secrets:**
+   - Go to GitHub repo → Settings → Secrets and variables → Actions
+   - For Railway: Add `RAILWAY_TOKEN`
+   - For Vercel: Add `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
+
+2. **Workflows will automatically:**
+   - Deploy backend to Railway on backend file changes
+   - Deploy frontend to Vercel on frontend file changes
+   - Run CI tests on pull requests
+
+See `.github/workflows/README.md` for detailed setup instructions.
+
+## Manual Deployment
+
+### Frontend Deployment
 
 ```bash
 cd frontend
@@ -86,6 +125,20 @@ npm start
 Or deploy to Vercel:
 ```bash
 vercel deploy
+```
+
+### Backend Deployment
+
+Deploy to Railway:
+```bash
+railway up
+```
+
+Or use Railway CLI:
+```bash
+railway login
+railway link
+railway up
 ```
 
 ## Production Checklist
