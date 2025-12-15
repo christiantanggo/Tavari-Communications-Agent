@@ -312,8 +312,20 @@ export class AIRealtimeService {
                 process.stdout.write(`\n🔵 OPENAI RESPONSE DELTA #${this._responseDeltaCount}: ${message.type}\n`);
                 console.log(`🔵 OpenAI response delta #${this._responseDeltaCount}:`, message.type);
               }
+            } else if (message.type === 'error') {
+              // CRITICAL: Log ALL errors, especially audio-related ones
+              process.stdout.write(`\n❌❌❌ OPENAI ERROR (MAIN HANDLER): ${JSON.stringify(message, null, 2)}\n`);
+              console.error('❌ OpenAI error received:', message);
+            } else {
+              // Log ALL other message types to see what OpenAI is sending
+              // This will help us understand if audio is being processed
+              if (!this._unknownMessageCount) this._unknownMessageCount = 0;
+              this._unknownMessageCount++;
+              if (this._unknownMessageCount <= 20) {
+                process.stdout.write(`\n🔵 OPENAI MESSAGE TYPE: ${message.type}\n`);
+                console.log(`🔵 OpenAI message type: ${message.type}`, message);
+              }
             }
-            // Don't log other message types - too verbose
             
             this.handleMessage(message);
           } catch (error) {
