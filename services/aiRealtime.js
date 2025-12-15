@@ -175,15 +175,19 @@ export class AIRealtimeService {
               resolve(true);
               } else if (message.type === 'error') {
                 process.stdout.write(`\n❌❌❌ SESSION HANDLER ERROR ❌❌❌\n`);
-                process.stdout.write(`❌ Error type: ${message.type}\n`);
-                process.stdout.write(`❌ Error code: ${message.code || 'N/A'}\n`);
-                process.stdout.write(`❌ Error message: ${message.message || 'N/A'}\n`);
-                process.stdout.write(`❌ Error param: ${message.param || 'N/A'}\n`);
-                console.error('❌ OpenAI session error:', JSON.stringify(message, null, 2));
+                // OpenAI errors can be nested in message.error OR at top level
+                const errorObj = message.error || message;
+                process.stdout.write(`❌ FULL ERROR OBJECT: ${JSON.stringify(message, null, 2)}\n`);
+                process.stdout.write(`❌ Error type: ${errorObj.type || message.type || 'N/A'}\n`);
+                process.stdout.write(`❌ Error code: ${errorObj.code || message.code || 'N/A'}\n`);
+                process.stdout.write(`❌ Error message: ${errorObj.message || message.message || 'N/A'}\n`);
+                process.stdout.write(`❌ Error param: ${errorObj.param || message.param || 'N/A'}\n`);
+                console.error('❌ OpenAI session error (full):', JSON.stringify(message, null, 2));
                 // Log the full error to help debug
-                if (message.param) {
-                  process.stdout.write(`\n❌ UNKNOWN PARAMETER: ${message.param}\n`);
-                  console.error(`❌ CRITICAL: Unknown parameter '${message.param}' in session configuration`);
+                const param = errorObj.param || message.param;
+                if (param) {
+                  process.stdout.write(`\n❌❌❌ UNKNOWN PARAMETER: ${param} ❌❌❌\n`);
+                  console.error(`❌ CRITICAL: Unknown parameter '${param}' in session configuration`);
                 }
                 // Don't reject on error - might be recoverable
               }
@@ -520,26 +524,21 @@ export class AIRealtimeService {
         
       case 'error':
         process.stdout.write(`\n❌❌❌ OPENAI ERROR IN MAIN HANDLER ❌❌❌\n`);
-        process.stdout.write(`❌ Error type: ${message.type}\n`);
-        process.stdout.write(`❌ Error code: ${message.code || 'N/A'}\n`);
-        process.stdout.write(`❌ Error message: ${message.message || 'N/A'}\n`);
-        process.stdout.write(`❌ Error param: ${message.param || 'N/A'}\n`);
-        console.error('❌ OpenAI Realtime error:', JSON.stringify(message, null, 2));
-        if (message.error) {
-          console.error('Error details:', JSON.stringify(message.error, null, 2));
-        }
-        if (message.message) {
-          console.error('Error message:', message.message);
-        }
-        if (message.code) {
-          console.error('Error code:', message.code);
-        }
-        if (message.param) {
-          process.stdout.write(`\n❌❌❌ UNKNOWN PARAMETER: ${message.param} ❌❌❌\n`);
-          console.error(`❌ CRITICAL: Unknown parameter '${message.param}' - this must be fixed!`);
+        // OpenAI errors can be nested in message.error OR at top level
+        const errorObj = message.error || message;
+        process.stdout.write(`❌ FULL ERROR OBJECT: ${JSON.stringify(message, null, 2)}\n`);
+        process.stdout.write(`❌ Error type: ${errorObj.type || message.type || 'N/A'}\n`);
+        process.stdout.write(`❌ Error code: ${errorObj.code || message.code || 'N/A'}\n`);
+        process.stdout.write(`❌ Error message: ${errorObj.message || message.message || 'N/A'}\n`);
+        process.stdout.write(`❌ Error param: ${errorObj.param || message.param || 'N/A'}\n`);
+        console.error('❌ OpenAI Realtime error (full):', JSON.stringify(message, null, 2));
+        const param = errorObj.param || message.param;
+        if (param) {
+          process.stdout.write(`\n❌❌❌ UNKNOWN PARAMETER: ${param} ❌❌❌\n`);
+          console.error(`❌ CRITICAL: Unknown parameter '${param}' - this must be fixed!`);
         }
         // Log the full message object
-        console.error('Full error object:', message);
+        console.error('Full error object:', JSON.stringify(message, null, 2));
         break;
         
       default:
