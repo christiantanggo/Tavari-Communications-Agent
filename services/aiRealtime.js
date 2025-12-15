@@ -112,29 +112,25 @@ export class AIRealtimeService {
               
               // Now send session.update to configure audio format
               try {
+                // MINIMAL CONFIGURATION - Only what's absolutely required
+                // Removed input_audio_transcription - it's causing errors and semantic_vad doesn't need it
                 const sessionConfig = {
                   type: 'session.update',
                   session: {
-                    type: 'realtime', // REQUIRED: Session type must be specified
+                    type: 'realtime',
                     instructions: this.buildSystemInstructions(),
-                    // CORRECT STRUCTURE: turn_detection must be under audio.input, NOT directly under session
                     audio: {
                       input: {
                         turn_detection: {
-                          type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
-                          eagerness: 'high', // Valid values: "auto", "low", "medium", "high" (NOT a number!)
-                          create_response: true, // Automatically generate response when speech ends
-                          interrupt_response: true, // Interrupt ongoing response if new speech detected
+                          type: 'semantic_vad',
+                          eagerness: 'high',
+                          create_response: true,
+                          interrupt_response: true,
                         },
                       },
                     },
-                    // input_audio_transcription goes directly under session, NOT under audio.input
-                    input_audio_transcription: {
-                      model: 'whisper-1', // Enable transcription to help with speech detection
-                    },
-                    // temperature and max_output_tokens must be INSIDE session object
                     temperature: 0.8,
-                    max_output_tokens: 4096, // CORRECT parameter name (NOT max_response_output_tokens)
+                    max_output_tokens: 4096,
                   },
                 };
                 
