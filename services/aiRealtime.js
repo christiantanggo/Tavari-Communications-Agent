@@ -115,9 +115,8 @@ export class AIRealtimeService {
                   session: {
                     type: 'realtime', // REQUIRED: Session type must be specified
                     instructions: this.buildSystemInstructions(),
-                    // voice is NOT valid in session.update - must be set at connection time or use default
-                    input_audio_format: 'pcm16', // Audio format must be INSIDE session object
-                    output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
+                    // input_audio_format and output_audio_format are NOT valid in session.update
+                    // OpenAI defaults to PCM16 24kHz - we convert Telnyx audio to match
                     turn_detection: {
                       type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
                       eagerness: 'high', // Valid values: "auto", "low", "medium", "high" (NOT a number!)
