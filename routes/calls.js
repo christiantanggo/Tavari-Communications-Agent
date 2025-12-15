@@ -139,6 +139,46 @@ router.post('/webhook', async (req, res) => {
             process.stdout.write(`\n❌ [${requestId}] SIMPLE TEST: Failed to speak greeting\n`);
             console.error(`[${requestId}] ❌ SIMPLE TEST: Failed to speak:`, speakError.message);
           }
+        } else if (process.env.STREAMING_TEST_MODE === 'true') {
+          // STREAMING TEST MODE: Start streaming, receive audio, but don't process with AI
+          process.stdout.write(`\n🧪 [${requestId}] STREAMING TEST MODE: Starting stream to test audio reception (NO AI)\n`);
+          console.log(`[${requestId}] 🧪 STREAMING TEST MODE: Starting media stream to test if we receive audio chunks`);
+          
+          if (callControlId) {
+            let retries = 0;
+            const maxRetries = 5;
+            let success = false;
+            
+            while (retries < maxRetries && !success) {
+              try {
+                await TelnyxService.startMediaStream(callControlId);
+                process.stdout.write(`\n✅ [${requestId}] STREAMING TEST: Media stream started\n`);
+                console.log(`[${requestId}] ✅ STREAMING TEST: Media stream started - check logs for '🎧 AUDIO RECEIVED' messages`);
+                console.log(`[${requestId}] ✅ If you see audio chunks in logs, streaming works!`);
+                success = true;
+              } catch (error) {
+                if (error.message?.includes('Call session not found')) {
+                  retries++;
+                  if (retries < maxRetries) {
+                    const waitTime = Math.min(1000 * Math.pow(2, retries - 1), 5000);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                  } else {
+                    try {
+                      const result = await TelnyxService.handleCallStart(callData, callControlId);
+                      await TelnyxService.startMediaStream(callControlId);
+                      success = true;
+                    } catch (createError) {
+                      console.error(`[${requestId}] ❌ Failed to create session:`, createError.message);
+                    }
+                  }
+                } else {
+                  process.stdout.write(`\n❌ [${requestId}] STREAMING TEST: Failed to start stream: ${error.message}\n`);
+                  console.error(`[${requestId}] ❌ STREAMING TEST: Failed:`, error.message);
+                  break;
+                }
+              }
+            }
+          }
         } else {
           // NORMAL MODE: Start media stream and AI
           process.stdout.write(`\n🔵 [${requestId}] Starting media stream and AI...\n`);

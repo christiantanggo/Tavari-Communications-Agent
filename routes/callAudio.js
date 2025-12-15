@@ -227,6 +227,20 @@ export const setupCallAudioWebSocket = (server) => {
           console.log(`[${connectionId}] 🎧 AUDIO RECEIVED #${audioChunkCount} (size: ${data.length} bytes, handler ready: ${!!handler}, AI ready: ${handler?.aiService?.ws?.readyState === 1})`);
         }
         
+        // PHASE 2 TEST MODE: Just log audio, don't process with AI
+        const STREAMING_TEST_MODE = process.env.STREAMING_TEST_MODE === 'true';
+        
+        if (STREAMING_TEST_MODE) {
+          // TEST MODE: Just log that we're receiving audio
+          // This proves streaming works before we add AI complexity
+          if (audioChunkCount <= 20 || audioChunkCount % 100 === 0) {
+            process.stdout.write(`\n🧪 STREAMING TEST: Audio chunk #${audioChunkCount} received (${data.length} bytes)\n`);
+            console.log(`[${connectionId}] 🧪 STREAMING TEST: Receiving audio chunks - if you see this, streaming works!`);
+          }
+          // Don't process with AI - just prove we're receiving audio
+          return;
+        }
+        
         // CRITICAL: Process audio continuously - NEVER stop listening
         // This WebSocket must stay open for the entire call duration
         // Audio will flow bidirectionally: caller → AI → caller → AI (loop forever)
