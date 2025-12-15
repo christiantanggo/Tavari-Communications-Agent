@@ -257,24 +257,42 @@ export const setupCallAudioWebSocket = (server) => {
               console.log(`[${connectionId}] Querying call_sessions table...`);
               console.log(`[${connectionId}] Query: SELECT * FROM call_sessions WHERE id = '${callSessionId}'`);
               
-              console.log(`[${connectionId}] Executing Supabase query (with timeout check)...`);
+              console.log(`[${connectionId}] Executing Supabase query (with 5 second timeout)...`);
               const queryStartTime = Date.now();
               
-              // Add a timeout promise
+              // Create a timeout that rejects
+              let timeoutId;
               const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => {
-                  reject(new Error('Database query timeout after 10 seconds'));
-                }, 10000); // 10 second timeout
+                timeoutId = setTimeout(() => {
+                  reject(new Error('Database query timeout after 5 seconds'));
+                }, 5000); // 5 second timeout
               });
               
+              // Create the query promise
               const queryPromise = supabaseClient
                 .from('call_sessions')
                 .select('*')
                 .eq('id', callSessionId)
-                .single();
+                .single()
+                .then(result => {
+                  clearTimeout(timeoutId);
+                  return result;
+                })
+                .catch(err => {
+                  clearTimeout(timeoutId);
+                  throw err;
+                });
               
-              console.log(`[${connectionId}] Waiting for query result...`);
-              const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+              console.log(`[${connectionId}] Waiting for query result (max 5 seconds)...`);
+              let queryResult;
+              try {
+                queryResult = await Promise.race([queryPromise, timeoutPromise]);
+              } catch (raceError) {
+                clearTimeout(timeoutId);
+                throw raceError;
+              }
+              
+              const { data, error } = queryResult;
               
               const queryDuration = Date.now() - queryStartTime;
               console.log(`[${connectionId}] ✅ Database query completed in ${queryDuration}ms`);
