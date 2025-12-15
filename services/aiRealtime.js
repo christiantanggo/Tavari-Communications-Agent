@@ -82,6 +82,12 @@ export class AIRealtimeService {
                     voice: 'alloy',
                     temperature: 0.8,
                     max_response_output_tokens: 4096,
+                    turn_detection: {
+                      type: 'server_vad',
+                      threshold: 0.5,
+                      prefix_padding_ms: 300,
+                      silence_duration_ms: 500,
+                    },
                   },
                 };
                 
@@ -141,6 +147,23 @@ export class AIRealtimeService {
             } else if (message.type === 'session.updated' || message.type === 'session.created') {
               process.stdout.write(`\n✅ OPENAI ${message.type.toUpperCase()}\n`);
               console.log('✅ OpenAI session event:', message.type);
+            } else if (message.type === 'input_audio_buffer.speech_started') {
+              process.stdout.write(`\n🔵 OPENAI: Speech started detected\n`);
+              console.log('🔵 OpenAI detected speech started');
+            } else if (message.type === 'input_audio_buffer.speech_stopped') {
+              process.stdout.write(`\n🔵 OPENAI: Speech stopped - should trigger response\n`);
+              console.log('🔵 OpenAI detected speech stopped - response should be generated');
+            } else if (message.type === 'response.created') {
+              process.stdout.write(`\n🔵 OPENAI: Response created\n`);
+              console.log('🔵 OpenAI response created');
+            } else if (message.type === 'response.audio_transcript.delta' || message.type === 'response.audio.delta') {
+              // Log first few deltas to verify responses
+              if (!this._responseDeltaCount) this._responseDeltaCount = 0;
+              this._responseDeltaCount++;
+              if (this._responseDeltaCount <= 5) {
+                process.stdout.write(`\n🔵 OPENAI RESPONSE DELTA #${this._responseDeltaCount}: ${message.type}\n`);
+                console.log(`🔵 OpenAI response delta #${this._responseDeltaCount}:`, message.type);
+              }
             }
             // Don't log other message types - too verbose
             
@@ -224,12 +247,14 @@ export class AIRealtimeService {
         if (message.delta) {
           // Log first few to verify responses are coming
           if (!this._firstAudioResponseLogged) {
-            process.stdout.write(`\n🔵 OPENAI AUDIO RESPONSE RECEIVED\n`);
+            process.stdout.write(`\n🔵 OPENAI AUDIO RESPONSE RECEIVED - SIZE: ${message.delta.length} bytes\n`);
             console.log('🔵 OpenAI audio response received, size:', message.delta.length, 'bytes (base64)');
             this._firstAudioResponseLogged = true;
           }
           const audioBuffer = Buffer.from(message.delta, 'base64');
           this.handleAudioOutput(audioBuffer);
+        } else {
+          console.warn('⚠️ response.audio.delta received but delta is empty');
         }
         break;
         
