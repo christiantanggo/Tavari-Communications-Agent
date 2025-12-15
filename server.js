@@ -315,6 +315,10 @@ async function startOpenAIRealtime(callId) {
     s.messageCount++;
     if (s.messageCount <= 20) {
       console.log(`📨 [${callId}] OpenAI message #${s.messageCount}: type=${msg.type}`);
+      // Log full message for first 10 messages to see structure
+      if (s.messageCount <= 10) {
+        console.log(`📋 [${callId}] Full message:`, JSON.stringify(msg, null, 2));
+      }
     }
     
     // Always log audio-related messages
@@ -361,8 +365,8 @@ async function startOpenAIRealtime(callId) {
       return;
     }
     
-    // Collect transcript text for Telnyx TTS
-    if (msg.type === "response.audio_transcript.delta" && msg.delta) {
+    // Collect transcript text for Telnyx TTS - try multiple event types
+    if ((msg.type === "response.audio_transcript.delta" || msg.type === "response.text.delta") && msg.delta) {
       const session = sessions.get(callId);
       if (session) {
         if (!session.transcriptText) session.transcriptText = "";
@@ -371,7 +375,36 @@ async function startOpenAIRealtime(callId) {
         if (!s.transcriptLogCount) s.transcriptLogCount = 0;
         s.transcriptLogCount++;
         if (s.transcriptLogCount <= 1) {
-          console.log(`💬 [${callId}] Transcript: ${msg.delta}`);
+          console.log(`💬 [${callId}] Transcript delta: ${msg.delta}`);
+        }
+      }
+    }
+    
+    // Also check for text in conversation items
+    if (msg.type === "conversation.item.created" || msg.type === "conversation.item.input_audio_transcription.completed") {
+      const session = sessions.get(callId);
+      if (session && msg.item) {
+        // Check if this item has text content from the assistant
+        const itemText = msg.item?.content?.[0]?.text || msg.item?.transcript || msg.item?.text;
+        if (itemText && msg.item?.role === "assistant") {
+          console.log(`💬 [${callId}] Found assistant text in conversation item: "${itemText}"`);
+          if (session?.callControlId) {
+            console.log(`🔊 [${callId}] Sending assistant text to Telnyx TTS: "${itemText}"`);
+            axios.post(
+              `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
+              {
+                payload: itemText,
+                voice: "Polly.Joanna",
+                language: "en-US",
+                premium: true,
+              },
+              { headers: telnyxHeaders() }
+            ).then(() => {
+              console.log(`✅ [${callId}] Telnyx TTS started from conversation item`);
+            }).catch((error) => {
+              console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
+            });
+          }
         }
       }
     }
@@ -419,6 +452,43 @@ async function startOpenAIRealtime(callId) {
     
     if (msg.type === "response.done") {
       console.log(`✅ [${callId}] OpenAI response done`);
+      // Check if response has text content we can use
+      const session = sessions.get(callId);
+      if (session && msg.response) {
+        // Log the full response object to see what's available
+        console.log(`📋 [${callId}] Response object:`, JSON.stringify(msg.response, null, 2));
+        
+        // Try to extract text from response - check multiple possible locations
+        const text = msg.response?.output?.[0]?.text || 
+                     msg.response?.text || 
+                     msg.response?.transcript ||
+                     msg.response?.content?.[0]?.text ||
+                     (msg.response?.output && Array.isArray(msg.response.output) && msg.response.output.length > 0 ? msg.response.output[0] : null);
+        
+        if (text) {
+          console.log(`💬 [${callId}] Found text in response.done: "${text}"`);
+          // Use this text for Telnyx TTS
+          if (session?.callControlId) {
+            console.log(`🔊 [${callId}] Sending text to Telnyx TTS from response.done: "${text}"`);
+            axios.post(
+              `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
+              {
+                payload: text,
+                voice: "Polly.Joanna",
+                language: "en-US",
+                premium: true,
+              },
+              { headers: telnyxHeaders() }
+            ).then(() => {
+              console.log(`✅ [${callId}] Telnyx TTS started from response.done`);
+            }).catch((error) => {
+              console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
+            });
+          }
+        } else {
+          console.log(`⚠️ [${callId}] No text found in response.done, checking transcript...`);
+        }
+      }
     }
     
     // Log any errors or unexpected types
