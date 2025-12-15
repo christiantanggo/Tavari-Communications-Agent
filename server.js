@@ -270,18 +270,16 @@ async function startOpenAIRealtime(callId) {
   ws.on("open", () => {
     console.log(`✅ OpenAI Realtime WebSocket connected for ${callId}`);
 
-    // Configure session for ulaw
+    // Configure session - text output only (audio via Telnyx TTS)
     ws.send(
       JSON.stringify({
         type: "session.update",
         session: {
-          modalities: ["audio", "text"],
+          modalities: ["text"], // Text only - we'll use Telnyx for TTS
           instructions:
             "You are Tavari's phone receptionist. Greet callers warmly and help them. Be concise, friendly, and ask one question at a time.",
-          voice: "alloy",
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw", // Use same format as Telnyx to avoid conversion issues
-          input_audio_transcription: { model: "whisper-1" },
+          input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
+          input_audio_transcription: { model: "whisper-1" }, // Transcribe input audio
           turn_detection: {
             type: "server_vad",
             threshold: 0.5,
@@ -380,13 +378,43 @@ async function startOpenAIRealtime(callId) {
       }
     }
     
-    // Also check for text in conversation items
-    if (msg.type === "conversation.item.created" || msg.type === "conversation.item.input_audio_transcription.completed") {
+    // Check for text in conversation items - multiple event types
+    if (msg.type === "conversation.item.created" || 
+        msg.type === "conversation.item.input_audio_transcription.completed" ||
+        msg.type === "conversation.item.output_item.created" ||
+        msg.type === "conversation.item.output_item.completed") {
       const session = sessions.get(callId);
       if (session && msg.item) {
-        // Check if this item has text content from the assistant
-        const itemText = msg.item?.content?.[0]?.text || msg.item?.transcript || msg.item?.text;
-        if (itemText && msg.item?.role === "assistant") {
+        // Log the full item structure to debug
+        console.log(`📋 [${callId}] Conversation item event: ${msg.type}`);
+        console.log(`📋 [${callId}] Item structure:`, JSON.stringify(msg.item, null, 2));
+        
+        // Check multiple possible locations for assistant text
+        const role = msg.item?.role;
+        const contents = msg.item?.content || msg.item?.output_item?.content || [];
+        
+        // Look for text in content array
+        let itemText = null;
+        for (const content of contents) {
+          if (content.type === "text" && content.text) {
+            itemText = content.text;
+            break;
+          } else if (content.type === "input_text" && content.text) {
+            // This is user input, skip
+            continue;
+          } else if (content.text) {
+            itemText = content.text;
+            break;
+          }
+        }
+        
+        // Also check top-level fields
+        if (!itemText) {
+          itemText = msg.item?.text || msg.item?.transcript || msg.item?.output_item?.text;
+        }
+        
+        // If this is an assistant message, send to TTS
+        if (itemText && (role === "assistant" || msg.type.includes("output"))) {
           console.log(`💬 [${callId}] Found assistant text in conversation item: "${itemText}"`);
           if (session?.callControlId) {
             console.log(`🔊 [${callId}] Sending assistant text to Telnyx TTS: "${itemText}"`);
@@ -405,6 +433,8 @@ async function startOpenAIRealtime(callId) {
               console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
             });
           }
+        } else if (itemText && role === "user") {
+          console.log(`👤 [${callId}] User input detected: "${itemText}"`);
         }
       }
     }
