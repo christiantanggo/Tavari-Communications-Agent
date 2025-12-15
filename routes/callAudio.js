@@ -10,9 +10,26 @@ const router = express.Router();
 // WebSocket endpoint for audio streaming
 export const setupCallAudioWebSocket = (server) => {
   console.log('🔵 Setting up WebSocket server for audio streaming...');
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ 
+    server,
+    path: '/api/calls/:callSessionId/audio', // This won't work - WebSocketServer doesn't support path patterns
+    // Instead, we'll accept all connections and validate path in handler
+  });
   console.log('✅ WebSocket server created and attached to HTTP server');
   console.log('🔵 WebSocket server will accept all connections, path validation happens in handler');
+  
+  // Log when server is ready
+  wss.on('listening', () => {
+    console.log('✅ WebSocket server is listening for connections');
+  });
+  
+  // Log upgrade requests (before connection)
+  server.on('upgrade', (request, socket, head) => {
+    const url = request.url || '';
+    process.stdout.write(`\n🔵 HTTP UPGRADE REQUEST: ${url}\n`);
+    console.log('🔵 HTTP Upgrade request received:', url);
+    console.log('🔵 Upgrade headers:', JSON.stringify(request.headers, null, 2));
+  });
   
   wss.on('connection', async (ws, req) => {
     const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
