@@ -84,7 +84,10 @@ export class AIRealtimeService {
                     max_response_output_tokens: 4096,
                     turn_detection: {
                       type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
-                      eagerness: 0.5, // How eager to respond (0.0-1.0, lower = wait longer)
+                      eagerness: 0.7, // Increased from 0.5 to be more responsive (0.0-1.0, higher = respond faster)
+                    },
+                    input_audio_transcription: {
+                      model: 'whisper-1', // Enable transcription to help with speech detection
                     },
                   },
                 };
