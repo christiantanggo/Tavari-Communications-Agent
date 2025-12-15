@@ -83,10 +83,8 @@ export class AIRealtimeService {
                     temperature: 0.8,
                     max_response_output_tokens: 4096,
                     turn_detection: {
-                      type: 'server_vad',
-                      threshold: 0.5,
-                      prefix_padding_ms: 300,
-                      silence_duration_ms: 500,
+                      type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
+                      eagerness: 0.5, // How eager to respond (0.0-1.0, lower = wait longer)
                     },
                   },
                 };
@@ -229,10 +227,35 @@ export class AIRealtimeService {
   // Handle incoming messages from OpenAI
   handleMessage(message) {
     switch (message.type) {
+      case 'input_audio_buffer.speech_started':
+        process.stdout.write(`\n🔵 OPENAI: Speech started - user is speaking\n`);
+        console.log('🔵 OpenAI detected speech started');
+        break;
+        
+      case 'input_audio_buffer.speech_stopped':
+        process.stdout.write(`\n🔵 OPENAI: Speech stopped - creating response...\n`);
+        console.log('🔵 OpenAI detected speech stopped - response should be generated automatically');
+        // With server_vad, OpenAI should auto-create response, but let's verify
+        break;
+        
+      case 'response.created':
+        process.stdout.write(`\n🔵 OPENAI: Response created - AI will speak now\n`);
+        console.log('🔵 OpenAI response created');
+        this.isResponding = true;
+        break;
+        
       case 'response.audio_transcript.delta':
         if (message.delta) {
           this.transcript += message.delta;
-          console.log('🔵 OpenAI transcript delta:', message.delta);
+          // Log first transcript to verify AI is responding
+          if (!this._firstTranscriptLogged) {
+            process.stdout.write(`\n🔵 OPENAI TRANSCRIPT STARTED: "${message.delta}"\n`);
+            console.log('🔵 OpenAI transcript delta:', message.delta);
+            this._firstTranscriptLogged = true;
+          } else if (this.transcript.length < 100) {
+            // Log first 100 chars of transcript
+            console.log('🔵 OpenAI transcript so far:', this.transcript.substring(0, 100));
+          }
         }
         break;
         
@@ -274,11 +297,6 @@ export class AIRealtimeService {
         this.sessionConfigured = true;
         break;
         
-      case 'response.done':
-        this.isResponding = false;
-        this.responseLock = false;
-        break;
-        
       case 'error':
         console.error('OpenAI Realtime error:', JSON.stringify(message, null, 2));
         if (message.error) {
@@ -292,6 +310,13 @@ export class AIRealtimeService {
         }
         // Log the full message object
         console.error('Full error object:', message);
+        break;
+        
+      default:
+        // Log any other message types we're not handling - might be important
+        if (message.type && !message.type.startsWith('conversation.') && message.type !== 'ping') {
+          console.log('🔵 OpenAI message (unhandled):', message.type);
+        }
         break;
     }
   }
