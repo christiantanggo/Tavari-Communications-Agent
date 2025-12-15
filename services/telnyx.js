@@ -587,13 +587,30 @@ export class TelnyxService {
     try {
       // Step 1: Answer the call ONLY
       // DO NOT start streaming here - wait for call.answered event
+      // URL encode the callControlId in case it contains special characters
+      const encodedCallControlId = encodeURIComponent(callControlId);
+      const answerEndpoint = `/calls/${encodedCallControlId}/actions/answer`;
+      
+      process.stdout.write(`\n🔵 [handleCallStart] Step 1: Answering call via Call Control API\n`);
+      process.stdout.write(`🔵 [handleCallStart] Call Control ID (raw): ${callControlId}\n`);
+      process.stdout.write(`🔵 [handleCallStart] Call Control ID (encoded): ${encodedCallControlId}\n`);
+      process.stdout.write(`🔵 [handleCallStart] Endpoint: POST ${answerEndpoint}\n`);
+      
       console.log('🔵 Step 1: Answering call via Call Control API');
-      console.log('🔵 POST /calls/' + callControlId + '/actions/answer');
-      const answerResponse = await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/answer`, {});
+      console.log('🔵 POST /calls/' + encodedCallControlId + '/actions/answer');
+      console.log('🔵 Raw callControlId:', callControlId);
+      
+      const answerResponse = await this.makeAPIRequest('POST', answerEndpoint, {});
+      
+      process.stdout.write(`\n✅ [handleCallStart] Call answered successfully\n`);
+      process.stdout.write(`✅ [handleCallStart] Answer response: ${JSON.stringify(answerResponse, null, 2)}\n`);
       console.log('✅ Call answered successfully');
       console.log('✅ Answer response:', JSON.stringify(answerResponse, null, 2));
       console.log('✅ Waiting for call.answered event to start streaming...');
     } catch (error) {
+      process.stdout.write(`\n❌ [handleCallStart] CRITICAL ERROR: Failed to answer call\n`);
+      process.stdout.write(`❌ [handleCallStart] Error message: ${error.message}\n`);
+      process.stdout.write(`❌ [handleCallStart] Error response: ${JSON.stringify(error.response?.data || {}, null, 2)}\n`);
       console.error('❌ CRITICAL ERROR: Failed to answer call');
       console.error('❌ Error message:', error.message);
       console.error('❌ Error stack:', error.stack);
@@ -676,7 +693,14 @@ export class TelnyxService {
       console.log('🔵 Stream payload:', JSON.stringify(streamPayload, null, 2));
       console.log('🔵 Making streaming_start API call to Telnyx...');
       
-      const streamResponse = await this.makeAPIRequest('POST', `/calls/${callControlId}/actions/streaming_start`, streamPayload);
+      // URL encode the callControlId in case it contains special characters
+      const encodedCallControlId = encodeURIComponent(callControlId);
+      const streamEndpoint = `/calls/${encodedCallControlId}/actions/streaming_start`;
+      
+      process.stdout.write(`\n🔵 [startMediaStream] Making streaming_start API call\n`);
+      process.stdout.write(`🔵 [startMediaStream] Endpoint: POST ${streamEndpoint}\n`);
+      
+      const streamResponse = await this.makeAPIRequest('POST', streamEndpoint, streamPayload);
       console.log('✅ Telnyx streaming_start API call successful');
       console.log('🔵 Telnyx response:', JSON.stringify(streamResponse, null, 2));
       console.log('⚠️  IMPORTANT: Telnyx should now connect to WebSocket URL:', streamUrl);
