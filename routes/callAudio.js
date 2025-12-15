@@ -12,25 +12,33 @@ export const setupCallAudioWebSocket = (server) => {
   console.log('🔵 Setting up WebSocket server for audio streaming...');
   const wss = new WebSocketServer({ server });
   console.log('✅ WebSocket server created and attached to HTTP server');
-  console.log('🔵 WebSocket server listening for connections on path: /api/calls/*/audio');
+  console.log('🔵 WebSocket server will accept all connections, path validation happens in handler');
   
   wss.on('connection', async (ws, req) => {
     const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     process.stdout.write(`\n=== WS_CONN [${connectionId}] ===\n`);
     console.log(`=== WebSocket connection received [${connectionId}] ===`);
-    process.stdout.write(`[${connectionId}] WS_EXISTS: ${!!ws}\n`);
-    console.log(`[${connectionId}] WebSocket object exists:`, !!ws);
-    process.stdout.write(`[${connectionId}] REQ_EXISTS: ${!!req}\n`);
-    console.log(`[${connectionId}] Request object exists:`, !!req);
-    process.stdout.write(`[${connectionId}] AFTER_REQ_LOG\n`);
-    process.stdout.write(`[${connectionId}] ENTERING_HANDLER\n`);
-    console.log(`[${connectionId}] Entering connection handler...`);
-    process.stdout.write(`[${connectionId}] AFTER_ENTERING_LOG\n`);
+    
+    // CRITICAL: Check path IMMEDIATELY - WebSocketServer doesn't support wildcards
+    const url = req.url || '';
+    console.log(`[${connectionId}] 🔵 WebSocket connection URL:`, url);
+    
+    // Simple path validation - must be /api/calls/{uuid}/audio
+    if (!url.startsWith('/api/calls/') || !url.endsWith('/audio')) {
+      console.log(`[${connectionId}] ❌ Invalid WebSocket path, closing:`, url);
+      ws.close(1008, 'Invalid path');
+      return;
+    }
+    
+    console.log(`[${connectionId}] ✅ Valid WebSocket path:`, url);
+    
+    // Extract callSessionId from path: /api/calls/{uuid}/audio
+    const pathParts = url.split('/');
+    const callSessionId = pathParts[3]; // /api/calls/{id}/audio
+    console.log(`[${connectionId}] ✅ Extracted callSessionId:`, callSessionId);
     
     // Wrap everything in a try-catch to catch any unhandled errors
-    process.stdout.write(`[${connectionId}] BEFORE_TRY\n`);
     try {
-      process.stdout.write(`[${connectionId}] INSIDE_TRY\n`);
       // Log request info safely with extensive error handling
       console.log(`[${connectionId}] Step 0: Starting request info logging...`);
       process.stdout.write(`[${connectionId}] STEP_0_START\n`);
@@ -136,77 +144,8 @@ export const setupCallAudioWebSocket = (server) => {
         throw headerError; // Re-throw to be caught by outer catch
       }
       
-      console.log(`[${connectionId}] Step 1: Starting URL parsing...`);
-      // Handle WebSocket URL parsing - Telnyx might send full URL or just path
-      let url;
-      try {
-        const requestUrl = req?.url || '/';
-        console.log(`[${connectionId}] Attempting to parse URL:`, requestUrl);
-        console.log(`[${connectionId}] Request URL type:`, typeof requestUrl);
-        console.log(`[${connectionId}] Request URL length:`, requestUrl?.length || 'N/A');
-        
-        if (requestUrl.startsWith('http://') || requestUrl.startsWith('https://') || requestUrl.startsWith('ws://') || requestUrl.startsWith('wss://')) {
-          console.log(`[${connectionId}] URL is absolute, parsing directly...`);
-          url = new URL(requestUrl);
-          console.log(`[${connectionId}] ✅ Parsed as absolute URL`);
-        } else {
-          // It's just a path, construct full URL
-          console.log(`[${connectionId}] URL is relative, constructing full URL...`);
-          try {
-            const protocol = req.headers?.['x-forwarded-proto'] === 'https' || req.connection?.encrypted ? 'https' : 'http';
-            console.log(`[${connectionId}] Protocol determined:`, protocol);
-            
-            const host = req.headers?.host || req.headers?.['x-forwarded-host'] || 'localhost:5001';
-            console.log(`[${connectionId}] Host determined:`, host);
-            
-            const baseUrl = `${protocol}://${host}`;
-            console.log(`[${connectionId}] Constructing URL from path, base:`, baseUrl);
-            url = new URL(requestUrl, baseUrl);
-            console.log(`[${connectionId}] ✅ Parsed as relative URL`);
-          } catch (relativeUrlError) {
-            console.error(`[${connectionId}] ❌ Error constructing relative URL:`, relativeUrlError);
-            throw relativeUrlError;
-          }
-        }
-        console.log(`[${connectionId}] ✅ Parsed URL pathname:`, url.pathname);
-        console.log(`[${connectionId}] ✅ Full parsed URL:`, url.toString());
-      } catch (urlError) {
-        console.error(`[${connectionId}] ❌ Error parsing URL:`, urlError);
-        console.error(`[${connectionId}] Error message:`, urlError.message);
-        console.error(`[${connectionId}] Error stack:`, urlError.stack);
-        console.error(`[${connectionId}] Request URL was:`, req?.url);
-        console.error(`[${connectionId}] Headers host:`, req?.headers?.host);
-        console.error(`[${connectionId}] Closing WebSocket due to URL parsing error...`);
-        ws.close(1011, 'Invalid URL');
-        return;
-      }
-      
-      // Only handle audio streaming paths
-      console.log(`[${connectionId}] Step 2: Checking path validity...`);
-      console.log(`[${connectionId}] Path starts with /api/calls/?`, url.pathname.startsWith('/api/calls/'));
-      console.log(`[${connectionId}] Path ends with /audio?`, url.pathname.endsWith('/audio'));
-      
-      // Allow test connections for debugging
-      if (url.pathname === '/api/calls/test-connection/audio') {
-        console.log(`[${connectionId}] ✅ Test WebSocket connection received`);
-        ws.send(JSON.stringify({ type: 'test_response', message: 'WebSocket server is accessible!' }));
-        setTimeout(() => ws.close(1000, 'Test complete'), 1000);
-        return;
-      }
-      
-      if (!url.pathname.startsWith('/api/calls/') || !url.pathname.endsWith('/audio')) {
-        console.log(`[${connectionId}] ❌ Invalid path, closing connection:`, url.pathname);
-        ws.close(1008, 'Invalid path');
-        return;
-      }
-      
-      console.log(`[${connectionId}] ✅ Path is valid, extracting callSessionId...`);
-      const pathParts = url.pathname.split('/');
-      console.log(`[${connectionId}] Path parts:`, pathParts);
-      console.log(`[${connectionId}] Path parts length:`, pathParts.length);
-      const callSessionId = pathParts[3]; // /api/calls/{id}/audio
-      console.log(`[${connectionId}] ✅ Extracted callSessionId:`, callSessionId);
-      console.log(`[${connectionId}] ✅ Audio WebSocket connected for call: ${callSessionId}`);
+      // Path validation and callSessionId extraction already done at top of handler
+      // callSessionId is already available from the early path check
       
       // CRITICAL: Set up message handler IMMEDIATELY to receive audio from Telnyx
       // This must happen BEFORE any async operations to avoid missing early audio chunks
