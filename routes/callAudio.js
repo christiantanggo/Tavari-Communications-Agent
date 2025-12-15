@@ -368,16 +368,34 @@ export const setupCallAudioWebSocket = (server) => {
         }
         
         console.log('🔧 Step 3: Initializing CallHandler...');
+        process.stdout.write(`\n🔵🔵🔵 STARTING HANDLER INITIALIZATION 🔵🔵🔵\n`);
+        const initStartTime = Date.now();
         try {
           console.log('Calling handler.initialize()...');
-          const initResult = await handler.initialize();
+          process.stdout.write(`\n🔵 CALLING handler.initialize() at ${new Date().toISOString()}\n`);
+          
+          // Add timeout to initialization (30 seconds max)
+          const initPromise = handler.initialize();
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+              reject(new Error('Handler initialization timed out after 30 seconds'));
+            }, 30000);
+          });
+          
+          const initResult = await Promise.race([initPromise, timeoutPromise]);
+          const initDuration = Date.now() - initStartTime;
+          process.stdout.write(`\n✅✅✅ HANDLER INITIALIZATION COMPLETE (${initDuration}ms) ✅✅✅\n`);
           console.log('✅ handler.initialize() completed');
           console.log('Initialize result:', initResult);
+          console.log(`Initialization took ${initDuration}ms`);
         } catch (initError) {
+          const initDuration = Date.now() - initStartTime;
+          process.stdout.write(`\n❌❌❌ HANDLER INITIALIZATION FAILED (${initDuration}ms) ❌❌❌\n`);
           console.error('❌ Error initializing CallHandler:', initError);
           console.error('Init error message:', initError.message);
           console.error('Init error stack:', initError.stack);
           console.error('Init error details:', JSON.stringify(initError, null, 2));
+          console.error(`Initialization failed after ${initDuration}ms`);
           throw initError;
         }
         console.log('✅ CallHandler initialized successfully');
