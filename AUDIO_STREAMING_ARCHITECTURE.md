@@ -121,9 +121,10 @@ input_audio_transcription: {
 ```
 
 **⚠️ CRITICAL:**
+- Line 374-398: After `speech_stopped`, we MUST explicitly send `response.create` (semantic_vad does NOT auto-respond)
 - Line 427-437: After `response.done`, session continues listening automatically
 - WebSocket must NEVER close after responses
-- `semantic_vad` handles VAD automatically - no manual restart needed
+- `semantic_vad` detects speech boundaries but requires explicit `response.create` to generate responses
 
 ---
 
@@ -199,6 +200,11 @@ input_audio_transcription: {
 - **File:** `services/aiRealtime.js` line 99-105
 - **Problem:** Need VAD to detect when caller speaks again
 - **Status:** ✅ CONFIGURED - `semantic_vad` is configured and should work automatically
+
+### **Issue 6: Missing response.create After Speech Stops (CRITICAL)**
+- **File:** `services/aiRealtime.js` line 374-378
+- **Problem:** Semantic VAD detects speech boundaries but does NOT automatically create responses. We were relying on auto-response which doesn't work reliably.
+- **Status:** ✅ FIXED - Now explicitly sends `input_audio_buffer.commit` and `response.create` after `speech_stopped`
 
 ---
 
@@ -282,8 +288,12 @@ REPEAT
 - Is there a race condition between events?
 
 **Most likely issues:**
-1. OpenAI session configuration error (unknown parameter)
-2. `semantic_vad` not detecting speech correctly
+1. ~~OpenAI session configuration error (unknown parameter)~~ ✅ FIXED
+2. ~~`semantic_vad` not triggering responses~~ ✅ FIXED - Now explicitly sending `response.create`
 3. Audio format conversion issue
 4. WebSocket lifecycle bug
 5. Race condition in initialization
+
+**✅ CRITICAL FIX APPLIED:**
+- `input_audio_buffer.speech_stopped` now explicitly triggers `response.create`
+- This was the root cause: semantic_vad detects speech but doesn't auto-respond

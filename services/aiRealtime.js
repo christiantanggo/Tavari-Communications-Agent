@@ -372,9 +372,38 @@ export class AIRealtimeService {
         break;
         
       case 'input_audio_buffer.speech_stopped':
-        process.stdout.write(`\n🔵 OPENAI: Speech stopped - creating response...\n`);
-        console.log('🔵 OpenAI detected speech stopped - response should be generated automatically');
-        // With server_vad, OpenAI should auto-create response, but let's verify
+        process.stdout.write(`\n🔵 OPENAI: Speech stopped - explicitly triggering response...\n`);
+        console.log('🔵 OpenAI detected speech stopped - explicitly triggering response.create');
+        
+        // CRITICAL: Semantic VAD detects speech boundaries but does NOT automatically create responses
+        // We MUST explicitly send response.create after speech stops
+        if (!this.isResponding && !this.responseLock) {
+          this.responseLock = true;
+          
+          // First, commit the audio buffer to finalize the input
+          try {
+            this.ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+            process.stdout.write(`\n🟢 Committed audio buffer\n`);
+            console.log('🟢 Sent input_audio_buffer.commit');
+            
+            // Then explicitly trigger a response
+            this.ws.send(JSON.stringify({
+              type: 'response.create',
+              response: {
+                instructions: 'Respond naturally to what the caller just said.'
+              }
+            }));
+            
+            process.stdout.write(`\n🟢🟢🟢 EXPLICITLY TRIGGERED response.create AFTER SPEECH STOPPED 🟢🟢🟢\n`);
+            console.log('🟢🟢🟢 EXPLICITLY TRIGGERED response.create - AI will now respond 🟢🟢🟢');
+          } catch (error) {
+            console.error('❌ Error triggering response.create:', error);
+            this.responseLock = false; // Reset lock on error
+          }
+        } else {
+          process.stdout.write(`\n⚠️ Skipping response.create - already responding or locked\n`);
+          console.log('⚠️ Skipping response.create - isResponding:', this.isResponding, 'responseLock:', this.responseLock);
+        }
         break;
         
       case 'response.created':
