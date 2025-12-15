@@ -92,8 +92,6 @@ export class AIRealtimeService {
                   session: {
                     type: 'realtime', // REQUIRED: Session type must be specified
                     instructions: this.buildSystemInstructions(),
-                    input_audio_format: 'pcm16', // OpenAI REQUIRES PCM16 at 24kHz - we'll convert from Telnyx
-                    output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                     modalities: ['text', 'audio'],
                     voice: 'alloy',
                     temperature: 0.8,
@@ -106,6 +104,9 @@ export class AIRealtimeService {
                       model: 'whisper-1', // Enable transcription to help with speech detection
                     },
                   },
+                  // Audio format parameters must be at TOP LEVEL, not inside session object
+                  input_audio_format: 'pcm16', // OpenAI REQUIRES PCM16 at 24kHz - we'll convert from Telnyx
+                  output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
                 };
                 
                 console.log('🔵 Configuring session for PCM16 at 24kHz (will convert from Telnyx G.711 μ-law)...');
