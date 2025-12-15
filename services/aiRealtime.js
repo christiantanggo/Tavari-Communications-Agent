@@ -125,10 +125,10 @@ export class AIRealtimeService {
                     input_audio_transcription: {
                       model: 'whisper-1', // Enable transcription to help with speech detection
                     },
+                    // temperature and max_response_output_tokens must be INSIDE session object
+                    temperature: 0.8,
+                    max_response_output_tokens: 4096,
                   },
-                  // temperature and max_response_output_tokens must be at TOP LEVEL, not inside session
-                  temperature: 0.8,
-                  max_response_output_tokens: 4096,
                 };
                 
                 console.log('🔵 Configuring session for PCM16 at 24kHz (will convert from Telnyx G.711 μ-law)...');
