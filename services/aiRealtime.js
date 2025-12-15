@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import { convertTelnyxToOpenAI } from '../utils/audioConverter.js';
+import log from '../utils/logHelper.js';
 
 // In production (Railway), env vars are already available via process.env
 // dotenv.config() is only needed for local development
@@ -24,91 +25,58 @@ export class AIRealtimeService {
   async connect() {
     return new Promise((resolve, reject) => {
       try {
-        process.stdout.write('\n\n\n🔵🔵🔵 STARTING OPENAI CONNECTION 🔵🔵🔵\n\n\n');
-        console.log('🔵🔵🔵 STARTING OPENAI CONNECTION 🔵🔵🔵');
+        log.verbose('🔵 Connecting to OpenAI Realtime API...');
         
         // Verify API key is set
         if (!OPENAI_API_KEY) {
           const error = new Error('OPENAI_API_KEY environment variable is not set');
-          process.stdout.write('\n❌❌❌ OPENAI API KEY NOT SET ❌❌❌\n');
-          console.error('❌', error.message);
+          log.error('❌ OPENAI API KEY NOT SET');
           reject(error);
           return;
         }
         
-        // OpenAI Realtime API requires Authorization header with Bearer token
-        // Format: wss://api.openai.com/v1/realtime?model=MODEL
-        // Headers: Authorization: Bearer sk-...
         const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
-        
-        // Clean API key - remove any whitespace, newlines, or invalid characters
         const cleanApiKey = OPENAI_API_KEY?.trim().replace(/\s+/g, '') || '';
-        
-        process.stdout.write('\n🔵🔵🔵 CONNECTING TO OPENAI REALTIME API 🔵🔵🔵\n');
-        console.log('🔵 Connecting to OpenAI Realtime API...');
-        console.log('🔵 API Key present:', !!cleanApiKey);
-        console.log('🔵 API Key length:', cleanApiKey.length);
-        console.log('🔵 API Key starts with:', cleanApiKey.substring(0, 7) || 'N/A');
-        console.log('🔵 Using Authorization header (OpenAI Realtime API standard)');
-        console.log('🔵 URL:', url);
         
         if (!cleanApiKey) {
           const error = new Error('OPENAI_API_KEY is empty after cleaning');
-          process.stdout.write('\n❌❌❌ OPENAI API KEY EMPTY ❌❌❌\n');
-          console.error('❌', error.message);
+          log.error('❌ OPENAI API KEY EMPTY');
           reject(error);
           return;
         }
         
-        // Set Authorization header for WebSocket connection
-        process.stdout.write('\n🔵 Creating WebSocket connection...\n');
-        
-        // Create WebSocket with error handling BEFORE connection attempt
+        // Create WebSocket with error handling
         try {
           this.ws = new WebSocket(url, {
             headers: {
               'Authorization': `Bearer ${cleanApiKey}`
             },
-            // Add connection timeout at WebSocket level
-            handshakeTimeout: 15000, // 15 seconds for handshake
+            handshakeTimeout: 15000,
           });
-          process.stdout.write('\n🔵 WebSocket object created, waiting for connection...\n');
-          process.stdout.write(`🔵 Initial readyState: ${this.ws.readyState} (0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)\n`);
         } catch (createError) {
-          process.stdout.write('\n❌❌❌ FAILED TO CREATE WEBSOCKET OBJECT ❌❌❌\n');
-          console.error('❌ Error creating WebSocket:', createError);
+          log.error('❌ Failed to create WebSocket:', createError);
           reject(createError);
           return;
         }
         
-        // Set up error handler IMMEDIATELY after creation
+        // Set up error handler
         this.ws.on('error', (error) => {
-          process.stdout.write('\n❌❌❌ OPENAI WEBSOCKET ERROR (IMMEDIATE) ❌❌❌\n');
-          console.error('❌❌❌ OpenAI Realtime WebSocket error:', error);
-          console.error('❌ Error name:', error.name);
-          console.error('❌ Error message:', error.message);
-          console.error('❌ Error stack:', error.stack);
-          console.error('❌ WebSocket readyState at error:', this.ws?.readyState);
+          log.error('❌ OpenAI WebSocket error:', error);
           reject(error);
         });
         
         this.ws.on('open', () => {
-          process.stdout.write('\n\n\n✅✅✅ OPENAI WEBSOCKET CONNECTED ✅✅✅\n\n\n');
-          console.log('✅✅✅ Connected to OpenAI Realtime API ✅✅✅');
-          console.log('✅ OpenAI WebSocket readyState:', this.ws.readyState);
-          console.log('✅ About to wait for session.created...');
+          log.success('✅ Connected to OpenAI Realtime API');
           
           // Wait for session.created first, then send session.update
           // OpenAI creates session automatically on connect, but we should wait for confirmation
           const sessionReadyHandler = (data) => {
             try {
               const message = JSON.parse(data.toString());
-              process.stdout.write(`\n🔵 SESSION HANDLER: ${message.type}\n`);
-              console.log('🔵 Session handler received:', message.type);
+              log.verbose(`🔵 [OPENAI] Session handler: ${message.type}`);
               
               if (message.type === 'session.created') {
-              process.stdout.write('\n✅ OPENAI SESSION CREATED - Configuring session...\n');
-              console.log('✅ OpenAI session.created event received');
+              console.log('✅ [OPENAI] Session created - configuring...');
               
               // Now send session.update to configure audio format
               try {
@@ -119,29 +87,20 @@ export class AIRealtimeService {
                   session: {
                     type: 'realtime',
                     instructions: this.buildSystemInstructions(),
-                    audio: {
-                      input: {
-                        turn_detection: {
-                          type: 'semantic_vad',
-                          eagerness: 'high',
-                          create_response: true,
-                          interrupt_response: true,
-                        },
-                      },
-                    },
+                    // CRITICAL: output_audio_format must be inside session object (not at top level)
+                    output_audio_format: 'pcm16',
                   },
                 };
                 
-                console.log('🔵 Configuring session for PCM16 at 24kHz (will convert from Telnyx G.711 μ-law)...');
-                console.log('🔵 Session config:', JSON.stringify(sessionConfig, null, 2));
+                console.log('🔵 [OPENAI] Configuring session for PCM16 at 24kHz');
+                log.verbose('🔵 [OPENAI] Session config:', JSON.stringify(sessionConfig, null, 2));
                 this.ws.send(JSON.stringify(sessionConfig));
               } catch (error) {
                 console.error('❌ Error sending session config:', error);
               }
             } else if (message.type === 'session.updated') {
-              process.stdout.write('\n✅✅✅ OPENAI SESSION.updated RECEIVED - SESSION FULLY CONFIGURED ✅✅✅\n');
-              console.log('✅ OpenAI session.updated event received - session configured');
-              console.log('✅ Session config response:', JSON.stringify(message, null, 2));
+              console.log('✅ [OPENAI] Session configured successfully');
+              log.verbose('✅ [OPENAI] Session config response:', JSON.stringify(message, null, 2));
               this.sessionConfigured = true;
               this.ws.removeListener('message', sessionReadyHandler);
               
@@ -150,9 +109,7 @@ export class AIRealtimeService {
                 try {
                   const greetingText = this.agentConfig?.greeting_text || 'Hello! Thank you for calling. How can I help you today?';
                   
-                  process.stdout.write(`\n🔵 SENDING INITIAL GREETING TO OPENAI: "${greetingText}"\n`);
-                  console.log('🔵 Sending initial greeting response...');
-                  console.log('🔵 Greeting text:', greetingText);
+                  console.log(`🔵 [OPENAI] Sending initial greeting: "${greetingText}"`);
                   
                   // Create response with explicit greeting instructions
                   // This ensures the AI speaks the greeting immediately when answering
@@ -163,58 +120,49 @@ export class AIRealtimeService {
                     },
                   };
                   
-                  console.log('🔵 Greeting response payload:', JSON.stringify(greetingResponse, null, 2));
                   this.ws.send(JSON.stringify(greetingResponse));
-                  process.stdout.write(`\n✅ INITIAL GREETING SENT TO OPENAI\n`);
+                  console.log('✅ [OPENAI] Initial greeting sent');
                 } catch (error) {
-                  process.stdout.write(`\n❌ ERROR SENDING INITIAL GREETING\n`);
-                  console.error('❌ Error sending initial greeting:', error);
-                  console.error('Error stack:', error.stack);
+                  console.error('❌ [OPENAI] Error sending initial greeting:', error.message);
                 }
               }, 1000); // Wait 1 second after session is configured to ensure it's ready
               
               resolve(true);
               } else if (message.type === 'error') {
-                process.stdout.write(`\n❌❌❌ SESSION HANDLER ERROR ❌❌❌\n`);
                 // OpenAI errors can be nested in message.error OR at top level
                 const errorObj = message.error || message;
-                process.stdout.write(`❌ FULL ERROR OBJECT: ${JSON.stringify(message, null, 2)}\n`);
-                process.stdout.write(`❌ Error type: ${errorObj.type || message.type || 'N/A'}\n`);
-                process.stdout.write(`❌ Error code: ${errorObj.code || message.code || 'N/A'}\n`);
-                process.stdout.write(`❌ Error message: ${errorObj.message || message.message || 'N/A'}\n`);
-                process.stdout.write(`❌ Error param: ${errorObj.param || message.param || 'N/A'}\n`);
-                console.error('❌ OpenAI session error (full):', JSON.stringify(message, null, 2));
-                // Log the full error to help debug
-                const param = errorObj.param || message.param;
-                if (param) {
-                  process.stdout.write(`\n❌❌❌ UNKNOWN PARAMETER: ${param} ❌❌❌\n`);
-                  console.error(`❌ CRITICAL: Unknown parameter '${param}' in session configuration`);
+                const errorMsg = errorObj.message || message.message || 'Unknown error';
+                const errorCode = errorObj.code || message.code || 'N/A';
+                const errorParam = errorObj.param || message.param;
+                
+                console.error(`❌ [OPENAI] Session configuration error: ${errorMsg} (code: ${errorCode}${errorParam ? `, param: ${errorParam}` : ''})`);
+                console.error(`❌ [OPENAI] Full error object:`, JSON.stringify(message, null, 2));
+                
+                // Log full error details for debugging
+                if (errorParam) {
+                  console.error(`❌ [OPENAI] CRITICAL: Unknown parameter '${errorParam}' in session configuration`);
+                  console.error(`❌ [OPENAI] Check OpenAI Realtime API documentation for valid parameters`);
                 }
-                // Don't reject on error - might be recoverable
               }
             } catch (error) {
-              console.error('❌ Error in sessionReadyHandler:', error);
-              console.error('❌ Error parsing message:', error.message);
-              console.error('❌ Data type:', typeof data);
-              console.error('❌ Data preview:', data.toString().substring(0, 200));
+              console.error('❌ [OPENAI] Error in sessionReadyHandler:', error.message);
             }
           };
           
           // Listen for session events - use 'message' event directly
           // We'll remove this handler once session is configured
           this.ws.on('message', sessionReadyHandler);
-          process.stdout.write('\n🔵 Session handler registered, waiting for session.created...\n');
+          console.log('🔵 [OPENAI] Waiting for session.created...');
           
           // Timeout after 10 seconds - if no confirmation, assume session is ready anyway
           // This is a workaround for cases where session.updated doesn't arrive
           setTimeout(() => {
             this.ws.removeListener('message', sessionReadyHandler);
             if (!this.sessionConfigured) {
-              process.stdout.write(`\n⚠️⚠️⚠️ SESSION CONFIGURATION TIMEOUT - PROCEEDING ANYWAY ⚠️⚠️⚠️\n`);
-              console.warn('⚠️ Session confirmation timeout after 10 seconds');
-              console.warn('⚠️ WARNING: Did not receive session.updated confirmation');
-              console.warn('⚠️ PROCEEDING ANYWAY - Setting sessionConfigured=true to allow audio');
-              console.warn('⚠️ This may cause issues if OpenAI is not actually ready');
+              console.warn('⚠️ [OPENAI] Session confirmation timeout after 10 seconds');
+              console.warn('⚠️ [OPENAI] WARNING: Did not receive session.updated confirmation');
+              console.warn('⚠️ [OPENAI] PROCEEDING ANYWAY - Setting sessionConfigured=true to allow audio');
+              console.warn('⚠️ [OPENAI] This may cause issues if OpenAI is not actually ready');
               // Set sessionConfigured anyway so audio can be sent
               // This is a workaround - ideally we'd wait for confirmation
               this.sessionConfigured = true;
@@ -224,7 +172,7 @@ export class AIRealtimeService {
               setTimeout(() => {
                 try {
                   const greetingText = this.agentConfig?.greeting_text || 'Hello! Thank you for calling. How can I help you today?';
-                  process.stdout.write(`\n🔵 SENDING GREETING AFTER TIMEOUT: "${greetingText}"\n`);
+                  console.log(`🔵 [OPENAI] Sending greeting after timeout: "${greetingText}"`);
                   const greetingResponse = {
                     type: 'response.create',
                     response: {
@@ -232,7 +180,7 @@ export class AIRealtimeService {
                     },
                   };
                   this.ws.send(JSON.stringify(greetingResponse));
-                  process.stdout.write(`\n✅ GREETING SENT AFTER TIMEOUT\n`);
+                  console.log('✅ [OPENAI] Greeting sent after timeout');
                 } catch (error) {
                   console.error('❌ Error sending greeting after timeout:', error);
                 }
@@ -252,75 +200,30 @@ export class AIRealtimeService {
             
             // Skip session events in main handler - they're handled by sessionReadyHandler
             if (message.type === 'session.created' || message.type === 'session.updated') {
-              // These are handled by sessionReadyHandler, but log here too for visibility
+              // These are handled by sessionReadyHandler
               if (message.type === 'session.updated' && !this.sessionConfigured) {
-                // This shouldn't happen, but if it does, configure session
-                process.stdout.write(`\n🔵 MAIN HANDLER: Got session.updated, configuring...\n`);
+                log.verbose('🔵 [OPENAI] Got session.updated in main handler, configuring...');
                 this.sessionConfigured = true;
               }
               return; // Don't process further in main handler
             }
             
-            // Log ALL message types for debugging (we can filter later)
-            if (!this._messageTypeCounts) this._messageTypeCounts = {};
-            if (!this._messageTypeCounts[message.type]) {
-              this._messageTypeCounts[message.type] = 0;
-              // Log first occurrence of each message type
-              process.stdout.write(`\n🔵 OPENAI MESSAGE TYPE: ${message.type}\n`);
-              console.log(`🔵 OpenAI message type received: ${message.type}`);
-            }
-            this._messageTypeCounts[message.type]++;
-            
-            // Log only important messages (reduce noise)
+            // Log only critical messages to reduce noise
             if (message.type === 'error' || message.type === 'error.event') {
-              process.stdout.write(`\n❌ OPENAI ERROR MESSAGE:\n`);
-              console.error('❌ OpenAI Realtime error:', JSON.stringify(message, null, 2));
-            } else if (message.type?.startsWith('response.')) {
-              // Log response events (transcript, audio) - but not every delta
-              if (message.type === 'response.audio_transcript.delta' || message.type === 'response.audio.delta') {
-                // Only log every 10th delta to reduce noise
-                if (!this._deltaCount) this._deltaCount = 0;
-                this._deltaCount++;
-                if (this._deltaCount % 10 === 0) {
-                  console.log('🔵 OpenAI response:', message.type, message.delta ? `(delta: ${message.delta.substring(0, 50)}...)` : '');
-                }
-              } else {
-                // Log non-delta response events
-                console.log('🔵 OpenAI response:', message.type);
-              }
-            } else if (message.type === 'session.updated' || message.type === 'session.created') {
-              process.stdout.write(`\n✅ OPENAI ${message.type.toUpperCase()}\n`);
-              console.log('✅ OpenAI session event:', message.type);
-            } else if (message.type === 'input_audio_buffer.speech_started') {
-              process.stdout.write(`\n🔵 OPENAI: Speech started detected\n`);
-              console.log('🔵 OpenAI detected speech started');
-            } else if (message.type === 'input_audio_buffer.speech_stopped') {
-              process.stdout.write(`\n🔵 OPENAI: Speech stopped - should trigger response\n`);
-              console.log('🔵 OpenAI detected speech stopped - response should be generated');
+              const errorObj = message.error || message;
+              const errorMsg = errorObj.message || message.message || 'Unknown error';
+              const errorCode = errorObj.code || message.code || 'N/A';
+              const errorParam = errorObj.param || message.param;
+              console.error(`❌ [OPENAI] Session error: ${errorMsg} (code: ${errorCode}${errorParam ? `, param: ${errorParam}` : ''})`);
+              console.error('❌ [OPENAI] Full error:', JSON.stringify(message, null, 2));
             } else if (message.type === 'response.created') {
-              process.stdout.write(`\n🔵 OPENAI: Response created\n`);
-              console.log('🔵 OpenAI response created');
-            } else if (message.type === 'response.audio_transcript.delta' || message.type === 'response.audio.delta') {
-              // Log first few deltas to verify responses
-              if (!this._responseDeltaCount) this._responseDeltaCount = 0;
-              this._responseDeltaCount++;
-              if (this._responseDeltaCount <= 5) {
-                process.stdout.write(`\n🔵 OPENAI RESPONSE DELTA #${this._responseDeltaCount}: ${message.type}\n`);
-                console.log(`🔵 OpenAI response delta #${this._responseDeltaCount}:`, message.type);
-              }
-            } else if (message.type === 'error') {
-              // CRITICAL: Log ALL errors, especially audio-related ones
-              process.stdout.write(`\n❌❌❌ OPENAI ERROR (MAIN HANDLER): ${JSON.stringify(message, null, 2)}\n`);
-              console.error('❌ OpenAI error received:', message);
-            } else {
-              // Log ALL other message types to see what OpenAI is sending
-              // This will help us understand if audio is being processed
-              if (!this._unknownMessageCount) this._unknownMessageCount = 0;
-              this._unknownMessageCount++;
-              if (this._unknownMessageCount <= 20) {
-                process.stdout.write(`\n🔵 OPENAI MESSAGE TYPE: ${message.type}\n`);
-                console.log(`🔵 OpenAI message type: ${message.type}`, message);
-              }
+              console.log('🔵 [OPENAI] Response created - AI will start speaking');
+            } else if (message.type === 'response.done') {
+              console.log('✅ [OPENAI] Response complete - session ready for next input');
+            } else if (message.type === 'input_audio_buffer.speech_started') {
+              console.log('🔵 [OPENAI] Speech started detected');
+            } else if (message.type === 'input_audio_buffer.speech_stopped') {
+              console.log('🔵 [OPENAI] Speech stopped - AI should respond');
             }
             
             this.handleMessage(message);
@@ -334,46 +237,14 @@ export class AIRealtimeService {
           }
         });
         
-        // Add connection timeout with periodic state checks
-        let stateCheckCount = 0;
+        // Add connection timeout
         const connectionTimeout = setTimeout(() => {
           if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            process.stdout.write('\n❌❌❌ OPENAI CONNECTION TIMEOUT (15 seconds) ❌❌❌\n');
-            console.error('❌ OpenAI WebSocket connection timeout after 15 seconds');
-            console.error('❌ WebSocket readyState:', this.ws?.readyState);
-            console.error('❌ State check count:', stateCheckCount);
-            
-            // Try to get more info about why it failed
-            if (this.ws) {
-              console.error('❌ WebSocket URL attempted:', url);
-              console.error('❌ WebSocket protocol:', this.ws.protocol);
-              console.error('❌ WebSocket extensions:', this.ws.extensions);
-            }
-            
+            console.error('❌ [OPENAI] Connection timeout after 15 seconds');
             this.ws?.close();
             reject(new Error('OpenAI WebSocket connection timeout - connection never opened'));
           }
-        }, 15000); // Increased to 15 seconds to match handshakeTimeout
-        
-        // Monitor connection state periodically
-        const stateCheckInterval = setInterval(() => {
-          stateCheckCount++;
-          if (this.ws) {
-            const state = this.ws.readyState;
-            const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
-            process.stdout.write(`🔵 Connection state check #${stateCheckCount}: ${state} (${stateNames[state]})\n`);
-            
-            if (state === WebSocket.OPEN) {
-              clearInterval(stateCheckInterval);
-              clearTimeout(connectionTimeout);
-            } else if (state === WebSocket.CLOSED) {
-              clearInterval(stateCheckInterval);
-              clearTimeout(connectionTimeout);
-              process.stdout.write('\n❌❌❌ WEBSOCKET CLOSED BEFORE OPENING ❌❌❌\n');
-              reject(new Error('WebSocket closed before connection could be established'));
-            }
-          }
-        }, 1000); // Check every second
+        }, 15000);
         
         // Clear timeout and interval on successful connection
         this.ws.once('open', () => {
@@ -383,17 +254,9 @@ export class AIRealtimeService {
         
         this.ws.on('close', (code, reason) => {
           const reasonStr = reason?.toString() || 'No reason provided';
-          // Use multiple stdout writes to ensure it's not dropped
-          process.stdout.write(`\n\n\n`);
-          process.stdout.write(`❌❌❌ OPENAI WEBSOCKET CLOSED ❌❌❌\n`);
-          process.stdout.write(`CODE: ${code}\n`);
-          process.stdout.write(`REASON: ${reasonStr}\n`);
-          process.stdout.write(`READYSTATE: ${this.ws.readyState}\n`);
-          process.stdout.write(`SESSION_CONFIGURED: ${this.sessionConfigured}\n`);
-          process.stdout.write(`❌❌❌ END CLOSE EVENT ❌❌❌\n\n\n`);
-          console.error('❌ OpenAI Realtime WebSocket closed', { code, reason: reasonStr });
-          console.error('❌ WebSocket readyState:', this.ws.readyState);
-          console.error('❌ Session configured:', this.sessionConfigured);
+          console.error(`❌ [OPENAI] WebSocket closed (code: ${code}, reason: ${reasonStr})`);
+          console.error('❌ [OPENAI] WebSocket readyState:', this.ws.readyState);
+          console.error('❌ [OPENAI] Session configured:', this.sessionConfigured);
           
           // Log specific error codes with helpful messages
           if (code === 3000) {
@@ -428,15 +291,13 @@ export class AIRealtimeService {
   handleMessage(message) {
     switch (message.type) {
       case 'input_audio_buffer.speech_started':
-        process.stdout.write(`\n🔵 OPENAI: Speech started - user is speaking\n`);
-        console.log('🔵 OpenAI detected speech started');
+        console.log('🔵 [OPENAI] Speech started detected');
         break;
         
       case 'input_audio_buffer.speech_stopped':
-        process.stdout.write(`\n🔵 OPENAI: Speech stopped - explicitly triggering response...\n`);
-        console.log('🔵 OpenAI detected speech stopped - explicitly triggering response.create');
+        console.log('🔵 [OPENAI] Speech stopped - triggering response.create');
         
-        // CRITICAL: Semantic VAD detects speech boundaries but does NOT automatically create responses
+        // CRITICAL: OpenAI detects speech boundaries but does NOT automatically create responses
         // We MUST explicitly send response.create after speech stops
         if (!this.isResponding && !this.responseLock) {
           this.responseLock = true;
@@ -455,21 +316,18 @@ export class AIRealtimeService {
               }
             }));
             
-            process.stdout.write(`\n🟢🟢🟢 EXPLICITLY TRIGGERED response.create AFTER SPEECH STOPPED 🟢🟢🟢\n`);
-            console.log('🟢🟢🟢 EXPLICITLY TRIGGERED response.create - AI will now respond 🟢🟢🟢');
+            console.log('🔵 [OPENAI] Triggering response.create after speech stopped');
           } catch (error) {
-            console.error('❌ Error triggering response.create:', error);
+            console.error('❌ [OPENAI] Error triggering response.create:', error.message);
             this.responseLock = false; // Reset lock on error
           }
         } else {
-          process.stdout.write(`\n⚠️ Skipping response.create - already responding or locked\n`);
-          console.log('⚠️ Skipping response.create - isResponding:', this.isResponding, 'responseLock:', this.responseLock);
+          console.log('⚠️ [OPENAI] Skipping response.create - already responding or locked');
         }
         break;
         
       case 'response.created':
-        process.stdout.write(`\n🔵 OPENAI: Response created - AI will speak now\n`);
-        console.log('🔵 OpenAI response created');
+        console.log('🔵 [OPENAI] Response created - AI will speak now');
         this.isResponding = true;
         break;
         
@@ -478,12 +336,8 @@ export class AIRealtimeService {
           this.transcript += message.delta;
           // Log first transcript to verify AI is responding
           if (!this._firstTranscriptLogged) {
-            process.stdout.write(`\n🔵 OPENAI TRANSCRIPT STARTED: "${message.delta}"\n`);
-            console.log('🔵 OpenAI transcript delta:', message.delta);
+            console.log(`🔵 [OPENAI] Transcript started: "${message.delta}"`);
             this._firstTranscriptLogged = true;
-          } else if (this.transcript.length < 100) {
-            // Log first 100 chars of transcript
-            console.log('🔵 OpenAI transcript so far:', this.transcript.substring(0, 100));
           }
         }
         break;
@@ -491,59 +345,64 @@ export class AIRealtimeService {
       case 'response.audio_transcript.done':
         this.isResponding = false;
         this.responseLock = false;
-        console.log('✅ OpenAI transcript done. Full transcript:', this.transcript);
         // Notify callback if transcript is available
         if (this.onTranscriptComplete && this.transcript && this.transcript.trim().length > 0) {
           this.onTranscriptComplete(this.transcript);
+          this.transcript = ''; // Reset for next response
         }
         break;
         
       case 'response.audio.delta':
+        // Clear timeout since we're receiving audio
+        if (this._audioDeltaTimeout) {
+          clearTimeout(this._audioDeltaTimeout);
+          this._audioDeltaTimeout = null;
+        }
+        
         // Audio chunks come as base64
         if (message.delta) {
-          // Track audio deltas received
           if (!this._audioDeltaCount) this._audioDeltaCount = 0;
           this._audioDeltaCount++;
           
-          // Log first few and every 10th to verify responses are coming
-          if (this._audioDeltaCount <= 5 || this._audioDeltaCount % 10 === 0) {
-            process.stdout.write(`\n🔊 OPENAI AUDIO DELTA #${this._audioDeltaCount} - Base64 size: ${message.delta.length} bytes\n`);
-            console.log(`🔊 OpenAI audio delta #${this._audioDeltaCount}, base64 size: ${message.delta.length} bytes`);
+          // Log first few to verify audio is coming from OpenAI
+          if (this._audioDeltaCount <= 3) {
+            console.log(`🔊 [OPENAI] Audio delta #${this._audioDeltaCount} received (base64: ${message.delta.length} bytes)`);
           }
           
           const audioBuffer = Buffer.from(message.delta, 'base64');
           
-          // Log decoded buffer size
-          if (this._audioDeltaCount <= 5) {
-            console.log(`🔊 Decoded audio buffer size: ${audioBuffer.length} bytes (PCM16 24kHz)`);
+          if (this._audioDeltaCount <= 3) {
+            console.log(`🔊 [OPENAI] Decoded to ${audioBuffer.length} bytes (PCM16 24kHz)`);
           }
           
           this.handleAudioOutput(audioBuffer);
         } else {
-          console.warn('⚠️ response.audio.delta received but delta is empty');
+          console.warn('⚠️ [OPENAI] response.audio.delta received but delta is empty');
         }
         break;
         
       case 'response.audio.done':
         const totalDeltas = this._audioDeltaCount || 0;
-        process.stdout.write(`\n✅ OPENAI AUDIO RESPONSE COMPLETE - Total deltas: ${totalDeltas}\n`);
-        console.log(`✅ OpenAI audio response complete. Total audio deltas received: ${totalDeltas}`);
+        console.log(`✅ [OPENAI] Audio response complete (${totalDeltas} chunks sent)`);
         break;
         
       case 'response.done':
-        process.stdout.write(`\n✅ OPENAI RESPONSE COMPLETE - SESSION READY FOR NEXT INPUT\n`);
-        console.log('✅ OpenAI response complete');
-        console.log('✅ Session is now ready to listen for next user input');
-        console.log('✅ With semantic_vad, OpenAI will automatically detect speech and respond');
+        // Clear timeout if still set
+        if (this._audioDeltaTimeout) {
+          clearTimeout(this._audioDeltaTimeout);
+          this._audioDeltaTimeout = null;
+        }
+        
+        const audioDeltasReceived = this._audioDeltaCount || 0;
+        if (audioDeltasReceived === 0) {
+          console.error('❌ [OPENAI] CRITICAL: response.done but NO audio deltas were received!');
+          console.error('❌ [OPENAI] OpenAI created a response but did not generate any audio.');
+          console.error('❌ [OPENAI] Check session configuration - audio.output may not be enabled.');
+        } else {
+          console.log(`✅ [OPENAI] Response complete - ${audioDeltasReceived} audio chunks received`);
+        }
         this.isResponding = false;
         this.responseLock = false;
-        // CRITICAL: Session should continue listening automatically with semantic_vad
-        // No need to restart listening - it's continuous
-        // CRITICAL: WebSocket stays open, audio stream continues, semantic_vad will detect next speech
-        // DO NOT close WebSocket, DO NOT stop audio processing, DO NOT restart stream
-        process.stdout.write(`\n✅✅✅ SESSION CONTINUES LISTENING - AUDIO STREAM STAYS OPEN ✅✅✅\n`);
-        process.stdout.write(`✅✅✅ WebSocket remains open, semantic_vad will detect next speech automatically ✅✅✅\n`);
-        console.log('✅✅✅ CRITICAL: WebSocket stays open, audio continues flowing, AI will detect next speech ✅✅✅');
         break;
         
       case 'session.updated':
@@ -552,22 +411,16 @@ export class AIRealtimeService {
         break;
         
       case 'error':
-        process.stdout.write(`\n❌❌❌ OPENAI ERROR IN MAIN HANDLER ❌❌❌\n`);
         // OpenAI errors can be nested in message.error OR at top level
         const errorObj = message.error || message;
-        process.stdout.write(`❌ FULL ERROR OBJECT: ${JSON.stringify(message, null, 2)}\n`);
-        process.stdout.write(`❌ Error type: ${errorObj.type || message.type || 'N/A'}\n`);
-        process.stdout.write(`❌ Error code: ${errorObj.code || message.code || 'N/A'}\n`);
-        process.stdout.write(`❌ Error message: ${errorObj.message || message.message || 'N/A'}\n`);
-        process.stdout.write(`❌ Error param: ${errorObj.param || message.param || 'N/A'}\n`);
-        console.error('❌ OpenAI Realtime error (full):', JSON.stringify(message, null, 2));
-        const param = errorObj.param || message.param;
-        if (param) {
-          process.stdout.write(`\n❌❌❌ UNKNOWN PARAMETER: ${param} ❌❌❌\n`);
-          console.error(`❌ CRITICAL: Unknown parameter '${param}' - this must be fixed!`);
+        const errorMsg = errorObj.message || message.message || 'Unknown error';
+        const errorCode = errorObj.code || message.code || 'N/A';
+        const errorParam = errorObj.param || message.param;
+        console.error(`❌ [OPENAI] Session error: ${errorMsg} (code: ${errorCode}${errorParam ? `, param: ${errorParam}` : ''})`);
+        console.error('❌ [OPENAI] Full error:', JSON.stringify(message, null, 2));
+        if (errorParam) {
+          console.error(`❌ [OPENAI] CRITICAL: Unknown parameter '${errorParam}' - check session configuration`);
         }
-        // Log the full message object
-        console.error('Full error object:', JSON.stringify(message, null, 2));
         break;
         
       default:
@@ -617,32 +470,36 @@ export class AIRealtimeService {
   // Send audio input to OpenAI
   sendAudio(audioData) {
     if (!this.ws) {
-      console.warn('⚠️ OpenAI WebSocket not initialized, cannot send audio');
+      if (!this._sendErrorCount) this._sendErrorCount = 0;
+      this._sendErrorCount++;
+      if (this._sendErrorCount <= 3) {
+        console.error('❌ [OPENAI IN] WebSocket not initialized');
+      }
       return;
     }
     
     if (this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('⚠️ OpenAI WebSocket not open (readyState:', this.ws.readyState, '), cannot send audio');
+      if (!this._sendErrorCount) this._sendErrorCount = 0;
+      this._sendErrorCount++;
+      if (this._sendErrorCount <= 3) {
+        console.error(`❌ [OPENAI IN] WebSocket not open (state: ${this.ws.readyState})`);
+      }
       return;
     }
     
-    // Don't send audio until session is configured (unless we timed out and are proceeding anyway)
+    // Don't send audio until session is configured
     if (!this.sessionConfigured && !this._sessionTimeoutProceeded) {
-      // Only log first few times to avoid spam
       if (!this._sessionWarningCount) this._sessionWarningCount = 0;
       this._sessionWarningCount++;
-      if (this._sessionWarningCount <= 5) {
-        process.stdout.write(`\n⚠️ SESSION NOT CONFIGURED - SKIPPING AUDIO #${this._sessionWarningCount}\n`);
-        console.warn(`⚠️ Session not configured yet, skipping audio chunk #${this._sessionWarningCount} (this is normal during startup)`);
+      if (this._sessionWarningCount <= 3) {
+        console.warn(`⚠️ [OPENAI IN] Session not configured yet, skipping audio (normal during startup)`);
       }
       return;
     }
     
     // If we proceeded without session confirmation, log a warning on first audio send
     if (this._sessionTimeoutProceeded && !this._timeoutWarningLogged) {
-      process.stdout.write(`\n⚠️ SENDING AUDIO WITHOUT session.updated CONFIRMATION (proceeding after timeout)\n`);
-      console.warn('⚠️ WARNING: Sending audio to OpenAI without session.updated confirmation');
-      console.warn('⚠️ OpenAI may ignore this audio if session is not fully configured');
+      console.warn('⚠️ [OPENAI IN] WARNING: Sending audio without session.updated confirmation');
       this._timeoutWarningLogged = true;
     }
     
@@ -655,8 +512,7 @@ export class AIRealtimeService {
       
       // Log first conversion to verify it's working
       if (!this._firstConversionLogged) {
-        console.log('🔵 Converting audio: Telnyx PCMU (G.711 μ-law) 8kHz → OpenAI PCM16 24kHz');
-        console.log('🔵 Input size:', audioData.length, 'bytes');
+        console.log(`🔵 [OPENAI IN] First audio conversion: ${audioData.length} bytes (PCMU 8kHz) → PCM16 24kHz`);
         this._firstConversionLogged = true;
       }
       
@@ -664,10 +520,6 @@ export class AIRealtimeService {
       try {
         convertedAudio = convertTelnyxToOpenAI(audioData);
         if (!this._firstOutputLogged) {
-          console.log('🔵 Converted audio size:', convertedAudio.length, 'bytes (PCM16 24kHz)');
-          console.log('🔵 Expected size ratio: 6x (8kHz→24kHz, 1 byte→2 bytes)');
-          console.log('🔵 Actual ratio:', (convertedAudio.length / audioData.length).toFixed(2));
-          
           // Check if audio is silence (all zeros or very low amplitude)
           let maxAmplitude = 0;
           let nonZeroSamples = 0;
@@ -677,21 +529,17 @@ export class AIRealtimeService {
             if (sample > maxAmplitude) maxAmplitude = sample;
           }
           const silenceRatio = 1 - (nonZeroSamples / (convertedAudio.length / 2));
-          console.log('🔵 Audio statistics:');
-          console.log('   - Max amplitude:', maxAmplitude);
-          console.log('   - Non-zero samples:', nonZeroSamples, 'of', convertedAudio.length / 2);
-          console.log('   - Silence ratio:', (silenceRatio * 100).toFixed(1) + '%');
+          
+          console.log(`🔵 [OPENAI IN] First conversion: ${audioData.length} → ${convertedAudio.length} bytes (ratio: ${(convertedAudio.length / audioData.length).toFixed(1)}x)`);
+          
           if (silenceRatio > 0.95) {
-            process.stdout.write(`\n⚠️⚠️⚠️ WARNING: AUDIO APPEARS TO BE SILENCE (${(silenceRatio * 100).toFixed(1)}% zeros) ⚠️⚠️⚠️\n`);
-            console.warn('⚠️ WARNING: Converted audio appears to be mostly silence');
-            console.warn('⚠️ OpenAI may not detect speech if audio is silence');
+            console.error(`❌ [OPENAI IN] WARNING: Audio appears to be silence (${(silenceRatio * 100).toFixed(1)}% zeros, max amplitude: ${maxAmplitude})`);
           }
           
           this._firstOutputLogged = true;
         }
       } catch (conversionError) {
-        console.error('❌ Audio conversion error:', conversionError);
-        console.error('Conversion error stack:', conversionError.stack);
+        console.error('❌ [OPENAI IN] Audio conversion error:', conversionError.message);
         return; // Don't send invalid audio
       }
       
@@ -713,9 +561,8 @@ export class AIRealtimeService {
       // Log first few sends to verify audio is being transmitted
       if (!this._audioSendCount) this._audioSendCount = 0;
       this._audioSendCount++;
-      if (this._audioSendCount <= 5 || this._audioSendCount % 50 === 0) {
-        process.stdout.write(`\n🔵 SENDING AUDIO TO OPENAI #${this._audioSendCount} (${base64Audio.length} base64 bytes)\n`);
-        console.log(`🔵 Sending audio chunk #${this._audioSendCount} to OpenAI (${base64Audio.length} base64 bytes, ${convertedAudio.length} raw bytes)`);
+      if (this._audioSendCount <= 3 || this._audioSendCount % 100 === 0) {
+        log.verbose(`🔵 [OPENAI IN] Sending audio chunk #${this._audioSendCount} (${base64Audio.length} base64 bytes)`);
       }
       
       this.ws.send(JSON.stringify(payload));
@@ -728,21 +575,21 @@ export class AIRealtimeService {
   // Handle audio output from OpenAI
   handleAudioOutput(audio) {
     // This will be called by the WebSocket handler
-    // Audio will be streamed back to Voximplant
+    // Audio will be streamed back to Telnyx
     if (!this._audioOutputCount) this._audioOutputCount = 0;
     this._audioOutputCount++;
     
     // Log first few to verify callback is working
-    if (this._audioOutputCount <= 5) {
-      process.stdout.write(`\n🔊 HANDLING AUDIO OUTPUT #${this._audioOutputCount} - Size: ${audio.length} bytes\n`);
-      console.log(`🔊 Handling audio output #${this._audioOutputCount}, size: ${audio.length} bytes`);
-      console.log(`🔊 onAudioOutput callback exists: ${!!this.onAudioOutput}`);
+    if (this._audioOutputCount <= 3) {
+      console.log(`🔊 [OPENAI OUT] Audio chunk #${this._audioOutputCount} from OpenAI (${audio.length} bytes), callback: ${!!this.onAudioOutput}`);
     }
     
     if (this.onAudioOutput) {
       this.onAudioOutput(audio);
     } else {
-      console.warn(`⚠️ onAudioOutput callback not set! Audio chunk #${this._audioOutputCount} will be lost`);
+      if (this._audioOutputCount <= 3) {
+        console.error(`❌ [OPENAI OUT] onAudioOutput callback NOT SET! Audio will be lost`);
+      }
     }
   }
   
