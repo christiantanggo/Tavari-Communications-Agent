@@ -90,6 +90,7 @@ export class AIRealtimeService {
                 const sessionConfig = {
                   type: 'session.update',
                   session: {
+                    type: 'realtime', // REQUIRED: Session type must be specified
                     instructions: this.buildSystemInstructions(),
                     input_audio_format: 'pcm16', // OpenAI REQUIRES PCM16 at 24kHz - we'll convert from Telnyx
                     output_audio_format: 'pcm16', // OpenAI outputs PCM16 at 24kHz
