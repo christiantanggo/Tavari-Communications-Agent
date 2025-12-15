@@ -10,25 +10,44 @@ const router = express.Router();
 // WebSocket endpoint for audio streaming
 export const setupCallAudioWebSocket = (server) => {
   console.log('🔵 Setting up WebSocket server for audio streaming...');
+  
+  // Create WebSocketServer WITHOUT attaching to server initially
+  // We'll handle upgrades manually to ensure we can log them
   const wss = new WebSocketServer({ 
-    server,
-    // No path option - WebSocketServer doesn't support path patterns
-    // We'll accept all connections and validate path in handler
+    noServer: true, // Don't auto-handle upgrades - we'll do it manually
   });
-  console.log('✅ WebSocket server created and attached to HTTP server');
-  console.log('🔵 WebSocket server will accept all connections, path validation happens in handler');
+  console.log('✅ WebSocket server created (noServer mode)');
   
   // Log when server is ready
   wss.on('listening', () => {
     console.log('✅ WebSocket server is listening for connections');
   });
   
-  // Log upgrade requests (before connection)
+  // MANUALLY handle HTTP upgrade requests
   server.on('upgrade', (request, socket, head) => {
     const url = request.url || '';
-    process.stdout.write(`\n🔵 HTTP UPGRADE REQUEST: ${url}\n`);
+    process.stdout.write(`\n🔵🔵🔵 HTTP UPGRADE REQUEST: ${url}\n`);
     console.log('🔵 HTTP Upgrade request received:', url);
     console.log('🔵 Upgrade headers:', JSON.stringify(request.headers, null, 2));
+    console.log('🔵 Upgrade method:', request.method);
+    console.log('🔵 Upgrade host:', request.headers.host);
+    
+    // Validate path - must be /api/calls/{uuid}/audio
+    if (!url.startsWith('/api/calls/') || !url.endsWith('/audio')) {
+      console.log(`❌ Invalid WebSocket path, rejecting: ${url}`);
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    
+    console.log(`✅ Valid WebSocket path, handling upgrade: ${url}`);
+    
+    // Handle the upgrade and pass to WebSocketServer
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      // This callback is called after upgrade is complete
+      console.log('✅ WebSocket upgrade complete, emitting connection event');
+      wss.emit('connection', ws, request);
+    });
   });
   
   wss.on('connection', async (ws, req) => {
