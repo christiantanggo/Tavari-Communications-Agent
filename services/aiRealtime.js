@@ -115,16 +115,19 @@ export class AIRealtimeService {
                   session: {
                     type: 'realtime', // REQUIRED: Session type must be specified
                     instructions: this.buildSystemInstructions(),
-                    // input_audio_format and output_audio_format are NOT valid in session.update
-                    // OpenAI defaults to PCM16 24kHz - we convert Telnyx audio to match
-                    turn_detection: {
-                      type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
-                      eagerness: 'high', // Valid values: "auto", "low", "medium", "high" (NOT a number!)
-                      create_response: true, // Automatically generate response when speech ends
-                      interrupt_response: true, // Interrupt ongoing response if new speech detected
-                    },
-                    input_audio_transcription: {
-                      model: 'whisper-1', // Enable transcription to help with speech detection
+                    // CORRECT STRUCTURE: turn_detection must be under audio.input, NOT directly under session
+                    audio: {
+                      input: {
+                        turn_detection: {
+                          type: 'semantic_vad', // Use semantic VAD - more reliable than server_vad
+                          eagerness: 'high', // Valid values: "auto", "low", "medium", "high" (NOT a number!)
+                          create_response: true, // Automatically generate response when speech ends
+                          interrupt_response: true, // Interrupt ongoing response if new speech detected
+                        },
+                        transcription: {
+                          model: 'whisper-1', // Enable transcription to help with speech detection
+                        },
+                      },
                     },
                     // temperature and max_output_tokens must be INSIDE session object
                     temperature: 0.8,
