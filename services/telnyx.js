@@ -641,9 +641,11 @@ export class TelnyxService {
       
       // Start media stream using Telnyx Call Control API
       // This creates a bidirectional WebSocket connection for audio
+      // CRITICAL: stream_track must be "both" for bidirectional audio
+      // If it's not "both", Telnyx will only send one-way audio and silence occurs after first response
       const streamPayload = {
         stream_url: streamUrl,
-        stream_track: 'both_tracks', // Send and receive audio (Telnyx API requires 'both_tracks', not 'both')
+        stream_track: 'both', // CRITICAL: Must be "both" for bidirectional audio (not "both_tracks")
       };
       
       console.log('🔵 Starting media stream for Telnyx...');

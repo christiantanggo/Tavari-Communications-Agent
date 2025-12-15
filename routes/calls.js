@@ -54,8 +54,12 @@ router.post('/webhook', async (req, res) => {
       console.log(`[${requestId}] Telnyx webhook event:`, eventType);
       
       if (eventType === 'call.initiated') {
-        process.stdout.write(`\n🔵 [${requestId}] CALL.INITIATED EVENT - Processing...\n`);
+        // CRITICAL: On call.initiated, we ONLY answer the call and create the session
+        // We do NOT start the media stream or AI here - that happens on call.answered
+        // Starting AI/stream too early causes Telnyx to never stream mic audio back
+        process.stdout.write(`\n🔵 [${requestId}] CALL.INITIATED EVENT - Answering call only (NO AI/STREAM)\n`);
         console.log(`[${requestId}] Call initiated event received`);
+        console.log(`[${requestId}] ⚠️ CRITICAL: NOT starting AI or stream here - waiting for call.answered`);
         
         const callData = TelnyxService.parseInboundCall(req);
         // Extract call_control_id from webhook payload
@@ -75,6 +79,7 @@ router.post('/webhook', async (req, res) => {
         }
         
         // STEP 1: Answer the call IMMEDIATELY
+        // This is the ONLY action we take on call.initiated
         process.stdout.write(`\n🔵 [${requestId}] STEP 1: Answering call IMMEDIATELY...\n`);
         console.log(`[${requestId}] STEP 1: Answering call via POST /calls/${callControlId}/actions/answer`);
         try {
@@ -94,15 +99,16 @@ router.post('/webhook', async (req, res) => {
         }
         
         // STEP 2: Create call session and handle business logic (BEFORE starting stream)
-        // NOTE: We removed the speak test because it interferes with bidirectional media streaming
-        // The AI will greet via the media stream instead
-        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Creating call session...\n`);
+        // CRITICAL: We do NOT start media stream or AI here - that happens on call.answered
+        // Starting stream/AI on call.initiated causes Telnyx to never stream mic audio back
+        process.stdout.write(`\n🔵 [${requestId}] STEP 2: Creating call session (NO STREAM/AI YET)...\n`);
         console.log(`[${requestId}] STEP 2: Creating call session and handling business logic`);
+        console.log(`[${requestId}] ⚠️ NOT starting media stream or AI - waiting for call.answered event`);
         try {
           const result = await TelnyxService.handleCallStart(callData, callControlId);
           process.stdout.write(`\n✅ [${requestId}] STEP 2 COMPLETE: Call session created: ${result.callSession?.id}\n`);
           console.log(`[${requestId}] ✅ Call session created:`, result.callSession?.id);
-          console.log(`[${requestId}] ✅ Waiting for call.answered event to start streaming...`);
+          console.log(`[${requestId}] ✅ Waiting for call.answered event to start streaming and AI...`);
         } catch (sessionError) {
           process.stdout.write(`\n⚠️ [${requestId}] WARNING: Call session creation failed (non-critical)\n`);
           console.warn(`[${requestId}] ⚠️ Call session creation failed:`, sessionError.message);
@@ -114,10 +120,13 @@ router.post('/webhook', async (req, res) => {
         console.log(`[${requestId}] Sending 200 OK response to Telnyx`);
         res.json({ status: 'ok' });
       } else if (eventType === 'call.answered') {
+        // CRITICAL: This is where we start the media stream and AI
+        // We MUST wait for call.answered - starting on call.initiated causes Telnyx to never stream mic audio
         // Call was answered - NOW start the media stream
         // Telnyx requires the call to be in "answered" state before streaming can start
-        process.stdout.write(`\n🔵 [${requestId}] CALL.ANSWERED EVENT - Starting media stream...\n`);
-        console.log(`[${requestId}] Call answered - starting media stream...`);
+        process.stdout.write(`\n🔵 [${requestId}] CALL.ANSWERED EVENT - Starting media stream and AI NOW...\n`);
+        console.log(`[${requestId}] Call answered - starting media stream and AI...`);
+        console.log(`[${requestId}] ✅ This is the correct event to start streaming - call.initiated was too early`);
         
         const callData = TelnyxService.parseInboundCall(req);
         const callControlId = req.body.data?.payload?.call_control_id || 

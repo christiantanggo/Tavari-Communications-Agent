@@ -192,15 +192,44 @@ export const setupCallAudioWebSocket = (server) => {
       let audioChunkCount = 0;
       const audioBuffer = []; // Buffer audio until handler is ready
       
+      // CRITICAL: Set up keepalive to prevent Telnyx timeout
+      // Telnyx will stop sending audio if no activity is detected
+      // Send keepalive every 8 seconds (between 5-10 seconds as recommended)
+      const keepaliveInterval = setInterval(() => {
+        if (ws.readyState === 1) { // WebSocket.OPEN
+          try {
+            // Send empty message or ping to keep connection alive
+            // Telnyx WebSocket accepts empty messages as keepalive
+            ws.ping();
+            if (audioChunkCount % 100 === 0) { // Log every 100th keepalive to reduce noise
+              console.log(`[${connectionId}] 💓 Keepalive sent (audio chunks received: ${audioChunkCount})`);
+            }
+          } catch (keepaliveError) {
+            console.error(`[${connectionId}] ❌ Error sending keepalive:`, keepaliveError);
+          }
+        } else {
+          // WebSocket is not open, clear interval
+          clearInterval(keepaliveInterval);
+        }
+      }, 8000); // 8 seconds
+      
+      // Clear keepalive when WebSocket closes
+      ws.on('close', () => {
+        clearInterval(keepaliveInterval);
+      });
+      
       ws.on('message', async (data) => {
         audioChunkCount++;
-        
+
         // CRITICAL: Log EVERY audio chunk to confirm continuous streaming
         if (audioChunkCount <= 10 || audioChunkCount % 50 === 0) {
           process.stdout.write(`\n🎧 AUDIO RECEIVED #${audioChunkCount} (size: ${data.length} bytes)\n`);
           console.log(`[${connectionId}] 🎧 AUDIO RECEIVED #${audioChunkCount} (size: ${data.length} bytes, handler ready: ${!!handler}, AI ready: ${handler?.aiService?.ws?.readyState === 1})`);
         }
         
+        // CRITICAL: Process audio continuously - NEVER stop listening
+        // This WebSocket must stay open for the entire call duration
+        // Audio will flow bidirectionally: caller → AI → caller → AI (loop forever)
         if (handler && handler.aiService && handler.aiService.ws && handler.aiService.ws.readyState === 1) {
           // Handler and AI service are ready, process immediately
           try {

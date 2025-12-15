@@ -433,7 +433,11 @@ export class AIRealtimeService {
         this.responseLock = false;
         // CRITICAL: Session should continue listening automatically with semantic_vad
         // No need to restart listening - it's continuous
+        // CRITICAL: WebSocket stays open, audio stream continues, semantic_vad will detect next speech
+        // DO NOT close WebSocket, DO NOT stop audio processing, DO NOT restart stream
         process.stdout.write(`\n✅✅✅ SESSION CONTINUES LISTENING - AUDIO STREAM STAYS OPEN ✅✅✅\n`);
+        process.stdout.write(`✅✅✅ WebSocket remains open, semantic_vad will detect next speech automatically ✅✅✅\n`);
+        console.log('✅✅✅ CRITICAL: WebSocket stays open, audio continues flowing, AI will detect next speech ✅✅✅');
         break;
         
       case 'session.updated':
