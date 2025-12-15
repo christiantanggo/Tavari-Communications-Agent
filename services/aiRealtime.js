@@ -16,6 +16,8 @@ export class AIRealtimeService {
     this.isResponding = false;
     this.responseLock = false;
     this.sessionConfigured = false;
+    this.onAudioOutput = null;
+    this.onTranscriptComplete = null;
   }
   
   // Connect to OpenAI Realtime API
@@ -496,18 +498,32 @@ export class AIRealtimeService {
         this.isResponding = false;
         this.responseLock = false;
         console.log('✅ OpenAI transcript done. Full transcript:', this.transcript);
+        // Notify callback if transcript is available
+        if (this.onTranscriptComplete && this.transcript && this.transcript.trim().length > 0) {
+          this.onTranscriptComplete(this.transcript);
+        }
         break;
         
       case 'response.audio.delta':
         // Audio chunks come as base64
         if (message.delta) {
-          // Log first few to verify responses are coming
-          if (!this._firstAudioResponseLogged) {
-            process.stdout.write(`\n🔵 OPENAI AUDIO RESPONSE RECEIVED - SIZE: ${message.delta.length} bytes\n`);
-            console.log('🔵 OpenAI audio response received, size:', message.delta.length, 'bytes (base64)');
-            this._firstAudioResponseLogged = true;
+          // Track audio deltas received
+          if (!this._audioDeltaCount) this._audioDeltaCount = 0;
+          this._audioDeltaCount++;
+          
+          // Log first few and every 10th to verify responses are coming
+          if (this._audioDeltaCount <= 5 || this._audioDeltaCount % 10 === 0) {
+            process.stdout.write(`\n🔊 OPENAI AUDIO DELTA #${this._audioDeltaCount} - Base64 size: ${message.delta.length} bytes\n`);
+            console.log(`🔊 OpenAI audio delta #${this._audioDeltaCount}, base64 size: ${message.delta.length} bytes`);
           }
+          
           const audioBuffer = Buffer.from(message.delta, 'base64');
+          
+          // Log decoded buffer size
+          if (this._audioDeltaCount <= 5) {
+            console.log(`🔊 Decoded audio buffer size: ${audioBuffer.length} bytes (PCM16 24kHz)`);
+          }
+          
           this.handleAudioOutput(audioBuffer);
         } else {
           console.warn('⚠️ response.audio.delta received but delta is empty');
@@ -515,7 +531,9 @@ export class AIRealtimeService {
         break;
         
       case 'response.audio.done':
-        console.log('✅ OpenAI audio response complete');
+        const totalDeltas = this._audioDeltaCount || 0;
+        process.stdout.write(`\n✅ OPENAI AUDIO RESPONSE COMPLETE - Total deltas: ${totalDeltas}\n`);
+        console.log(`✅ OpenAI audio response complete. Total audio deltas received: ${totalDeltas}`);
         break;
         
       case 'response.done':
@@ -717,8 +735,20 @@ export class AIRealtimeService {
   handleAudioOutput(audio) {
     // This will be called by the WebSocket handler
     // Audio will be streamed back to Voximplant
+    if (!this._audioOutputCount) this._audioOutputCount = 0;
+    this._audioOutputCount++;
+    
+    // Log first few to verify callback is working
+    if (this._audioOutputCount <= 5) {
+      process.stdout.write(`\n🔊 HANDLING AUDIO OUTPUT #${this._audioOutputCount} - Size: ${audio.length} bytes\n`);
+      console.log(`🔊 Handling audio output #${this._audioOutputCount}, size: ${audio.length} bytes`);
+      console.log(`🔊 onAudioOutput callback exists: ${!!this.onAudioOutput}`);
+    }
+    
     if (this.onAudioOutput) {
       this.onAudioOutput(audio);
+    } else {
+      console.warn(`⚠️ onAudioOutput callback not set! Audio chunk #${this._audioOutputCount} will be lost`);
     }
   }
   

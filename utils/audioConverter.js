@@ -19,6 +19,14 @@ for (let i = 0; i < 256; i++) {
  * @returns {Buffer} - Linear PCM16 buffer
  */
 export function decodeMulaw(mulawBuffer) {
+  // Validation
+  if (!Buffer.isBuffer(mulawBuffer)) {
+    throw new Error(`decodeMulaw: Expected Buffer, got ${typeof mulawBuffer}`);
+  }
+  if (mulawBuffer.length === 0) {
+    throw new Error('decodeMulaw: Input buffer is empty');
+  }
+  
   const pcm16Buffer = Buffer.allocUnsafe(mulawBuffer.length * 2);
   for (let i = 0; i < mulawBuffer.length; i++) {
     const sample = MULAW_TABLE[mulawBuffer[i]];
@@ -34,6 +42,17 @@ export function decodeMulaw(mulawBuffer) {
  * @returns {Buffer} - Resampled PCM16 buffer at 24kHz
  */
 export function resample8kTo24k(inputBuffer) {
+  // Validation
+  if (!Buffer.isBuffer(inputBuffer)) {
+    throw new Error(`resample8kTo24k: Expected Buffer, got ${typeof inputBuffer}`);
+  }
+  if (inputBuffer.length === 0) {
+    throw new Error('resample8kTo24k: Input buffer is empty');
+  }
+  if (inputBuffer.length % 2 !== 0) {
+    throw new Error(`resample8kTo24k: Input buffer length must be even (PCM16), got ${inputBuffer.length}`);
+  }
+  
   // 3x upsampling: 8kHz -> 24kHz
   const inputSamples = inputBuffer.length / 2; // 16-bit samples
   const outputSamples = inputSamples * 3;
@@ -66,6 +85,14 @@ export function resample8kTo24k(inputBuffer) {
  * @returns {Buffer} - OpenAI-compatible audio buffer (PCM16 at 24kHz)
  */
 export function convertTelnyxToOpenAI(telnyxAudio) {
+  // Validation
+  if (!Buffer.isBuffer(telnyxAudio)) {
+    throw new Error(`convertTelnyxToOpenAI: Expected Buffer, got ${typeof telnyxAudio}`);
+  }
+  if (telnyxAudio.length === 0) {
+    throw new Error('convertTelnyxToOpenAI: Input buffer is empty');
+  }
+  
   try {
     // Step 1: Decode μ-law to linear PCM16 (8kHz)
     const pcm16_8k = decodeMulaw(telnyxAudio);
@@ -75,7 +102,8 @@ export function convertTelnyxToOpenAI(telnyxAudio) {
     
     return pcm16_24k;
   } catch (error) {
-    console.error('Error converting audio format:', error);
+    console.error('Error converting Telnyx audio to OpenAI format:', error);
+    console.error('Input buffer length:', telnyxAudio?.length);
     throw error;
   }
 }
@@ -86,6 +114,17 @@ export function convertTelnyxToOpenAI(telnyxAudio) {
  * @returns {Buffer} - μ-law encoded buffer
  */
 export function encodeMulaw(pcm16Buffer) {
+  // Validation
+  if (!Buffer.isBuffer(pcm16Buffer)) {
+    throw new Error(`encodeMulaw: Expected Buffer, got ${typeof pcm16Buffer}`);
+  }
+  if (pcm16Buffer.length === 0) {
+    throw new Error('encodeMulaw: Input buffer is empty');
+  }
+  if (pcm16Buffer.length % 2 !== 0) {
+    throw new Error(`encodeMulaw: Input buffer length must be even (PCM16), got ${pcm16Buffer.length}`);
+  }
+  
   const mulawBuffer = Buffer.allocUnsafe(pcm16Buffer.length / 2);
   for (let i = 0; i < mulawBuffer.length; i++) {
     const sample = pcm16Buffer.readInt16LE(i * 2);
@@ -123,6 +162,17 @@ export function encodeMulaw(pcm16Buffer) {
  * @returns {Buffer} - Resampled PCM16 buffer at 8kHz
  */
 export function resample24kTo8k(inputBuffer) {
+  // Validation
+  if (!Buffer.isBuffer(inputBuffer)) {
+    throw new Error(`resample24kTo8k: Expected Buffer, got ${typeof inputBuffer}`);
+  }
+  if (inputBuffer.length === 0) {
+    throw new Error('resample24kTo8k: Input buffer is empty');
+  }
+  if (inputBuffer.length % 2 !== 0) {
+    throw new Error(`resample24kTo8k: Input buffer length must be even (PCM16), got ${inputBuffer.length}`);
+  }
+  
   // 3x downsampling: 24kHz -> 8kHz
   const inputSamples = inputBuffer.length / 2; // 16-bit samples
   const outputSamples = Math.floor(inputSamples / 3);
@@ -145,6 +195,17 @@ export function resample24kTo8k(inputBuffer) {
  * @returns {Buffer} - Telnyx-compatible audio buffer (PCMU at 8kHz)
  */
 export function convertOpenAIToTelnyx(openAIAudio) {
+  // Validation
+  if (!Buffer.isBuffer(openAIAudio)) {
+    throw new Error(`convertOpenAIToTelnyx: Expected Buffer, got ${typeof openAIAudio}`);
+  }
+  if (openAIAudio.length === 0) {
+    throw new Error('convertOpenAIToTelnyx: Input buffer is empty');
+  }
+  if (openAIAudio.length % 2 !== 0) {
+    throw new Error(`convertOpenAIToTelnyx: Input buffer length must be even (PCM16), got ${openAIAudio.length}`);
+  }
+  
   try {
     // Step 1: Resample from 24kHz to 8kHz
     const pcm16_8k = resample24kTo8k(openAIAudio);
@@ -155,6 +216,7 @@ export function convertOpenAIToTelnyx(openAIAudio) {
     return pcmu_8k;
   } catch (error) {
     console.error('Error converting OpenAI audio to Telnyx format:', error);
+    console.error('Input buffer length:', openAIAudio?.length);
     throw error;
   }
 }

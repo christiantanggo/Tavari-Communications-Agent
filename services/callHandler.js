@@ -15,6 +15,8 @@ export class CallHandler {
     this.agentConfig = null;
     this.startTime = null;
     this.audioWebSocket = null;
+    this.audioSentCount = 0; // Track successful audio sends via WebSocket
+    this.lastTranscript = ''; // Store last transcript for fallback
   }
   
   // Initialize call handler
@@ -158,6 +160,29 @@ export class CallHandler {
       this.sendAudioToVoximplant(audio);
     };
     
+    // Set up transcript handler - use Telnyx speak API as fallback if WebSocket audio fails
+    this.aiService.onTranscriptComplete = async (transcript) => {
+      this.lastTranscript = transcript;
+      
+      process.stdout.write(`\n📝 TRANSCRIPT COMPLETE - Length: ${transcript.length} chars, Audio sent: ${this.audioSentCount} chunks\n`);
+      console.log(`📝 Transcript complete: "${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}"`);
+      console.log(`📝 Total audio chunks sent via WebSocket: ${this.audioSentCount}`);
+      console.log(`📝 Total send attempts: ${this._sendAttemptCount || 0}`);
+      
+      // If we haven't successfully sent audio via WebSocket, use Telnyx speak API as fallback
+      if (this.audioSentCount === 0 && transcript && transcript.trim().length > 0) {
+        process.stdout.write(`\n⚠️ FALLBACK: No audio sent via WebSocket, using Telnyx speak API\n`);
+        console.log('⚠️ No audio sent via WebSocket, using Telnyx speak API fallback');
+        console.log('🔵 Transcript to speak:', transcript.substring(0, 100) + '...');
+        await this.speakViaTelnyx(transcript);
+      } else if (this.audioSentCount > 0) {
+        process.stdout.write(`\n✅ PRIMARY: Audio sent successfully via WebSocket (${this.audioSentCount} chunks)\n`);
+        console.log(`✅ Audio sent successfully via WebSocket (${this.audioSentCount} chunks), transcript available for logging`);
+      } else {
+        console.warn('⚠️ No audio sent and no transcript available - caller may not hear response');
+      }
+    };
+    
     this.startTime = new Date();
     console.log('=== CallHandler initialized successfully ===');
     
@@ -193,8 +218,26 @@ export class CallHandler {
   // Send audio to Telnyx (via WebSocket)
   // Converts OpenAI PCM16 24kHz → Telnyx PCMU 8kHz
   sendAudioToVoximplant(audioData) {
-    if (!this.audioWebSocket || this.audioWebSocket.readyState !== 1) {
-      console.warn('⚠️ Audio WebSocket not ready, cannot send audio to Telnyx');
+    // Track all attempts
+    if (!this._sendAttemptCount) this._sendAttemptCount = 0;
+    this._sendAttemptCount++;
+    
+    // Check WebSocket state
+    const wsReady = this.audioWebSocket && this.audioWebSocket.readyState === 1;
+    
+    // Log WebSocket state (first few and periodically)
+    if (this._sendAttemptCount <= 5 || this._sendAttemptCount % 50 === 0) {
+      const wsState = this.audioWebSocket ? this.audioWebSocket.readyState : 'null';
+      const wsStateName = wsState === 0 ? 'CONNECTING' : wsState === 1 ? 'OPEN' : wsState === 2 ? 'CLOSING' : wsState === 3 ? 'CLOSED' : 'NULL';
+      process.stdout.write(`\n📤 SEND ATTEMPT #${this._sendAttemptCount} - WebSocket state: ${wsStateName} (${wsState})\n`);
+      console.log(`📤 Send attempt #${this._sendAttemptCount}, WebSocket readyState: ${wsStateName} (${wsState}), ready: ${wsReady}`);
+    }
+    
+    if (!wsReady) {
+      if (this._sendAttemptCount <= 5) {
+        console.warn(`⚠️ Audio WebSocket not ready (state: ${this.audioWebSocket?.readyState}), cannot send audio to Telnyx`);
+      }
+      // WebSocket not ready - will use speak API fallback when transcript is ready
       return;
     }
     
@@ -204,22 +247,89 @@ export class CallHandler {
       
       // Log first conversion to verify it's working
       if (!this._firstOutputConversionLogged) {
-        console.log('🔵 Converting audio: OpenAI PCM16 24kHz → Telnyx PCMU 8kHz');
-        console.log('🔵 Input size:', audioData.length, 'bytes (PCM16 24kHz)');
-        console.log('🔵 Output size:', telnyxAudio.length, 'bytes (PCMU 8kHz)');
+        process.stdout.write(`\n🔄 FIRST AUDIO CONVERSION - Input: ${audioData.length} bytes (PCM16 24kHz) → Output: ${telnyxAudio.length} bytes (PCMU 8kHz)\n`);
+        console.log('🔄 Converting audio: OpenAI PCM16 24kHz → Telnyx PCMU 8kHz');
+        console.log('🔄 Input size:', audioData.length, 'bytes (PCM16 24kHz)');
+        console.log('🔄 Output size:', telnyxAudio.length, 'bytes (PCMU 8kHz)');
+        console.log('🔄 Compression ratio:', (telnyxAudio.length / audioData.length).toFixed(2), 'x');
         this._firstOutputConversionLogged = true;
       }
       
+      // Send audio via WebSocket
       this.audioWebSocket.send(telnyxAudio);
+      this.audioSentCount++; // Track successful sends
+      
+      // Log successful sends (first few and periodically)
+      if (this.audioSentCount <= 5 || this.audioSentCount % 50 === 0) {
+        process.stdout.write(`\n✅ AUDIO SENT TO TELNYX #${this.audioSentCount} - Size: ${telnyxAudio.length} bytes\n`);
+        console.log(`✅ Audio sent to Telnyx #${this.audioSentCount}, size: ${telnyxAudio.length} bytes (PCMU 8kHz)`);
+      }
     } catch (error) {
-      console.error('❌ Error converting/sending audio to Telnyx:', error);
+      console.error(`❌ Error converting/sending audio to Telnyx (attempt #${this._sendAttemptCount}):`, error);
       console.error('Error stack:', error.stack);
+      // Error sending - will use speak API fallback when transcript is ready
+    }
+  }
+  
+  // Send text response via Telnyx speak API (fallback when WebSocket audio fails)
+  async speakViaTelnyx(text) {
+    if (!text || text.trim().length === 0) {
+      console.warn('⚠️ Cannot speak empty text via Telnyx');
+      return;
+    }
+    
+    // voximplantCallId is actually call_control_id for Telnyx
+    const callControlId = this.voximplantCallId;
+    
+    if (!callControlId) {
+      console.error('❌ Cannot speak via Telnyx: call_control_id not available');
+      return;
+    }
+    
+    try {
+      console.log('🔵 Sending text to Telnyx speak API:', text.substring(0, 100) + '...');
+      console.log('🔵 Call Control ID:', callControlId);
+      
+      // Use Telnyx speak API to send the text response
+      await TelnyxService.makeAPIRequest('POST', `/calls/${callControlId}/actions/speak`, {
+        payload: text,
+        voice: 'Polly.Joanna',
+        language: 'en-US',
+        premium: true,
+      });
+      
+      console.log('✅ Text sent to caller via Telnyx speak API');
+    } catch (error) {
+      console.error('❌ Failed to send text via Telnyx speak API:', error);
+      console.error('Error details:', error.response?.data || error.message);
     }
   }
   
   // Set the WebSocket connection for audio streaming
   setAudioWebSocket(ws) {
     this.audioWebSocket = ws;
+    const wsState = ws ? ws.readyState : 'null';
+    const wsStateName = wsState === 0 ? 'CONNECTING' : wsState === 1 ? 'OPEN' : wsState === 2 ? 'CLOSING' : wsState === 3 ? 'CLOSED' : 'NULL';
+    process.stdout.write(`\n🔌 AUDIO WEBSOCKET SET - State: ${wsStateName} (${wsState})\n`);
+    console.log(`🔌 Audio WebSocket set, readyState: ${wsStateName} (${wsState})`);
+    
+    // Monitor WebSocket state changes
+    if (ws) {
+      ws.on('open', () => {
+        process.stdout.write(`\n✅ TELNYX AUDIO WEBSOCKET OPENED\n`);
+        console.log('✅ Telnyx audio WebSocket opened - ready to send audio');
+      });
+      
+      ws.on('close', (code, reason) => {
+        process.stdout.write(`\n🔴 TELNYX AUDIO WEBSOCKET CLOSED - Code: ${code}, Reason: ${reason}\n`);
+        console.log(`🔴 Telnyx audio WebSocket closed - code: ${code}, reason: ${reason}`);
+      });
+      
+      ws.on('error', (error) => {
+        process.stdout.write(`\n❌ TELNYX AUDIO WEBSOCKET ERROR: ${error.message}\n`);
+        console.error('❌ Telnyx audio WebSocket error:', error);
+      });
+    }
   }
   
   // Handle call end
