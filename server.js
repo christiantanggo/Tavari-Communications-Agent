@@ -296,18 +296,22 @@ async function startOpenAIRealtime(callId) {
     s.ready = true;
     sessions.set(callId, s);
 
-    // Make the AI speak FIRST (audio)
-    ws.send(
-      JSON.stringify({
-        type: "response.create",
-        response: {
-          modalities: ["audio", "text"],
-          instructions: "Hello! Thanks for calling Tavari. How can I help you today?",
-        },
-      })
-    );
-
-    console.log(`🎤 Sent greeting for ${callId}`);
+    // Wait a moment for session to be fully ready, then make the AI speak
+    // Use input_text instead of instructions to ensure audio is generated
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["audio", "text"],
+              input_text: "Hello! Thanks for calling Tavari. How can I help you today?",
+            },
+          })
+        );
+        console.log(`🎤 Sent greeting for ${callId}`);
+      }
+    }, 100);
   });
 
   ws.on("message", (raw) => {
