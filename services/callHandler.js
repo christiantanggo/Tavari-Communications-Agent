@@ -4,6 +4,7 @@ import { AIRealtimeService } from './aiRealtime.js';
 import { UsageMinutes } from '../models/UsageMinutes.js';
 import { Business } from '../models/Business.js';
 import { supabaseClient } from '../config/database.js';
+import { convertOpenAIToTelnyx } from '../utils/audioConverter.js';
 
 export class CallHandler {
   constructor(voximplantCallId, businessId) {
@@ -190,7 +191,6 @@ export class CallHandler {
     
     try {
       // Convert OpenAI PCM16 24kHz → Telnyx PCMU 8kHz
-      const { convertOpenAIToTelnyx } = await import('../utils/audioConverter.js');
       const telnyxAudio = convertOpenAIToTelnyx(audioData);
       
       // Log first conversion to verify it's working
