@@ -152,8 +152,17 @@ export class AIRealtimeService {
               
               resolve(true);
               } else if (message.type === 'error') {
-                process.stdout.write(`\n❌ SESSION HANDLER ERROR: ${message.type}\n`);
+                process.stdout.write(`\n❌❌❌ SESSION HANDLER ERROR ❌❌❌\n`);
+                process.stdout.write(`❌ Error type: ${message.type}\n`);
+                process.stdout.write(`❌ Error code: ${message.code || 'N/A'}\n`);
+                process.stdout.write(`❌ Error message: ${message.message || 'N/A'}\n`);
+                process.stdout.write(`❌ Error param: ${message.param || 'N/A'}\n`);
                 console.error('❌ OpenAI session error:', JSON.stringify(message, null, 2));
+                // Log the full error to help debug
+                if (message.param) {
+                  process.stdout.write(`\n❌ UNKNOWN PARAMETER: ${message.param}\n`);
+                  console.error(`❌ CRITICAL: Unknown parameter '${message.param}' in session configuration`);
+                }
                 // Don't reject on error - might be recoverable
               }
             } catch (error) {
@@ -416,10 +425,15 @@ export class AIRealtimeService {
         break;
         
       case 'response.done':
-        process.stdout.write(`\n✅ OPENAI RESPONSE COMPLETE\n`);
+        process.stdout.write(`\n✅ OPENAI RESPONSE COMPLETE - SESSION READY FOR NEXT INPUT\n`);
         console.log('✅ OpenAI response complete');
+        console.log('✅ Session is now ready to listen for next user input');
+        console.log('✅ With semantic_vad, OpenAI will automatically detect speech and respond');
         this.isResponding = false;
         this.responseLock = false;
+        // CRITICAL: Session should continue listening automatically with semantic_vad
+        // No need to restart listening - it's continuous
+        process.stdout.write(`\n✅✅✅ SESSION CONTINUES LISTENING - AUDIO STREAM STAYS OPEN ✅✅✅\n`);
         break;
         
       case 'session.updated':
@@ -428,7 +442,12 @@ export class AIRealtimeService {
         break;
         
       case 'error':
-        console.error('OpenAI Realtime error:', JSON.stringify(message, null, 2));
+        process.stdout.write(`\n❌❌❌ OPENAI ERROR IN MAIN HANDLER ❌❌❌\n`);
+        process.stdout.write(`❌ Error type: ${message.type}\n`);
+        process.stdout.write(`❌ Error code: ${message.code || 'N/A'}\n`);
+        process.stdout.write(`❌ Error message: ${message.message || 'N/A'}\n`);
+        process.stdout.write(`❌ Error param: ${message.param || 'N/A'}\n`);
+        console.error('❌ OpenAI Realtime error:', JSON.stringify(message, null, 2));
         if (message.error) {
           console.error('Error details:', JSON.stringify(message.error, null, 2));
         }
@@ -437,6 +456,10 @@ export class AIRealtimeService {
         }
         if (message.code) {
           console.error('Error code:', message.code);
+        }
+        if (message.param) {
+          process.stdout.write(`\n❌❌❌ UNKNOWN PARAMETER: ${message.param} ❌❌❌\n`);
+          console.error(`❌ CRITICAL: Unknown parameter '${message.param}' - this must be fixed!`);
         }
         // Log the full message object
         console.error('Full error object:', message);
