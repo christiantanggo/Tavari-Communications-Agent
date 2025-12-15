@@ -92,8 +92,7 @@ export class AIRealtimeService {
                   session: {
                     type: 'realtime', // REQUIRED: Session type must be specified
                     instructions: this.buildSystemInstructions(),
-                    // modalities is not needed - both text and audio are enabled by default
-                    voice: 'alloy',
+                    // voice is NOT valid in session.update - must be set at connection time or use default
                     temperature: 0.8,
                     max_response_output_tokens: 4096,
                     input_audio_format: 'pcm16', // Audio format must be INSIDE session object
