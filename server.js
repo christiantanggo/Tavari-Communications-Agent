@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import http from "http";
 import WebSocket, { WebSocketServer } from "ws";
 import { URL } from "url";
+import { convertOpenAIToTelnyx } from "./utils/audioConverter.js";
 
 dotenv.config();
 
@@ -279,7 +280,7 @@ async function startOpenAIRealtime(callId) {
             "You are Tavari's phone receptionist. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time.",
           voice: "alloy",
           input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
+          output_audio_format: "pcm16", // Use pcm16 for output (supported), convert to g711_ulaw for Telnyx
           input_audio_transcription: { model: "whisper-1" },
           turn_detection: {
             type: "server_vad",
@@ -360,15 +361,33 @@ async function startOpenAIRealtime(callId) {
         if (!session.audioOutFrameCount) session.audioOutFrameCount = 0;
         session.audioOutFrameCount++;
         if (session.audioOutFrameCount <= 3) {
-          console.log(`📤 [${callId}] Sending audio frame #${session.audioOutFrameCount} to Telnyx (${msg.delta.length} bytes)`);
+          console.log(`📤 [${callId}] Received audio delta from OpenAI (${msg.delta.length} bytes base64)`);
         }
         
-        telnyxWs.send(
-          JSON.stringify({
-            event: "media",
-            media: { payload: msg.delta },
-          })
-        );
+        try {
+          // OpenAI sends pcm16 audio as base64 string
+          // Decode base64 to get pcm16 buffer
+          const pcm16Buffer = Buffer.from(msg.delta, "base64");
+          
+          // Convert pcm16 to g711_ulaw for Telnyx
+          const g711Buffer = convertOpenAIToTelnyx(pcm16Buffer);
+          
+          // Encode as base64 for Telnyx
+          const telnyxPayload = g711Buffer.toString("base64");
+          
+          if (session.audioOutFrameCount <= 3) {
+            console.log(`📤 [${callId}] Converted to g711_ulaw (${g711Buffer.length} bytes), sending to Telnyx`);
+          }
+          
+          telnyxWs.send(
+            JSON.stringify({
+              event: "media",
+              media: { payload: telnyxPayload },
+            })
+          );
+        } catch (error) {
+          console.error(`❌ [${callId}] Error converting/sending audio:`, error?.message || error);
+        }
       } else {
         if (!session.audioOutFrameCount || session.audioOutFrameCount === 0) {
           console.log(`⚠️ [${callId}] OpenAI sent audio but Telnyx WS not ready (state: ${telnyxWs?.readyState})`);
