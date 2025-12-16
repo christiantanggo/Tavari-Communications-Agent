@@ -76,7 +76,6 @@ app.post("/webhook", async (req, res) => {
     const callSessionId = payload?.call_session_id;
     const callId = callControlId || callSessionId;
 
-
     // Always 200 to Telnyx
     res.status(200).send("OK");
 
@@ -126,6 +125,7 @@ async function handleCallInitiated(payload, callId) {
   const callControlId = payload?.call_control_id;
   if (!callControlId) return;
 
+  console.log(`📞 Call initiated: ${callControlId}`);
 
   // Create/update session
   sessions.set(callId, {
@@ -179,6 +179,7 @@ async function handleCallAnswered(payload, callId) {
 }
 
 async function handleCallHangup(callId) {
+  console.log(`📴 Call hangup: ${callId}`);
   const s = sessions.get(callId);
   if (!s) return;
 
@@ -190,6 +191,7 @@ async function handleCallHangup(callId) {
   } catch {}
 
   sessions.delete(callId);
+  console.log(`🗑️  Removed session for ${callId}`);
 }
 
 /**
@@ -202,6 +204,7 @@ async function telnyxAnswer(callControlId) {
       {},
       { headers: telnyxHeaders() }
     );
+    console.log(`✅ Call answered: ${callControlId}`);
   } catch (err) {
     console.error(`❌ Failed to answer call ${callControlId}:`, err?.response?.status, err?.response?.data || err?.message);
     throw err;
@@ -232,6 +235,8 @@ async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
   // Telnyx will open a WebSocket to THIS URL:
   const streamUrl = `${PUBLIC_WSS_BASE}/media-stream-ws?call_id=${encodeURIComponent(callId)}`;
 
+  console.log(`🚀 Starting Telnyx media streaming (bidirectional)`);
+  console.log(`🚀 Using media stream URL: ${streamUrl}`);
 
   try {
     await axios.post(
@@ -247,6 +252,7 @@ async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
       { headers: telnyxHeaders() }
     );
 
+    console.log(`🎵 Media streaming started: ${callControlId}`);
   } catch (err) {
     console.error(
       "❌ Telnyx streaming_start error:",
@@ -260,6 +266,7 @@ async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
  * OPENAI REALTIME (WebSocket) — g711_ulaw in/out
  */
 async function startOpenAIRealtime(callId) {
+  console.log(`🤖 Starting OpenAI Realtime session for ${callId}...`);
 
   const ws = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
@@ -293,7 +300,7 @@ async function startOpenAIRealtime(callId) {
   sessions.set(callId, s);
 
   ws.on("open", () => {
-    console.log(`✅ [${callId}] OpenAI WebSocket connected`);
+    console.log(`✅ OpenAI Realtime WebSocket connected for ${callId}`);
 
     // Configure session - keep both modalities but we'll extract text for Telnyx TTS
     ws.send(
@@ -302,7 +309,7 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"], // Keep both - we need audio for input, text for output extraction
           instructions:
-            "You are Tavari's phone receptionist. CRITICAL LANGUAGE RULE: You MUST speak ONLY in English (US). Never respond in any other language. Never use Spanish, French, or any other language. Always respond in English only. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking. If the caller interrupts you, stop speaking immediately.",
+            "You are Tavari's phone receptionist. CRITICAL LANGUAGE RULE: You MUST speak ONLY in English (US). Never respond in any other language. Never use Spanish, French, or any other language. Always respond in English only. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking.",
           voice: "alloy",
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
@@ -310,7 +317,7 @@ async function startOpenAIRealtime(callId) {
           // VAPI-style turn detection: less aggressive, wait longer before responding
           turn_detection: {
             type: "semantic_vad",
-            eagerness: "low", // Lower eagerness = less aggressive (VAPI-style)
+            eagerness: 0.5, // Lower eagerness = less aggressive (VAPI-style)
             // Note: semantic_vad doesn't use silence_duration_ms, but we'll add delay in code
           },
           temperature: 0.7,
@@ -318,7 +325,6 @@ async function startOpenAIRealtime(callId) {
         },
       })
     );
-    console.log(`📤 [${callId}] Sent session.update`);
 
     s.ready = true;
     s.isResponding = false; // Track if AI is currently generating a response
@@ -329,23 +335,18 @@ async function startOpenAIRealtime(callId) {
     setTimeout(() => {
       const session = sessions.get(callId);
       if (session?.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
-        console.log(`👋 [${callId}] Triggering initial greeting...`);
         session.isResponding = true;
         session.openaiWs.send(
           JSON.stringify({
             type: "response.create",
             response: {
-              modalities: ["text"],
+              modalities: ["text"], // Only generate text for Telnyx TTS
               instructions: "Respond in English (US) only. Be brief and concise.",
             },
           })
         );
-        console.log(`📤 [${callId}] Sent response.create for greeting`);
-      } else {
-        console.log(`⚠️ [${callId}] Cannot trigger greeting - ws state: ${session?.openaiWs?.readyState}, isResponding: ${session?.isResponding}`);
       }
     }, 500); // Small delay to ensure session is ready
-    
   });
 
   ws.on("message", async (raw) => {
@@ -361,11 +362,6 @@ async function startOpenAIRealtime(callId) {
     // NOTE: We're NOT sending OpenAI audio to Telnyx - we use Telnyx TTS instead
     // OpenAI audio is ignored since we extract text and send to Telnyx /actions/speak
     if (msg.type === "response.audio.delta" && msg.delta) {
-      // Log that we're ignoring OpenAI audio (using Telnyx TTS instead)
-      if (!s.audioOutFrameCount) s.audioOutFrameCount = 0;
-      s.audioOutFrameCount++;
-      if (s.audioOutFrameCount === 1) {
-      }
       return;
     }
     
@@ -375,11 +371,6 @@ async function startOpenAIRealtime(callId) {
       if (session) {
         if (!session.transcriptText) session.transcriptText = "";
         session.transcriptText += msg.delta;
-        // Log first transcript chunk
-        if (!s.transcriptLogCount) s.transcriptLogCount = 0;
-        s.transcriptLogCount++;
-        if (s.transcriptLogCount <= 1) {
-        }
       }
     }
     
@@ -398,16 +389,15 @@ async function startOpenAIRealtime(callId) {
           
           // Prevent rapid consecutive responses (minimum 1 second between responses)
           if (timeSinceLastResponse < 1000) {
-            if (timeSinceLastResponse < 1000) {
-              return;
-            }
+            return;
+          }
           
           // Don't respond if TTS is currently playing
           if (session.isTtsPlaying) {
             return;
           }
           
-          // VAPI-style delay: Wait before responding to ensure caller is done
+          // VAPI-style delay: Wait 1 second before responding to ensure caller is done
           session.speechStopTime = now;
           session.speechStartedAfterStop = false;
           
@@ -421,7 +411,6 @@ async function startOpenAIRealtime(callId) {
             if (session.isResponding) {
               return;
             }
-            
             session.isResponding = true;
             session.lastResponseTime = Date.now();
             session.speechStopTime = 0;
@@ -430,12 +419,12 @@ async function startOpenAIRealtime(callId) {
               JSON.stringify({
                 type: "response.create",
                 response: {
-                  modalities: ["text"],
-                  instructions: "Respond in English (US) only. Be brief and concise. If the caller interrupts you, stop speaking immediately.",
+                  modalities: ["text"], // Only generate text for Telnyx TTS
+                  instructions: "CRITICAL: Respond ONLY in English (US). Never use any other language. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself."
                 },
               })
             );
-          }, 1500); // 1.5 second delay for better turn-taking
+          }, 1000); // 1 second delay (VAPI-style)
         }
       }
     }
@@ -463,8 +452,6 @@ async function startOpenAIRealtime(callId) {
         msg.type === "conversation.item.output_item.completed") {
       const session = sessions.get(callId);
       if (session && msg.item) {
-        console.log(`📋 [${callId}] Conversation item event: ${msg.type}`);
-        
         // Check multiple possible locations for assistant text
         const role = msg.item?.role;
         const contents = msg.item?.content || msg.item?.output_item?.content || [];
@@ -489,14 +476,11 @@ async function startOpenAIRealtime(callId) {
           itemText = msg.item?.text || msg.item?.transcript || msg.item?.output_item?.text;
         }
         
-        console.log(`📝 [${callId}] Extracted text from item (role: ${role}): "${itemText}"`);
-        
         // If this is an assistant message, send to TTS (only if we haven't sent this text already)
         if (itemText && (role === "assistant" || msg.type.includes("output"))) {
           // Prevent duplicate TTS requests
           if (itemText.trim() && itemText.trim() !== session.lastTtsText?.trim()) {
             if (session?.callControlId) {
-              console.log(`🔊 [${callId}] Sending to TTS: "${itemText.trim()}"`);
               session.lastTtsText = itemText.trim();
               axios.post(
                 `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
@@ -505,24 +489,16 @@ async function startOpenAIRealtime(callId) {
                   voice: "Polly.Joanna",
                   language: "en-US",
                   premium: true,
-                  interruption_settings: {
-                    enabled: true, // Allow caller to interrupt
-                  },
                 },
                 { headers: telnyxHeaders() }
-              ).then(() => {
-                console.log(`✅ [${callId}] TTS started successfully`);
-              }).catch((error) => {
+              ).catch((error) => {
                 console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
+                // Reset on error so we can retry
                 if (session.lastTtsText === itemText.trim()) {
                   session.lastTtsText = "";
                 }
               });
-            } else {
-              console.log(`⚠️ [${callId}] No callControlId, cannot send TTS`);
             }
-          } else {
-            console.log(`⏭️ [${callId}] Skipping duplicate TTS: "${itemText.trim()}"`);
           }
         } else if (itemText && role === "user") {
           // Only create a response if we're not already responding
@@ -533,7 +509,7 @@ async function startOpenAIRealtime(callId) {
               JSON.stringify({
                 type: "response.create",
                 response: {
-                  modalities: ["text"],
+                  modalities: ["text"], // Only generate text for Telnyx TTS
                   instructions: "Respond in English (US) only. Be brief and concise.",
                 },
               })
@@ -545,33 +521,25 @@ async function startOpenAIRealtime(callId) {
     
     // Handle response text completion events
     if (msg.type === "response.audio_transcript.done" || msg.type === "response.text.done") {
-      console.log(`📝 [${callId}] Response text done event: ${msg.type}`);
       const session = sessions.get(callId);
       const transcript = (msg.transcript || msg.text || session?.transcriptText || "").trim();
-      console.log(`📝 [${callId}] Extracted transcript: "${transcript}"`);
       
       if (transcript) {
-        
         // Use Telnyx /actions/speak for audio output (only if we haven't sent this already)
         if (transcript && session?.callControlId && transcript !== session.lastTtsText?.trim()) {
-          console.log(`🔊 [${callId}] Sending to TTS from response.text.done: "${transcript}"`);
           session.lastTtsText = transcript;
           axios.post(
             `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
             {
               payload: transcript,
-              voice: "Polly.Joanna",
+              voice: "Polly.Joanna", // You can make this configurable
               language: "en-US",
               premium: true,
-              interruption_settings: {
-                enabled: true, // Allow caller to interrupt
-              },
             },
             { headers: telnyxHeaders() }
-          ).then(() => {
-            console.log(`✅ [${callId}] TTS started from response.text.done`);
-          }).catch((error) => {
+          ).catch((error) => {
             console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
+            // Reset on error so we can retry
             if (session.lastTtsText === transcript) {
               session.lastTtsText = "";
             }
@@ -583,7 +551,7 @@ async function startOpenAIRealtime(callId) {
       if (session) session.transcriptText = "";
     }
     
-    // Log response creation/start events
+    // Handle response creation/start events
     if (msg.type === "response.created") {
       // Initialize transcript text and mark as responding
       const session = sessions.get(callId);
@@ -593,11 +561,7 @@ async function startOpenAIRealtime(callId) {
       }
     }
     
-    if (msg.type === "response.audio_started") {
-    }
-    
     if (msg.type === "response.done") {
-      console.log(`✅ [${callId}] Response done event`);
       // Mark that we're no longer responding - wait for user input
       const session = sessions.get(callId);
       if (session) {
@@ -608,8 +572,6 @@ async function startOpenAIRealtime(callId) {
       
       // Check if response has text content we can use
       if (session && msg.response) {
-        console.log(`📋 [${callId}] Response object:`, JSON.stringify(msg.response, null, 2));
-        
         // Try to extract text from response - check multiple possible locations
         const text = msg.response?.output?.[0]?.text || 
                      msg.response?.text || 
@@ -618,10 +580,9 @@ async function startOpenAIRealtime(callId) {
                      (msg.response?.output && Array.isArray(msg.response.output) && msg.response.output.length > 0 ? msg.response.output[0] : null);
         
         const textValue = typeof text === "string" ? text.trim() : (text?.text || "").trim();
-        console.log(`📝 [${callId}] Extracted text from response.done: "${textValue}"`);
-        if (textValue && textValue !== session.lastTtsText?.trim() && session?.callControlId) {
+        if (textValue && textValue !== session.lastTtsText?.trim()) {
           // Use this text for Telnyx TTS (only if not already sent)
-          console.log(`🔊 [${callId}] Sending to TTS from response.done: "${textValue}"`);
+          if (session?.callControlId) {
             session.lastTtsText = textValue;
             axios.post(
               `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
@@ -630,21 +591,15 @@ async function startOpenAIRealtime(callId) {
                 voice: "Polly.Joanna",
                 language: "en-US",
                 premium: true,
-                interruption_settings: {
-                  enabled: true, // Allow caller to interrupt
-                },
               },
               { headers: telnyxHeaders() }
-            ).then(() => {
-              console.log(`✅ [${callId}] TTS started from response.done`);
-            }).catch((error) => {
+            ).catch((error) => {
               console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
+              // Reset on error so we can retry
               if (session.lastTtsText === textValue) {
                 session.lastTtsText = "";
               }
             });
-          } else if (!textValue) {
-            console.log(`⚠️ [${callId}] No text found in response.done`);
           }
         }
       }
@@ -654,24 +609,10 @@ async function startOpenAIRealtime(callId) {
     if (msg.type === "error") {
       console.error(`❌ [${callId}] OpenAI error:`, JSON.stringify(msg, null, 2));
     }
-    
-    // Log session update confirmation
-    if (msg.type === "session.updated") {
-      console.log(`✅ [${callId}] Session updated successfully`);
-    }
-    
-    // Log response creation
-    if (msg.type === "response.created") {
-      console.log(`✅ [${callId}] Response created`);
-    }
-  });
-
-  ws.on("close", (code, reason) => {
-    console.log(`🔌 [${callId}] OpenAI WebSocket closed - code: ${code}, reason: ${reason?.toString() || 'none'}`);
   });
 
   ws.on("error", (e) => {
-    console.error(`❌ [${callId}] OpenAI WebSocket error:`, e?.message || e);
+    console.error(`❌ OpenAI WebSocket error for ${callId}:`, e?.message || e);
   });
 }
 
@@ -688,10 +629,13 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/media-stream-ws" });
 
 wss.on("connection", (socket, req) => {
+  console.log("🔌 Telnyx WebSocket connection established");
+  console.log(`🔍 WebSocket URL: ${req.url}`);
 
   const url = new URL(req.url, "http://localhost");
   const callId = url.searchParams.get("call_id");
 
+  console.log(`🔍 Extracted call_id from URL: ${callId}`);
 
   if (!callId) {
     console.error("❌ Missing call_id in WebSocket URL, closing");
@@ -717,6 +661,7 @@ wss.on("connection", (socket, req) => {
   s.telnyxWs = socket;
   sessions.set(callId, s);
 
+  console.log(`🎵 Telnyx media stream WebSocket connected (call: ${callId})`);
 
   socket.on("message", (data) => {
     // Telnyx sends JSON text frames (not binary) for media streaming
@@ -741,22 +686,12 @@ wss.on("connection", (socket, req) => {
       const openaiWs = session?.openaiWs;
 
       if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-        // Log first few audio frames for debugging
-        if (!s.audioFrameCount) s.audioFrameCount = 0;
-        s.audioFrameCount++;
-        if (s.audioFrameCount <= 3) {
-        }
-        
         openaiWs.send(
           JSON.stringify({
             type: "input_audio_buffer.append",
             audio: msg.media.payload, // already base64
           })
         );
-      } else {
-        if (s.audioFrameCount === 0 || s.audioFrameCount === undefined) {
-          console.log(`⚠️ [${callId}] Received audio from Telnyx but OpenAI WS not ready (state: ${openaiWs?.readyState})`);
-        }
       }
       return;
     }
