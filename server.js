@@ -353,7 +353,7 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"], // Keep both - we need audio for input, text for output extraction
           instructions:
-            "You are Tavari's phone receptionist. ABSOLUTE LANGUAGE RULE - THIS IS MANDATORY AND NON-NEGOTIABLE: You MUST speak ONLY in English (US). EVERY SINGLE WORD YOU SAY MUST BE IN ENGLISH. NEVER use Spanish, French, German, Chinese, Japanese, Portuguese, Italian, Russian, Arabic, or ANY other language. ONLY ENGLISH. If you generate any text that is not in English, it will be automatically rejected. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking. REMEMBER: ONLY ENGLISH. NO OTHER LANGUAGE.",
+            "You are Tavari's phone receptionist. CRITICAL RULES: 1) Speak ONLY in English (US). 2) Listen carefully to what the caller says and respond ONLY to their actual questions and statements. 3) Do NOT make up information, topics, or details the caller didn't mention. 4) If you don't know something, say 'I don't have that information.' 5) After you finish speaking, STOP immediately and wait. When a call starts, greet: 'Hello! Thanks for calling Tavari. How can I help you today?' Be brief and respond only to what they actually say.",
           voice: "alloy",
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
@@ -385,7 +385,7 @@ async function startOpenAIRealtime(callId) {
             type: "response.create",
             response: {
               modalities: ["text"], // Only generate text for Telnyx TTS
-              instructions: "CRITICAL: Respond ONLY in English (US). Never use any other language. Be brief and concise.",
+              instructions: "CRITICAL: 1) Respond ONLY in English (US). 2) Listen to what the caller actually said and respond ONLY to that. 3) Do NOT make up information. 4) Be brief and concise. 5) After you finish, STOP immediately.",
             },
           })
         );
@@ -459,8 +459,8 @@ async function startOpenAIRealtime(callId) {
             session.lastResponseTime = Date.now();
             session.speechStopTime = 0;
             
-            // ABSOLUTE ENGLISH-ONLY INSTRUCTIONS - NO EXCEPTIONS
-            const languageInstructions = "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE AND NON-NEGOTIABLE. NEVER USE SPANISH, FRENCH, GERMAN, CHINESE, JAPANESE, OR ANY OTHER LANGUAGE. ONLY ENGLISH. EVERY SINGLE WORD MUST BE IN ENGLISH. IF YOU GENERATE ANY TEXT THAT IS NOT IN ENGLISH, IT WILL BE REJECTED. RESPOND IN ENGLISH ONLY. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
+            // Clear, focused instructions
+            const languageInstructions = "CRITICAL: 1) Respond ONLY in English (US). 2) Listen to what the caller actually said and respond ONLY to that. 3) Do NOT make up information or talk about topics they didn't mention. 4) If you don't know something, say 'I don't have that information.' 5) Keep your response to 1-2 sentences. 6) After you finish, STOP immediately and wait for the caller.";
             
             session.openaiWs.send(
               JSON.stringify({
@@ -589,7 +589,7 @@ async function startOpenAIRealtime(callId) {
               session.lastResponseTime = Date.now();
               session.speechStopTime = 0;
               
-              const languageInstructions = "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE AND NON-NEGOTIABLE. NEVER USE SPANISH, FRENCH, GERMAN, CHINESE, JAPANESE, OR ANY OTHER LANGUAGE. ONLY ENGLISH. EVERY SINGLE WORD MUST BE IN ENGLISH. IF YOU GENERATE ANY TEXT THAT IS NOT IN ENGLISH, IT WILL BE REJECTED. RESPOND IN ENGLISH ONLY. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
+              const languageInstructions = "CRITICAL: 1) Respond ONLY in English (US). 2) Listen to what the caller actually said and respond ONLY to that. 3) Do NOT make up information or talk about topics they didn't mention. 4) If you don't know something, say 'I don't have that information.' 5) Keep your response to 1-2 sentences. 6) After you finish, STOP immediately and wait for the caller.";
               
               session.openaiWs.send(
                 JSON.stringify({
