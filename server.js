@@ -565,19 +565,42 @@ async function startOpenAIRealtime(callId) {
             }
           }
         } else if (itemText && role === "user") {
-          // Only create a response if we're not already responding
+          // User input detected - use same VAPI-style logic as transcription.completed
           const session = sessions.get(callId);
-          if (session && !session.isResponding && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
-            session.isResponding = true;
-            session.openaiWs.send(
-              JSON.stringify({
-                type: "response.create",
-                response: {
-                  modalities: ["text"], // Only generate text for Telnyx TTS
-                  instructions: "CRITICAL: Respond ONLY in English (US). Never use any other language. Be brief and concise.",
-                },
-              })
-            );
+          if (session && !session.isResponding && !session.isTtsPlaying && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+            const now = Date.now();
+            const timeSinceLastResponse = now - (session.lastResponseTime || 0);
+            
+            // Prevent rapid consecutive responses
+            if (timeSinceLastResponse < 1000) {
+              return;
+            }
+            
+            // VAPI-style delay: Wait before responding
+            session.speechStopTime = now;
+            session.speechStartedAfterStop = false;
+            
+            setTimeout(() => {
+              if (session.speechStartedAfterStop || session.isResponding || session.isTtsPlaying) {
+                return;
+              }
+              
+              session.isResponding = true;
+              session.lastResponseTime = Date.now();
+              session.speechStopTime = 0;
+              
+              const languageInstructions = "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE AND NON-NEGOTIABLE. NEVER USE SPANISH, FRENCH, GERMAN, CHINESE, JAPANESE, OR ANY OTHER LANGUAGE. ONLY ENGLISH. EVERY SINGLE WORD MUST BE IN ENGLISH. IF YOU GENERATE ANY TEXT THAT IS NOT IN ENGLISH, IT WILL BE REJECTED. RESPOND IN ENGLISH ONLY. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
+              
+              session.openaiWs.send(
+                JSON.stringify({
+                  type: "response.create",
+                  response: {
+                    modalities: ["text"],
+                    instructions: languageInstructions
+                  },
+                })
+              );
+            }, 500);
           }
         }
       }
@@ -642,6 +665,18 @@ async function startOpenAIRealtime(callId) {
         session.transcriptText = "";
         session.isResponding = true; // Mark that we're generating a response
       }
+    }
+    
+    // Handle response cancellation - reset state so we can respond again
+    if (msg.type === "response.done" && msg.response?.status === "cancelled") {
+      const session = sessions.get(callId);
+      if (session) {
+        session.isResponding = false; // Reset so we can respond to next user input
+        session.speechStopTime = 0;
+        session.speechStartedAfterStop = false;
+        console.error(`⚠️ [${callId}] Response cancelled (${msg.response?.status_details?.reason || "unknown"}) - resetting state for next response`);
+      }
+      return; // Don't process cancelled responses further
     }
     
     if (msg.type === "response.done") {
