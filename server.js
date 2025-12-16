@@ -293,6 +293,7 @@ async function startOpenAIRealtime(callId) {
   sessions.set(callId, s);
 
   ws.on("open", () => {
+    console.log(`✅ [${callId}] OpenAI WebSocket connected`);
 
     // Configure session - keep both modalities but we'll extract text for Telnyx TTS
     ws.send(
@@ -317,6 +318,7 @@ async function startOpenAIRealtime(callId) {
         },
       })
     );
+    console.log(`📤 [${callId}] Sent session.update`);
 
     s.ready = true;
     s.isResponding = false; // Track if AI is currently generating a response
@@ -327,6 +329,7 @@ async function startOpenAIRealtime(callId) {
     setTimeout(() => {
       const session = sessions.get(callId);
       if (session?.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
+        console.log(`👋 [${callId}] Triggering initial greeting...`);
         session.isResponding = true;
         session.openaiWs.send(
           JSON.stringify({
@@ -337,6 +340,9 @@ async function startOpenAIRealtime(callId) {
             },
           })
         );
+        console.log(`📤 [${callId}] Sent response.create for greeting`);
+      } else {
+        console.log(`⚠️ [${callId}] Cannot trigger greeting - ws state: ${session?.openaiWs?.readyState}, isResponding: ${session?.isResponding}`);
       }
     }, 500); // Small delay to ensure session is ready
     
@@ -633,14 +639,24 @@ async function startOpenAIRealtime(callId) {
     if (msg.type === "error") {
       console.error(`❌ [${callId}] OpenAI error:`, JSON.stringify(msg, null, 2));
     }
+    
+    // Log session update confirmation
+    if (msg.type === "session.updated") {
+      console.log(`✅ [${callId}] Session updated successfully`);
+    }
+    
+    // Log response creation
+    if (msg.type === "response.created") {
+      console.log(`✅ [${callId}] Response created`);
+    }
   });
 
-  ws.on("close", () => {
-    console.log(`🔌 OpenAI WebSocket closed for ${callId}`);
+  ws.on("close", (code, reason) => {
+    console.log(`🔌 [${callId}] OpenAI WebSocket closed - code: ${code}, reason: ${reason?.toString() || 'none'}`);
   });
 
   ws.on("error", (e) => {
-    console.error(`❌ OpenAI WebSocket error for ${callId}:`, e?.message || e);
+    console.error(`❌ [${callId}] OpenAI WebSocket error:`, e?.message || e);
   });
 }
 
