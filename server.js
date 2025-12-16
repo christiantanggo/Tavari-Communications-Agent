@@ -309,7 +309,7 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"], // Keep both - we need audio for input, text for output extraction
           instructions:
-            "You are Tavari's phone receptionist. CRITICAL LANGUAGE RULE: You MUST speak ONLY in English (US). Never respond in any other language. Never use Spanish, French, or any other language. Always respond in English only. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking.",
+            "You are Tavari's phone receptionist. CRITICAL LANGUAGE RULE - THIS IS MANDATORY: You MUST speak ONLY in English (US). This is non-negotiable. Never respond in Spanish, French, German, Chinese, Japanese, or ANY other language. If the caller speaks another language, respond in English only. Always use English (US) for all responses. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking.",
           voice: "alloy",
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
@@ -420,11 +420,11 @@ async function startOpenAIRealtime(callId) {
                 type: "response.create",
                 response: {
                   modalities: ["text"], // Only generate text for Telnyx TTS
-                  instructions: "CRITICAL: Respond ONLY in English (US). Never use any other language. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself."
+                  instructions: "CRITICAL LANGUAGE RULE - MANDATORY: Respond ONLY in English (US). This is non-negotiable. Never use Spanish, French, German, Chinese, Japanese, or ANY other language. If you detect the caller speaking another language, still respond in English only. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself."
                 },
               })
             );
-          }, 1000); // 1 second delay (VAPI-style)
+          }, 500); // 500ms delay - reduced for faster response
         }
       }
     }
