@@ -309,7 +309,7 @@ async function startOpenAIRealtime(callId) {
           // VAPI-style turn detection: less aggressive, wait longer before responding
           turn_detection: {
             type: "semantic_vad",
-            eagerness: 0.5, // Lower eagerness = less aggressive (VAPI-style)
+            eagerness: "low", // Lower eagerness = less aggressive (VAPI-style)
             // Note: semantic_vad doesn't use silence_duration_ms, but we'll add delay in code
           },
           temperature: 0.7,
