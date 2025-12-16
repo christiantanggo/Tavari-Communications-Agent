@@ -63,6 +63,38 @@ app.get("/health", (_req, res) => {
 const sessions = new Map();
 
 /**
+ * Detect if text is in English
+ * Simple heuristic: checks for mostly ASCII characters and common English patterns
+ */
+function detectLanguage(text) {
+  if (!text || text.trim().length === 0) return "unknown";
+  
+  const trimmed = text.trim();
+  
+  // Check if text is mostly ASCII (English uses ASCII)
+  const asciiRatio = trimmed.split("").filter(c => c.charCodeAt(0) < 128).length / trimmed.length;
+  
+  // Common English words/patterns
+  const englishPatterns = /\b(the|and|or|but|in|on|at|to|for|of|with|by|from|as|is|are|was|were|be|been|have|has|had|do|does|did|will|would|could|should|may|might|can|this|that|these|those|what|when|where|who|why|how|yes|no|hello|hi|thanks|thank|you|your|i|me|my|we|our|they|them|their)\b/gi;
+  const englishMatches = (trimmed.match(englishPatterns) || []).length;
+  const wordCount = trimmed.split(/\s+/).length;
+  const englishWordRatio = wordCount > 0 ? englishMatches / wordCount : 0;
+  
+  // If mostly ASCII and has English patterns, likely English
+  if (asciiRatio > 0.85 && (englishWordRatio > 0.2 || wordCount < 3)) {
+    return "en";
+  }
+  
+  // If mostly ASCII but no clear English patterns, still likely English
+  if (asciiRatio > 0.9) {
+    return "en";
+  }
+  
+  // Otherwise, might be another language
+  return "other";
+}
+
+/**
  * TELNYX WEBHOOK
  */
 app.post("/webhook", async (req, res) => {
@@ -381,6 +413,10 @@ async function startOpenAIRealtime(callId) {
       if (session && msg.item && msg.item.role === "user") {
         const userText = msg.item.transcript || msg.item.text || "";
         
+        // Detect user's language
+        const detectedLanguage = detectLanguage(userText);
+        session.userLanguage = detectedLanguage;
+        
         // VAPI-style: Only create a response if we're not already responding
         // CRITICAL: Don't respond while TTS is playing (prevents feedback loop)
         if (!session.isResponding && !session.isTtsPlaying && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
@@ -415,12 +451,22 @@ async function startOpenAIRealtime(callId) {
             session.lastResponseTime = Date.now();
             session.speechStopTime = 0;
             
+            // Build language-specific instructions based on detected user language
+            let languageInstructions = "";
+            if (session.userLanguage === "en") {
+              // User is speaking English - enforce English-only response
+              languageInstructions = "CRITICAL LANGUAGE RULE - MANDATORY: The caller is speaking English. You MUST respond ONLY in English (US). This is non-negotiable. Never use Spanish, French, German, Chinese, Japanese, or ANY other language. Match the caller's English language. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
+            } else {
+              // User might be speaking another language - still respond in English
+              languageInstructions = "CRITICAL LANGUAGE RULE - MANDATORY: Respond ONLY in English (US). This is non-negotiable. Never use Spanish, French, German, Chinese, Japanese, or ANY other language. Even if the caller speaks another language, you must respond in English only. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
+            }
+            
             session.openaiWs.send(
               JSON.stringify({
                 type: "response.create",
                 response: {
                   modalities: ["text"], // Only generate text for Telnyx TTS
-                  instructions: "CRITICAL LANGUAGE RULE - MANDATORY: Respond ONLY in English (US). This is non-negotiable. Never use Spanish, French, German, Chinese, Japanese, or ANY other language. If you detect the caller speaking another language, still respond in English only. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself."
+                  instructions: languageInstructions
                 },
               })
             );
