@@ -76,7 +76,6 @@ app.post("/webhook", async (req, res) => {
     const callSessionId = payload?.call_session_id;
     const callId = callControlId || callSessionId;
 
-    console.log(`📞 Telnyx event: ${eventType} for call ${callId}`);
 
     // Always 200 to Telnyx
     res.status(200).send("OK");
@@ -103,7 +102,6 @@ app.post("/webhook", async (req, res) => {
         const sessionTtsStart = sessions.get(callId);
         if (sessionTtsStart) {
           sessionTtsStart.isTtsPlaying = true;
-          console.log(`🔇 [${callId}] TTS started - muting OpenAI input to prevent feedback loop`);
         }
         break;
 
@@ -112,7 +110,6 @@ app.post("/webhook", async (req, res) => {
         const sessionTtsEnd = sessions.get(callId);
         if (sessionTtsEnd) {
           sessionTtsEnd.isTtsPlaying = false;
-          console.log(`🔊 [${callId}] TTS ended - OpenAI input re-enabled`);
         }
         break;
 
@@ -129,7 +126,6 @@ async function handleCallInitiated(payload, callId) {
   const callControlId = payload?.call_control_id;
   if (!callControlId) return;
 
-  console.log(`📞 Call initiated: ${callControlId}`);
 
   // Create/update session
   sessions.set(callId, {
@@ -183,7 +179,6 @@ async function handleCallAnswered(payload, callId) {
 }
 
 async function handleCallHangup(callId) {
-  console.log(`📴 Call hangup: ${callId}`);
   const s = sessions.get(callId);
   if (!s) return;
 
@@ -195,7 +190,6 @@ async function handleCallHangup(callId) {
   } catch {}
 
   sessions.delete(callId);
-  console.log(`🗑️  Removed session for ${callId}`);
 }
 
 /**
@@ -208,7 +202,6 @@ async function telnyxAnswer(callControlId) {
       {},
       { headers: telnyxHeaders() }
     );
-    console.log(`✅ Call answered: ${callControlId}`);
   } catch (err) {
     console.error(`❌ Failed to answer call ${callControlId}:`, err?.response?.status, err?.response?.data || err?.message);
     throw err;
@@ -239,8 +232,6 @@ async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
   // Telnyx will open a WebSocket to THIS URL:
   const streamUrl = `${PUBLIC_WSS_BASE}/media-stream-ws?call_id=${encodeURIComponent(callId)}`;
 
-  console.log(`🚀 Starting Telnyx media streaming (bidirectional)`);
-  console.log(`🚀 Using media stream URL: ${streamUrl}`);
 
   try {
     await axios.post(
@@ -256,7 +247,6 @@ async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
       { headers: telnyxHeaders() }
     );
 
-    console.log(`🎵 Media streaming started: ${callControlId}`);
   } catch (err) {
     console.error(
       "❌ Telnyx streaming_start error:",
@@ -270,7 +260,6 @@ async function startTelnyxBidirectionalMediaStream(callId, callControlId) {
  * OPENAI REALTIME (WebSocket) — g711_ulaw in/out
  */
 async function startOpenAIRealtime(callId) {
-  console.log(`🤖 Starting OpenAI Realtime session for ${callId}...`);
 
   const ws = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
@@ -304,7 +293,6 @@ async function startOpenAIRealtime(callId) {
   sessions.set(callId, s);
 
   ws.on("open", () => {
-    console.log(`✅ OpenAI Realtime WebSocket connected for ${callId}`);
 
     // Configure session - keep both modalities but we'll extract text for Telnyx TTS
     ws.send(
@@ -313,7 +301,7 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"], // Keep both - we need audio for input, text for output extraction
           instructions:
-            "You are Tavari's phone receptionist. CRITICAL: You MUST speak ONLY in English (US). Never respond in any other language. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking.",
+            "You are Tavari's phone receptionist. CRITICAL LANGUAGE RULE: You MUST speak ONLY in English (US). Never respond in any other language. Never use Spanish, French, or any other language. Always respond in English only. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking. If the caller interrupts you, stop speaking immediately.",
           voice: "alloy",
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
@@ -339,20 +327,19 @@ async function startOpenAIRealtime(callId) {
     setTimeout(() => {
       const session = sessions.get(callId);
       if (session?.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
-        console.log(`👋 [${callId}] Triggering initial greeting...`);
         session.isResponding = true;
         session.openaiWs.send(
           JSON.stringify({
             type: "response.create",
             response: {
-              modalities: ["text"], // Only generate text for Telnyx TTS
+              modalities: ["text"],
+              instructions: "Respond in English (US) only. Be brief and concise.",
             },
           })
         );
       }
     }, 500); // Small delay to ensure session is ready
     
-    console.log(`✅ OpenAI session ready for ${callId}`);
   });
 
   ws.on("message", async (raw) => {
@@ -363,21 +350,7 @@ async function startOpenAIRealtime(callId) {
       return;
     }
 
-    // Log first few messages to see what we're getting
-    if (!s.messageCount) s.messageCount = 0;
-    s.messageCount++;
-    if (s.messageCount <= 20) {
-      console.log(`📨 [${callId}] OpenAI message #${s.messageCount}: type=${msg.type}`);
-      // Log full message for first 10 messages to see structure
-      if (s.messageCount <= 10) {
-        console.log(`📋 [${callId}] Full message:`, JSON.stringify(msg, null, 2));
-      }
-    }
-    
-    // Always log audio-related messages
-    if (msg.type && msg.type.includes("audio")) {
-      console.log(`🔊 [${callId}] Audio event: ${msg.type}`, msg.delta ? `(${msg.delta.length} bytes)` : "");
-    }
+    // Minimal logging - only errors and critical events
 
     // NOTE: We're NOT sending OpenAI audio to Telnyx - we use Telnyx TTS instead
     // OpenAI audio is ignored since we extract text and send to Telnyx /actions/speak
@@ -386,7 +359,6 @@ async function startOpenAIRealtime(callId) {
       if (!s.audioOutFrameCount) s.audioOutFrameCount = 0;
       s.audioOutFrameCount++;
       if (s.audioOutFrameCount === 1) {
-        console.log(`🔇 [${callId}] Ignoring OpenAI audio (using Telnyx TTS instead)`);
       }
       return;
     }
@@ -401,7 +373,6 @@ async function startOpenAIRealtime(callId) {
         if (!s.transcriptLogCount) s.transcriptLogCount = 0;
         s.transcriptLogCount++;
         if (s.transcriptLogCount <= 1) {
-          console.log(`💬 [${callId}] Transcript delta: ${msg.delta}`);
         }
       }
     }
@@ -412,7 +383,6 @@ async function startOpenAIRealtime(callId) {
       const session = sessions.get(callId);
       if (session && msg.item && msg.item.role === "user") {
         const userText = msg.item.transcript || msg.item.text || "";
-        console.log(`👤 [${callId}] User speech transcribed: "${userText}"`);
         
         // VAPI-style: Only create a response if we're not already responding
         // CRITICAL: Don't respond while TTS is playing (prevents feedback loop)
@@ -422,35 +392,30 @@ async function startOpenAIRealtime(callId) {
           
           // Prevent rapid consecutive responses (minimum 1 second between responses)
           if (timeSinceLastResponse < 1000) {
-            console.log(`⏸️ [${callId}] Skipping response - too soon after last response (${timeSinceLastResponse}ms)`);
-            return;
-          }
+            if (timeSinceLastResponse < 1000) {
+              return;
+            }
           
           // Don't respond if TTS is currently playing
           if (session.isTtsPlaying) {
-            console.log(`⏸️ [${callId}] Skipping response - TTS is currently playing`);
             return;
           }
           
-          // VAPI-style delay: Wait 1 second before responding to ensure caller is done
-          console.log(`⏳ [${callId}] Waiting 1000ms before responding (VAPI-style turn-taking)`);
+          // VAPI-style delay: Wait before responding to ensure caller is done
           session.speechStopTime = now;
           session.speechStartedAfterStop = false;
           
           setTimeout(() => {
             // Check if caller started speaking again during the delay
             if (session.speechStartedAfterStop) {
-              console.log(`⏸️ [${callId}] Caller started speaking again - canceling response`);
               return;
             }
             
             // Double-check we're still not responding (safety check)
             if (session.isResponding) {
-              console.log(`⏸️ [${callId}] Already responding - canceling delayed response`);
               return;
             }
             
-            console.log(`💭 [${callId}] Creating response to user input after VAPI-style delay...`);
             session.isResponding = true;
             session.lastResponseTime = Date.now();
             session.speechStopTime = 0;
@@ -459,14 +424,12 @@ async function startOpenAIRealtime(callId) {
               JSON.stringify({
                 type: "response.create",
                 response: {
-                  modalities: ["text"], // Only generate text for Telnyx TTS
-                  instructions: "Respond naturally and briefly. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself."
+                  modalities: ["text"],
+                  instructions: "Respond in English (US) only. Be brief and concise. If the caller interrupts you, stop speaking immediately.",
                 },
               })
             );
-          }, 1000); // 1 second delay (VAPI-style)
-        } else if (session.isResponding) {
-          console.log(`⏸️ [${callId}] Already responding, ignoring user input until current response completes`);
+          }, 1500); // 1.5 second delay for better turn-taking
         }
       }
     }
@@ -478,13 +441,11 @@ async function startOpenAIRealtime(callId) {
       if (session) {
         // If TTS is playing, this is likely TTS echo - ignore it
         if (session.isTtsPlaying) {
-          console.log(`🔇 [${callId}] Speech detected during TTS playback - ignoring (feedback loop prevention)`);
           return; // Don't process this event
         }
         
         // Normal speech detection handling
         if (session.speechStopTime > 0 && !session.isResponding) {
-          console.log(`🔄 [${callId}] Caller started speaking again - will cancel pending response`);
           session.speechStartedAfterStop = true;
         }
       }
@@ -497,8 +458,6 @@ async function startOpenAIRealtime(callId) {
       const session = sessions.get(callId);
       if (session && msg.item) {
         // Log the full item structure to debug
-        console.log(`📋 [${callId}] Conversation item event: ${msg.type}`);
-        console.log(`📋 [${callId}] Item structure:`, JSON.stringify(msg.item, null, 2));
         
         // Check multiple possible locations for assistant text
         const role = msg.item?.role;
@@ -528,10 +487,8 @@ async function startOpenAIRealtime(callId) {
         if (itemText && (role === "assistant" || msg.type.includes("output"))) {
           // Prevent duplicate TTS requests
           if (itemText.trim() && itemText.trim() !== session.lastTtsText?.trim()) {
-            console.log(`💬 [${callId}] Found assistant text in conversation item: "${itemText}"`);
             if (session?.callControlId) {
               session.lastTtsText = itemText.trim();
-              console.log(`🔊 [${callId}] Sending assistant text to Telnyx TTS: "${itemText}"`);
               axios.post(
                 `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
                 {
@@ -539,13 +496,15 @@ async function startOpenAIRealtime(callId) {
                   voice: "Polly.Joanna",
                   language: "en-US",
                   premium: true,
+                  interruption_settings: {
+                    enabled: true, // Allow caller to interrupt
+                  },
                 },
                 { headers: telnyxHeaders() }
               ).then(() => {
-                console.log(`✅ [${callId}] Telnyx TTS started from conversation item`);
+                // TTS started
               }).catch((error) => {
-                console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
-                // Reset on error so we can retry
+                console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
                 if (session.lastTtsText === itemText.trim()) {
                   session.lastTtsText = "";
                 }
@@ -553,22 +512,19 @@ async function startOpenAIRealtime(callId) {
             }
           }
         } else if (itemText && role === "user") {
-          console.log(`👤 [${callId}] User input detected: "${itemText}"`);
           // Only create a response if we're not already responding
           const session = sessions.get(callId);
           if (session && !session.isResponding && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
-            console.log(`💭 [${callId}] Creating response to user input...`);
             session.isResponding = true;
             session.openaiWs.send(
               JSON.stringify({
                 type: "response.create",
                 response: {
-                  modalities: ["text"], // Only generate text for Telnyx TTS
+                  modalities: ["text"],
+                  instructions: "Respond in English (US) only. Be brief and concise.",
                 },
               })
             );
-          } else if (session?.isResponding) {
-            console.log(`⏸️ [${callId}] Already responding, ignoring user input until current response completes`);
           }
         }
       }
@@ -580,32 +536,30 @@ async function startOpenAIRealtime(callId) {
       const transcript = (msg.transcript || msg.text || session?.transcriptText || "").trim();
       
       if (transcript) {
-        console.log(`✅ [${callId}] Response text/transcript complete: "${transcript}"`);
         
         // Use Telnyx /actions/speak for audio output (only if we haven't sent this already)
         if (transcript && session?.callControlId && transcript !== session.lastTtsText?.trim()) {
           session.lastTtsText = transcript;
-          console.log(`🔊 [${callId}] Sending text to Telnyx TTS: "${transcript}"`);
           axios.post(
             `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
             {
               payload: transcript,
-              voice: "Polly.Joanna", // You can make this configurable
+              voice: "Polly.Joanna",
               language: "en-US",
               premium: true,
+              interruption_settings: {
+                enabled: true, // Allow caller to interrupt
+              },
             },
             { headers: telnyxHeaders() }
           ).then(() => {
-            console.log(`✅ [${callId}] Telnyx TTS started`);
+            // TTS started
           }).catch((error) => {
-            console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
-            // Reset on error so we can retry
+            console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
             if (session.lastTtsText === transcript) {
               session.lastTtsText = "";
             }
           });
-        } else if (transcript === session?.lastTtsText?.trim()) {
-          console.log(`⏭️ [${callId}] Skipping duplicate TTS for: "${transcript}"`);
         }
       }
       
@@ -615,7 +569,6 @@ async function startOpenAIRealtime(callId) {
     
     // Log response creation/start events
     if (msg.type === "response.created") {
-      console.log(`🎬 [${callId}] OpenAI response created`);
       // Initialize transcript text and mark as responding
       const session = sessions.get(callId);
       if (session) {
@@ -625,11 +578,9 @@ async function startOpenAIRealtime(callId) {
     }
     
     if (msg.type === "response.audio_started") {
-      console.log(`🔊 [${callId}] OpenAI audio started (but we'll use Telnyx TTS instead)`);
     }
     
     if (msg.type === "response.done") {
-      console.log(`✅ [${callId}] OpenAI response done`);
       // Mark that we're no longer responding - wait for user input
       const session = sessions.get(callId);
       if (session) {
@@ -641,7 +592,6 @@ async function startOpenAIRealtime(callId) {
       // Check if response has text content we can use
       if (session && msg.response) {
         // Log the full response object to see what's available
-        console.log(`📋 [${callId}] Response object:`, JSON.stringify(msg.response, null, 2));
         
         // Try to extract text from response - check multiple possible locations
         const text = msg.response?.output?.[0]?.text || 
@@ -651,12 +601,9 @@ async function startOpenAIRealtime(callId) {
                      (msg.response?.output && Array.isArray(msg.response.output) && msg.response.output.length > 0 ? msg.response.output[0] : null);
         
         const textValue = typeof text === "string" ? text.trim() : (text?.text || "").trim();
-        if (textValue && textValue !== session.lastTtsText?.trim()) {
-          console.log(`💬 [${callId}] Found text in response.done: "${textValue}"`);
+        if (textValue && textValue !== session.lastTtsText?.trim() && session?.callControlId) {
           // Use this text for Telnyx TTS (only if not already sent)
-          if (session?.callControlId) {
             session.lastTtsText = textValue;
-            console.log(`🔊 [${callId}] Sending text to Telnyx TTS from response.done: "${textValue}"`);
             axios.post(
               `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
               {
@@ -664,22 +611,20 @@ async function startOpenAIRealtime(callId) {
                 voice: "Polly.Joanna",
                 language: "en-US",
                 premium: true,
+                interruption_settings: {
+                  enabled: true, // Allow caller to interrupt
+                },
               },
               { headers: telnyxHeaders() }
             ).then(() => {
-              console.log(`✅ [${callId}] Telnyx TTS started from response.done`);
+              // TTS started
             }).catch((error) => {
-              console.error(`❌ [${callId}] Error sending to Telnyx TTS:`, error?.response?.data || error?.message);
-              // Reset on error so we can retry
+              console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
               if (session.lastTtsText === textValue) {
                 session.lastTtsText = "";
               }
             });
           }
-        } else if (textValue && textValue === session?.lastTtsText?.trim()) {
-          console.log(`⏭️ [${callId}] Skipping duplicate TTS from response.done`);
-        } else {
-          console.log(`⚠️ [${callId}] No text found in response.done`);
         }
       }
     }
@@ -712,13 +657,10 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/media-stream-ws" });
 
 wss.on("connection", (socket, req) => {
-  console.log("🔌 Telnyx WebSocket connection established");
-  console.log(`🔍 WebSocket URL: ${req.url}`);
 
   const url = new URL(req.url, "http://localhost");
   const callId = url.searchParams.get("call_id");
 
-  console.log(`🔍 Extracted call_id from URL: ${callId}`);
 
   if (!callId) {
     console.error("❌ Missing call_id in WebSocket URL, closing");
@@ -744,7 +686,6 @@ wss.on("connection", (socket, req) => {
   s.telnyxWs = socket;
   sessions.set(callId, s);
 
-  console.log(`🎵 Telnyx media stream WebSocket connected (call: ${callId})`);
 
   socket.on("message", (data) => {
     // Telnyx sends JSON text frames (not binary) for media streaming
@@ -773,7 +714,6 @@ wss.on("connection", (socket, req) => {
         if (!s.audioFrameCount) s.audioFrameCount = 0;
         s.audioFrameCount++;
         if (s.audioFrameCount <= 3) {
-          console.log(`📥 [${callId}] Received audio frame #${s.audioFrameCount} from Telnyx (${msg.media.payload.length} bytes)`);
         }
         
         openaiWs.send(
