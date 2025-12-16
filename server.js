@@ -98,6 +98,24 @@ app.post("/webhook", async (req, res) => {
         await handleCallHangup(callId);
         break;
 
+      case "call.speak.started":
+        // Track when TTS starts playing - mute OpenAI input during this time
+        const sessionTtsStart = sessions.get(callId);
+        if (sessionTtsStart) {
+          sessionTtsStart.isTtsPlaying = true;
+          console.log(`🔇 [${callId}] TTS started - muting OpenAI input to prevent feedback loop`);
+        }
+        break;
+
+      case "call.speak.ended":
+        // TTS finished - re-enable OpenAI input
+        const sessionTtsEnd = sessions.get(callId);
+        if (sessionTtsEnd) {
+          sessionTtsEnd.isTtsPlaying = false;
+          console.log(`🔊 [${callId}] TTS ended - OpenAI input re-enabled`);
+        }
+        break;
+
       default:
         break;
     }
@@ -280,6 +298,7 @@ async function startOpenAIRealtime(callId) {
     lastResponseTime: 0, // Track when last response was created (VAPI-style)
     speechStopTime: 0, // Track when speech stopped (VAPI-style)
     speechStartedAfterStop: false, // Track if caller started speaking again (VAPI-style)
+    isTtsPlaying: false, // Track if Telnyx TTS is currently playing (prevents feedback loop)
   };
   s.openaiWs = ws;
   sessions.set(callId, s);
@@ -396,13 +415,20 @@ async function startOpenAIRealtime(callId) {
         console.log(`👤 [${callId}] User speech transcribed: "${userText}"`);
         
         // VAPI-style: Only create a response if we're not already responding
-        if (!session.isResponding && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+        // CRITICAL: Don't respond while TTS is playing (prevents feedback loop)
+        if (!session.isResponding && !session.isTtsPlaying && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
           const now = Date.now();
           const timeSinceLastResponse = now - (session.lastResponseTime || 0);
           
           // Prevent rapid consecutive responses (minimum 1 second between responses)
           if (timeSinceLastResponse < 1000) {
             console.log(`⏸️ [${callId}] Skipping response - too soon after last response (${timeSinceLastResponse}ms)`);
+            return;
+          }
+          
+          // Don't respond if TTS is currently playing
+          if (session.isTtsPlaying) {
+            console.log(`⏸️ [${callId}] Skipping response - TTS is currently playing`);
             return;
           }
           
@@ -446,11 +472,21 @@ async function startOpenAIRealtime(callId) {
     }
     
     // VAPI-style: Track if caller starts speaking again after speech_stopped
+    // CRITICAL: Ignore speech detection if TTS is playing (prevents feedback loop)
     if (msg.type === "input_audio_buffer.speech_started") {
       const session = sessions.get(callId);
-      if (session && session.speechStopTime > 0 && !session.isResponding) {
-        console.log(`🔄 [${callId}] Caller started speaking again - will cancel pending response`);
-        session.speechStartedAfterStop = true;
+      if (session) {
+        // If TTS is playing, this is likely TTS echo - ignore it
+        if (session.isTtsPlaying) {
+          console.log(`🔇 [${callId}] Speech detected during TTS playback - ignoring (feedback loop prevention)`);
+          return; // Don't process this event
+        }
+        
+        // Normal speech detection handling
+        if (session.speechStopTime > 0 && !session.isResponding) {
+          console.log(`🔄 [${callId}] Caller started speaking again - will cancel pending response`);
+          session.speechStartedAfterStop = true;
+        }
       }
     }
     
