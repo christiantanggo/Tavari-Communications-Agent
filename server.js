@@ -510,7 +510,7 @@ async function startOpenAIRealtime(callId) {
                 type: "response.create",
                 response: {
                   modalities: ["text"], // Only generate text for Telnyx TTS
-                  instructions: "Respond in English (US) only. Be brief and concise.",
+                  instructions: "CRITICAL: Respond ONLY in English (US). Never use any other language. Be brief and concise.",
                 },
               })
             );
