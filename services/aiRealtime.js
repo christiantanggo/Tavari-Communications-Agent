@@ -19,6 +19,8 @@ export class AIRealtimeService {
     this.sessionConfigured = false;
     this.onAudioOutput = null;
     this.onTranscriptComplete = null;
+    this.lastResponseTime = 0; // Track when last response was created to prevent rapid responses
+    this.greetingSent = false; // Track if initial greeting has been sent
   }
   
   // Connect to OpenAI Realtime API
@@ -106,6 +108,11 @@ export class AIRealtimeService {
               
               // Send initial greeting immediately - AI should greet the caller right away
               setTimeout(() => {
+                if (this.greetingSent) {
+                  console.log('⚠️ [OPENAI] Greeting already sent, skipping');
+                  return;
+                }
+                
                 try {
                   const greetingText = this.agentConfig?.greeting_text || 'Hello! Thank you for calling. How can I help you today?';
                   
@@ -116,11 +123,13 @@ export class AIRealtimeService {
                   const greetingResponse = {
                     type: 'response.create',
                     response: {
-                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. Do not wait - greet them right now.`,
+                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. After greeting, stop speaking and wait for the caller to respond. Do not continue talking.`,
                     },
                   };
                   
                   this.ws.send(JSON.stringify(greetingResponse));
+                  this.lastResponseTime = Date.now();
+                  this.greetingSent = true;
                   console.log('✅ [OPENAI] Initial greeting sent');
                 } catch (error) {
                   console.error('❌ [OPENAI] Error sending initial greeting:', error.message);
@@ -170,16 +179,23 @@ export class AIRealtimeService {
               
               // Try to send greeting anyway
               setTimeout(() => {
+                if (this.greetingSent) {
+                  console.log('⚠️ [OPENAI] Greeting already sent, skipping timeout greeting');
+                  return;
+                }
+                
                 try {
                   const greetingText = this.agentConfig?.greeting_text || 'Hello! Thank you for calling. How can I help you today?';
                   console.log(`🔵 [OPENAI] Sending greeting after timeout: "${greetingText}"`);
                   const greetingResponse = {
                     type: 'response.create',
                     response: {
-                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. Do not wait - greet them right now.`,
+                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. After greeting, stop speaking and wait for the caller to respond. Do not continue talking.`,
                     },
                   };
                   this.ws.send(JSON.stringify(greetingResponse));
+                  this.lastResponseTime = Date.now();
+                  this.greetingSent = true;
                   console.log('✅ [OPENAI] Greeting sent after timeout');
                 } catch (error) {
                   console.error('❌ Error sending greeting after timeout:', error);
@@ -299,7 +315,18 @@ export class AIRealtimeService {
         
         // CRITICAL: OpenAI detects speech boundaries but does NOT automatically create responses
         // We MUST explicitly send response.create after speech stops
+        // BUT: Only respond if we're not already responding and haven't recently responded
         if (!this.isResponding && !this.responseLock) {
+          // Add a small delay to ensure we have actual user speech, not echo or noise
+          const now = Date.now();
+          const timeSinceLastResponse = now - (this.lastResponseTime || 0);
+          
+          // Prevent rapid consecutive responses (minimum 500ms between responses)
+          if (timeSinceLastResponse < 500) {
+            console.log('⚠️ [OPENAI] Skipping response - too soon after last response');
+            return;
+          }
+          
           this.responseLock = true;
           
           // First, commit the audio buffer to finalize the input
@@ -308,15 +335,19 @@ export class AIRealtimeService {
             process.stdout.write(`\n🟢 Committed audio buffer\n`);
             console.log('🟢 Sent input_audio_buffer.commit');
             
-            // Then explicitly trigger a response
-            this.ws.send(JSON.stringify({
-              type: 'response.create',
-              response: {
-                instructions: 'Respond naturally to what the caller just said.'
-              }
-            }));
-            
-            console.log('🔵 [OPENAI] Triggering response.create after speech stopped');
+            // Small delay before creating response to ensure audio buffer is fully committed
+            setTimeout(() => {
+              // Then explicitly trigger a response with explicit turn-taking instructions
+              this.ws.send(JSON.stringify({
+                type: 'response.create',
+                response: {
+                  instructions: 'Respond naturally and briefly to what the caller just said. After you finish your response, stop speaking and wait for the caller to speak again. Do not continue talking or repeat yourself.'
+                }
+              }));
+              
+              console.log('🔵 [OPENAI] Triggering response.create after speech stopped');
+              this.lastResponseTime = Date.now();
+            }, 100);
           } catch (error) {
             console.error('❌ [OPENAI] Error triggering response.create:', error.message);
             this.responseLock = false; // Reset lock on error
@@ -401,8 +432,12 @@ export class AIRealtimeService {
         } else {
           console.log(`✅ [OPENAI] Response complete - ${audioDeltasReceived} audio chunks received`);
         }
+        
+        // Reset response state - AI has finished speaking, now wait for user input
         this.isResponding = false;
         this.responseLock = false;
+        this.lastResponseTime = Date.now();
+        console.log('✅ [OPENAI] Response complete - waiting for user input');
         break;
         
       case 'session.updated':
@@ -463,6 +498,7 @@ export class AIRealtimeService {
     }
     
     instructions += `\n\nKeep responses concise and natural. If you can't answer a question, offer to take a message.`;
+    instructions += `\n\nCRITICAL: After you finish speaking, you MUST stop and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking and you need to respond. Wait for the caller's input before speaking again.`;
     
     return instructions;
   }
