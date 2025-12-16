@@ -463,7 +463,7 @@ async function startOpenAIRealtime(callId) {
         msg.type === "conversation.item.output_item.completed") {
       const session = sessions.get(callId);
       if (session && msg.item) {
-        // Log the full item structure to debug
+        console.log(`📋 [${callId}] Conversation item event: ${msg.type}`);
         
         // Check multiple possible locations for assistant text
         const role = msg.item?.role;
@@ -489,11 +489,14 @@ async function startOpenAIRealtime(callId) {
           itemText = msg.item?.text || msg.item?.transcript || msg.item?.output_item?.text;
         }
         
+        console.log(`📝 [${callId}] Extracted text from item (role: ${role}): "${itemText}"`);
+        
         // If this is an assistant message, send to TTS (only if we haven't sent this text already)
         if (itemText && (role === "assistant" || msg.type.includes("output"))) {
           // Prevent duplicate TTS requests
           if (itemText.trim() && itemText.trim() !== session.lastTtsText?.trim()) {
             if (session?.callControlId) {
+              console.log(`🔊 [${callId}] Sending to TTS: "${itemText.trim()}"`);
               session.lastTtsText = itemText.trim();
               axios.post(
                 `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
@@ -508,14 +511,18 @@ async function startOpenAIRealtime(callId) {
                 },
                 { headers: telnyxHeaders() }
               ).then(() => {
-                // TTS started
+                console.log(`✅ [${callId}] TTS started successfully`);
               }).catch((error) => {
                 console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
                 if (session.lastTtsText === itemText.trim()) {
                   session.lastTtsText = "";
                 }
               });
+            } else {
+              console.log(`⚠️ [${callId}] No callControlId, cannot send TTS`);
             }
+          } else {
+            console.log(`⏭️ [${callId}] Skipping duplicate TTS: "${itemText.trim()}"`);
           }
         } else if (itemText && role === "user") {
           // Only create a response if we're not already responding
@@ -538,13 +545,16 @@ async function startOpenAIRealtime(callId) {
     
     // Handle response text completion events
     if (msg.type === "response.audio_transcript.done" || msg.type === "response.text.done") {
+      console.log(`📝 [${callId}] Response text done event: ${msg.type}`);
       const session = sessions.get(callId);
       const transcript = (msg.transcript || msg.text || session?.transcriptText || "").trim();
+      console.log(`📝 [${callId}] Extracted transcript: "${transcript}"`);
       
       if (transcript) {
         
         // Use Telnyx /actions/speak for audio output (only if we haven't sent this already)
         if (transcript && session?.callControlId && transcript !== session.lastTtsText?.trim()) {
+          console.log(`🔊 [${callId}] Sending to TTS from response.text.done: "${transcript}"`);
           session.lastTtsText = transcript;
           axios.post(
             `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
@@ -559,7 +569,7 @@ async function startOpenAIRealtime(callId) {
             },
             { headers: telnyxHeaders() }
           ).then(() => {
-            // TTS started
+            console.log(`✅ [${callId}] TTS started from response.text.done`);
           }).catch((error) => {
             console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
             if (session.lastTtsText === transcript) {
@@ -587,6 +597,7 @@ async function startOpenAIRealtime(callId) {
     }
     
     if (msg.type === "response.done") {
+      console.log(`✅ [${callId}] Response done event`);
       // Mark that we're no longer responding - wait for user input
       const session = sessions.get(callId);
       if (session) {
@@ -597,7 +608,7 @@ async function startOpenAIRealtime(callId) {
       
       // Check if response has text content we can use
       if (session && msg.response) {
-        // Log the full response object to see what's available
+        console.log(`📋 [${callId}] Response object:`, JSON.stringify(msg.response, null, 2));
         
         // Try to extract text from response - check multiple possible locations
         const text = msg.response?.output?.[0]?.text || 
@@ -607,8 +618,10 @@ async function startOpenAIRealtime(callId) {
                      (msg.response?.output && Array.isArray(msg.response.output) && msg.response.output.length > 0 ? msg.response.output[0] : null);
         
         const textValue = typeof text === "string" ? text.trim() : (text?.text || "").trim();
+        console.log(`📝 [${callId}] Extracted text from response.done: "${textValue}"`);
         if (textValue && textValue !== session.lastTtsText?.trim() && session?.callControlId) {
           // Use this text for Telnyx TTS (only if not already sent)
+          console.log(`🔊 [${callId}] Sending to TTS from response.done: "${textValue}"`);
             session.lastTtsText = textValue;
             axios.post(
               `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
@@ -623,13 +636,15 @@ async function startOpenAIRealtime(callId) {
               },
               { headers: telnyxHeaders() }
             ).then(() => {
-              // TTS started
+              console.log(`✅ [${callId}] TTS started from response.done`);
             }).catch((error) => {
               console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
               if (session.lastTtsText === textValue) {
                 session.lastTtsText = "";
               }
             });
+          } else if (!textValue) {
+            console.log(`⚠️ [${callId}] No text found in response.done`);
           }
         }
       }
