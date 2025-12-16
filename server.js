@@ -365,7 +365,7 @@ async function startOpenAIRealtime(callId) {
             // Note: semantic_vad doesn't use silence_duration_ms, but we'll add delay in code
           },
           temperature: 0.7,
-          max_response_output_tokens: 800,
+          max_response_output_tokens: 150, // Reduced to prevent long responses
         },
       })
     );
