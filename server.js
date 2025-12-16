@@ -63,35 +63,45 @@ app.get("/health", (_req, res) => {
 const sessions = new Map();
 
 /**
- * Detect if text is in English
- * Simple heuristic: checks for mostly ASCII characters and common English patterns
+ * Detect if text is in English - STRICT CHECK
+ * Returns true ONLY if text is clearly English
  */
-function detectLanguage(text) {
-  if (!text || text.trim().length === 0) return "unknown";
+function isEnglish(text) {
+  if (!text || text.trim().length === 0) return false;
   
   const trimmed = text.trim();
   
   // Check if text is mostly ASCII (English uses ASCII)
   const asciiRatio = trimmed.split("").filter(c => c.charCodeAt(0) < 128).length / trimmed.length;
+  if (asciiRatio < 0.95) return false; // Must be 95%+ ASCII
   
-  // Common English words/patterns
-  const englishPatterns = /\b(the|and|or|but|in|on|at|to|for|of|with|by|from|as|is|are|was|were|be|been|have|has|had|do|does|did|will|would|could|should|may|might|can|this|that|these|those|what|when|where|who|why|how|yes|no|hello|hi|thanks|thank|you|your|i|me|my|we|our|they|them|their)\b/gi;
+  // Common English words/patterns - must have at least some
+  const englishPatterns = /\b(the|and|or|but|in|on|at|to|for|of|with|by|from|as|is|are|was|were|be|been|have|has|had|do|does|did|will|would|could|should|may|might|can|this|that|these|those|what|when|where|who|why|how|yes|no|hello|hi|thanks|thank|you|your|i|me|my|we|our|they|them|their|a|an|it|if|not|all|one|two|three|four|five|six|seven|eight|nine|ten|call|help|need|want|like|know|think|see|get|go|come|say|tell|ask|give|take|make|work|use|find|try|keep|let|put|set|run|move|play|turn|start|stop|show|hear|feel|seem|look|become|leave|bring|begin|write|provide|service|business|company|order|information|assist|further)\b/gi;
   const englishMatches = (trimmed.match(englishPatterns) || []).length;
-  const wordCount = trimmed.split(/\s+/).length;
-  const englishWordRatio = wordCount > 0 ? englishMatches / wordCount : 0;
+  const wordCount = trimmed.split(/\s+/).filter(w => w.length > 0).length;
   
-  // If mostly ASCII and has English patterns, likely English
-  if (asciiRatio > 0.85 && (englishWordRatio > 0.2 || wordCount < 3)) {
-    return "en";
+  // Must have at least 30% English words OR be very short (likely English)
+  if (wordCount === 0) return false;
+  const englishWordRatio = englishMatches / wordCount;
+  
+  return englishWordRatio > 0.3 || (wordCount <= 3 && asciiRatio > 0.9);
+}
+
+/**
+ * Validate and filter AI response - REJECT non-English responses
+ */
+function validateEnglishResponse(text, callId) {
+  if (!text || text.trim().length === 0) return null;
+  
+  const trimmed = text.trim();
+  
+  // STRICT: If not English, reject it
+  if (!isEnglish(trimmed)) {
+    console.error(`❌ [${callId}] REJECTED NON-ENGLISH RESPONSE: "${trimmed.substring(0, 100)}"`);
+    return null; // Reject non-English responses
   }
   
-  // If mostly ASCII but no clear English patterns, still likely English
-  if (asciiRatio > 0.9) {
-    return "en";
-  }
-  
-  // Otherwise, might be another language
-  return "other";
+  return trimmed;
 }
 
 /**
@@ -343,7 +353,7 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"], // Keep both - we need audio for input, text for output extraction
           instructions:
-            "You are Tavari's phone receptionist. CRITICAL LANGUAGE RULE - THIS IS MANDATORY: You MUST speak ONLY in English (US). This is non-negotiable. Never respond in Spanish, French, German, Chinese, Japanese, or ANY other language. If the caller speaks another language, respond in English only. Always use English (US) for all responses. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking.",
+            "You are Tavari's phone receptionist. ABSOLUTE LANGUAGE RULE - THIS IS MANDATORY AND NON-NEGOTIABLE: You MUST speak ONLY in English (US). EVERY SINGLE WORD YOU SAY MUST BE IN ENGLISH. NEVER use Spanish, French, German, Chinese, Japanese, Portuguese, Italian, Russian, Arabic, or ANY other language. ONLY ENGLISH. If you generate any text that is not in English, it will be automatically rejected. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking. REMEMBER: ONLY ENGLISH. NO OTHER LANGUAGE.",
           voice: "alloy",
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
@@ -415,10 +425,6 @@ async function startOpenAIRealtime(callId) {
       if (session && msg.item && msg.item.role === "user") {
         const userText = msg.item.transcript || msg.item.text || "";
         
-        // Detect user's language
-        const detectedLanguage = detectLanguage(userText);
-        session.userLanguage = detectedLanguage;
-        
         // VAPI-style: Only create a response if we're not already responding
         // CRITICAL: Don't respond while TTS is playing (prevents feedback loop)
         if (!session.isResponding && !session.isTtsPlaying && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
@@ -453,15 +459,8 @@ async function startOpenAIRealtime(callId) {
             session.lastResponseTime = Date.now();
             session.speechStopTime = 0;
             
-            // Build language-specific instructions based on detected user language
-            let languageInstructions = "";
-            if (session.userLanguage === "en") {
-              // User is speaking English - enforce English-only response
-              languageInstructions = "CRITICAL LANGUAGE RULE - MANDATORY: The caller is speaking English. You MUST respond ONLY in English (US). This is non-negotiable. Never use Spanish, French, German, Chinese, Japanese, or ANY other language. Match the caller's English language. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
-            } else {
-              // User might be speaking another language - still respond in English
-              languageInstructions = "CRITICAL LANGUAGE RULE - MANDATORY: Respond ONLY in English (US). This is non-negotiable. Never use Spanish, French, German, Chinese, Japanese, or ANY other language. Even if the caller speaks another language, you must respond in English only. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
-            }
+            // ABSOLUTE ENGLISH-ONLY INSTRUCTIONS - NO EXCEPTIONS
+            const languageInstructions = "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE AND NON-NEGOTIABLE. NEVER USE SPANISH, FRENCH, GERMAN, CHINESE, JAPANESE, OR ANY OTHER LANGUAGE. ONLY ENGLISH. EVERY SINGLE WORD MUST BE IN ENGLISH. IF YOU GENERATE ANY TEXT THAT IS NOT IN ENGLISH, IT WILL BE REJECTED. RESPOND IN ENGLISH ONLY. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself.";
             
             session.openaiWs.send(
               JSON.stringify({
@@ -524,16 +523,18 @@ async function startOpenAIRealtime(callId) {
           itemText = msg.item?.text || msg.item?.transcript || msg.item?.output_item?.text;
         }
         
-        // If this is an assistant message, send to TTS (only if we haven't sent this text already)
+        // If this is an assistant message, VALIDATE IT'S ENGLISH before sending to TTS
         if (itemText && (role === "assistant" || msg.type.includes("output"))) {
-          // Prevent duplicate TTS requests
-          if (itemText.trim() && itemText.trim() !== session.lastTtsText?.trim()) {
+          // STRICT VALIDATION: Reject non-English responses
+          const validatedText = validateEnglishResponse(itemText.trim(), callId);
+          
+          if (validatedText && validatedText !== session.lastTtsText?.trim()) {
             if (session?.callControlId) {
-              session.lastTtsText = itemText.trim();
+              session.lastTtsText = validatedText;
               axios.post(
                 `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
                 {
-                  payload: itemText.trim(),
+                  payload: validatedText,
                   voice: "Polly.Joanna",
                   language: "en-US",
                   premium: true,
@@ -542,10 +543,25 @@ async function startOpenAIRealtime(callId) {
               ).catch((error) => {
                 console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
                 // Reset on error so we can retry
-                if (session.lastTtsText === itemText.trim()) {
+                if (session.lastTtsText === validatedText) {
                   session.lastTtsText = "";
                 }
               });
+            }
+          } else if (!validatedText) {
+            // Non-English response rejected - force a new response with stronger instructions
+            console.error(`❌ [${callId}] REJECTED NON-ENGLISH RESPONSE, forcing new response`);
+            if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
+              session.isResponding = true;
+              session.openaiWs.send(
+                JSON.stringify({
+                  type: "response.create",
+                  response: {
+                    modalities: ["text"],
+                    instructions: "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE. EVERY WORD MUST BE IN ENGLISH. NO OTHER LANGUAGE IS ALLOWED. RESPOND IN ENGLISH ONLY.",
+                  },
+                })
+              );
             }
           }
         } else if (itemText && role === "user") {
@@ -573,25 +589,44 @@ async function startOpenAIRealtime(callId) {
       const transcript = (msg.transcript || msg.text || session?.transcriptText || "").trim();
       
       if (transcript) {
-        // Use Telnyx /actions/speak for audio output (only if we haven't sent this already)
-        if (transcript && session?.callControlId && transcript !== session.lastTtsText?.trim()) {
-          session.lastTtsText = transcript;
-          axios.post(
-            `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
-            {
-              payload: transcript,
-              voice: "Polly.Joanna", // You can make this configurable
-              language: "en-US",
-              premium: true,
-            },
-            { headers: telnyxHeaders() }
-          ).catch((error) => {
-            console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
-            // Reset on error so we can retry
-            if (session.lastTtsText === transcript) {
-              session.lastTtsText = "";
-            }
-          });
+        // STRICT VALIDATION: Reject non-English responses before sending to TTS
+        const validatedText = validateEnglishResponse(transcript, callId);
+        
+        if (validatedText && validatedText !== session.lastTtsText?.trim()) {
+          if (session?.callControlId) {
+            session.lastTtsText = validatedText;
+            axios.post(
+              `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
+              {
+                payload: validatedText,
+                voice: "Polly.Joanna",
+                language: "en-US",
+                premium: true,
+              },
+              { headers: telnyxHeaders() }
+            ).catch((error) => {
+              console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
+              // Reset on error so we can retry
+              if (session.lastTtsText === validatedText) {
+                session.lastTtsText = "";
+              }
+            });
+          }
+        } else if (!validatedText) {
+          // Non-English response rejected - force a new response
+          console.error(`❌ [${callId}] REJECTED NON-ENGLISH RESPONSE, forcing new response`);
+          if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
+            session.isResponding = true;
+            session.openaiWs.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  modalities: ["text"],
+                  instructions: "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE. EVERY WORD MUST BE IN ENGLISH. NO OTHER LANGUAGE IS ALLOWED. RESPOND IN ENGLISH ONLY.",
+                },
+              })
+            );
+          }
         }
       }
       
@@ -628,14 +663,18 @@ async function startOpenAIRealtime(callId) {
                      (msg.response?.output && Array.isArray(msg.response.output) && msg.response.output.length > 0 ? msg.response.output[0] : null);
         
         const textValue = typeof text === "string" ? text.trim() : (text?.text || "").trim();
-        if (textValue && textValue !== session.lastTtsText?.trim()) {
+        
+        // STRICT VALIDATION: Reject non-English responses
+        const validatedText = validateEnglishResponse(textValue, callId);
+        
+        if (validatedText && validatedText !== session.lastTtsText?.trim()) {
           // Use this text for Telnyx TTS (only if not already sent)
           if (session?.callControlId) {
-            session.lastTtsText = textValue;
+            session.lastTtsText = validatedText;
             axios.post(
               `https://api.telnyx.com/v2/calls/${session.callControlId}/actions/speak`,
               {
-                payload: textValue,
+                payload: validatedText,
                 voice: "Polly.Joanna",
                 language: "en-US",
                 premium: true,
@@ -644,10 +683,25 @@ async function startOpenAIRealtime(callId) {
             ).catch((error) => {
               console.error(`❌ [${callId}] TTS error:`, error?.response?.data || error?.message);
               // Reset on error so we can retry
-              if (session.lastTtsText === textValue) {
+              if (session.lastTtsText === validatedText) {
                 session.lastTtsText = "";
               }
             });
+          }
+        } else if (!validatedText && textValue) {
+          // Non-English response rejected - force a new response
+          console.error(`❌ [${callId}] REJECTED NON-ENGLISH RESPONSE from response.done, forcing new response`);
+          if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
+            session.isResponding = true;
+            session.openaiWs.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  modalities: ["text"],
+                  instructions: "YOU MUST RESPOND ONLY IN ENGLISH (US). THIS IS ABSOLUTE. EVERY WORD MUST BE IN ENGLISH. NO OTHER LANGUAGE IS ALLOWED. RESPOND IN ENGLISH ONLY.",
+                },
+              })
+            );
           }
         }
       }
