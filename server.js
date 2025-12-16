@@ -147,10 +147,20 @@ app.post("/webhook", async (req, res) => {
         break;
 
       case "call.speak.ended":
-        // TTS finished - re-enable OpenAI input
+        // TTS finished - re-enable OpenAI input after a delay
+        // This prevents immediate response to TTS echo
         const sessionTtsEnd = sessions.get(callId);
         if (sessionTtsEnd) {
-          sessionTtsEnd.isTtsPlaying = false;
+          sessionTtsEnd.ttsEndTime = Date.now();
+          // Add a delay before re-enabling to ensure TTS audio has fully stopped
+          setTimeout(() => {
+            if (sessions.has(callId)) {
+              const s = sessions.get(callId);
+              if (s) {
+                s.isTtsPlaying = false;
+              }
+            }
+          }, 500); // 500ms delay to ensure TTS audio has fully stopped and echo cleared
         }
         break;
 
@@ -184,6 +194,11 @@ async function handleCallInitiated(payload, callId) {
     transcriptText: "", // For collecting transcript for Telnyx TTS
     lastTtsText: "", // Track last TTS to prevent duplicates
     userLanguage: "unknown", // Track detected language of user input
+    isTtsPlaying: false, // Track if Telnyx TTS is currently playing (prevents feedback loop)
+    ttsEndTime: 0, // Track when TTS ended (to add delay before allowing responses)
+    lastResponseTime: 0, // Track when last response was created (VAPI-style)
+    speechStopTime: 0, // Track when speech stopped (VAPI-style)
+    speechStartedAfterStop: false, // Track if caller started speaking again (VAPI-style)
   });
 
   // Answer immediately
@@ -339,6 +354,7 @@ async function startOpenAIRealtime(callId) {
     speechStopTime: 0, // Track when speech stopped (VAPI-style)
     speechStartedAfterStop: false, // Track if caller started speaking again (VAPI-style)
     isTtsPlaying: false, // Track if Telnyx TTS is currently playing (prevents feedback loop)
+    ttsEndTime: 0, // Track when TTS ended (to add delay before allowing responses)
   };
   s.openaiWs = ws;
   sessions.set(callId, s);
@@ -430,6 +446,7 @@ async function startOpenAIRealtime(callId) {
         if (!session.isResponding && !session.isTtsPlaying && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
           const now = Date.now();
           const timeSinceLastResponse = now - (session.lastResponseTime || 0);
+          const timeSinceTtsEnd = session.ttsEndTime ? (now - session.ttsEndTime) : Infinity;
           
           // Prevent rapid consecutive responses (minimum 1 second between responses)
           if (timeSinceLastResponse < 1000) {
@@ -438,6 +455,11 @@ async function startOpenAIRealtime(callId) {
           
           // Don't respond if TTS is currently playing
           if (session.isTtsPlaying) {
+            return;
+          }
+          
+          // Wait at least 500ms after TTS ends before responding (prevents TTS echo)
+          if (timeSinceTtsEnd < 500) {
             return;
           }
           
@@ -570,9 +592,15 @@ async function startOpenAIRealtime(callId) {
           if (session && !session.isResponding && !session.isTtsPlaying && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
             const now = Date.now();
             const timeSinceLastResponse = now - (session.lastResponseTime || 0);
+            const timeSinceTtsEnd = session.ttsEndTime ? (now - session.ttsEndTime) : Infinity;
             
             // Prevent rapid consecutive responses
             if (timeSinceLastResponse < 1000) {
+              return;
+            }
+            
+            // Wait at least 500ms after TTS ends before responding (prevents TTS echo)
+            if (timeSinceTtsEnd < 500) {
               return;
             }
             
