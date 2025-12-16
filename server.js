@@ -196,8 +196,13 @@ async function telnyxAnswer(callControlId) {
 }
 
 function telnyxHeaders() {
-  // Sanitize API key - remove any whitespace, newlines, or invalid characters
-  const apiKey = (TELNYX_API_KEY || "").trim().replace(/[\r\n]/g, "");
+  // Sanitize API key - remove any whitespace, newlines, control characters, or invalid characters
+  // Remove all non-printable ASCII characters except space (but we'll trim anyway)
+  let apiKey = (TELNYX_API_KEY || "").trim();
+  // Remove all control characters (including \r, \n, \t, etc.)
+  apiKey = apiKey.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
+  // Remove any remaining whitespace (including tabs, spaces at start/end)
+  apiKey = apiKey.trim().replace(/\s/g, "");
   
   if (!apiKey) {
     throw new Error("TELNYX_API_KEY is not set or is empty");
