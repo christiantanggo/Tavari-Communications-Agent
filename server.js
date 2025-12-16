@@ -230,6 +230,11 @@ async function handleCallAnswered(payload, callId) {
       transcriptText: "",
       lastTtsText: "", // Track last TTS to prevent duplicates
       userLanguage: "unknown", // Track detected language of user input
+      isTtsPlaying: false, // Track if Telnyx TTS is currently playing (prevents feedback loop)
+      ttsEndTime: 0, // Track when TTS ended (to add delay before allowing responses)
+      lastResponseTime: 0, // Track when last response was created (VAPI-style)
+      speechStopTime: 0, // Track when speech stopped (VAPI-style)
+      speechStartedAfterStop: false, // Track if caller started speaking again (VAPI-style)
     });
   }
 
