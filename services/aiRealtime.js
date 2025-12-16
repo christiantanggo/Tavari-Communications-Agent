@@ -123,7 +123,7 @@ export class AIRealtimeService {
                   const greetingResponse = {
                     type: 'response.create',
                     response: {
-                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. After greeting, stop speaking and wait for the caller to respond. Do not continue talking.`,
+                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting in English: "${greetingText}". Speak naturally and be friendly. After greeting, IMMEDIATELY STOP speaking and wait for the caller to respond. Do not continue talking. Do not add anything else.`,
                     },
                   };
                   
@@ -190,7 +190,7 @@ export class AIRealtimeService {
                   const greetingResponse = {
                     type: 'response.create',
                     response: {
-                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting: "${greetingText}". Speak naturally and be friendly. After greeting, stop speaking and wait for the caller to respond. Do not continue talking.`,
+                      instructions: `You are answering the phone for a business. The call has just been answered. You MUST immediately greet the caller with this greeting in English: "${greetingText}". Speak naturally and be friendly. After greeting, IMMEDIATELY STOP speaking and wait for the caller to respond. Do not continue talking. Do not add anything else.`,
                     },
                   };
                   this.ws.send(JSON.stringify(greetingResponse));
@@ -341,7 +341,7 @@ export class AIRealtimeService {
               this.ws.send(JSON.stringify({
                 type: 'response.create',
                 response: {
-                  instructions: 'Respond naturally and briefly to what the caller just said. After you finish your response, stop speaking and wait for the caller to speak again. Do not continue talking or repeat yourself.'
+                  instructions: 'Respond naturally and briefly to what the caller just said. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself. Do not add additional comments. When you are done, STOP completely.'
                 }
               }));
               
@@ -433,11 +433,18 @@ export class AIRealtimeService {
           console.log(`✅ [OPENAI] Response complete - ${audioDeltasReceived} audio chunks received`);
         }
         
+        // Reset audio delta counter for next response
+        this._audioDeltaCount = 0;
+        this._firstTranscriptLogged = false;
+        
         // Reset response state - AI has finished speaking, now wait for user input
         this.isResponding = false;
         this.responseLock = false;
         this.lastResponseTime = Date.now();
-        console.log('✅ [OPENAI] Response complete - waiting for user input');
+        console.log('✅ [OPENAI] Response complete - waiting for user input (response state reset)');
+        
+        // Ensure no further responses are triggered until user speaks again
+        // The response is done, so we should not create another response until speech_stopped is detected again
         break;
         
       case 'session.updated':
@@ -473,6 +480,9 @@ export class AIRealtimeService {
     
     let instructions = `You are a helpful AI phone assistant answering calls for a business. `;
     
+    // CRITICAL: Language instruction - must speak English only
+    instructions += `\n\nLANGUAGE: You MUST speak ONLY in English (US). Never respond in any other language. All your responses must be in English.`;
+    
     // Make greeting instruction more explicit and urgent
     if (greeting_text) {
       instructions += `\n\nIMPORTANT: When you first start speaking (when the call is answered), you MUST immediately greet the caller with this exact greeting: "${greeting_text}". Do not wait for the caller to speak first - you are answering the phone, so greet them immediately. `;
@@ -498,7 +508,13 @@ export class AIRealtimeService {
     }
     
     instructions += `\n\nKeep responses concise and natural. If you can't answer a question, offer to take a message.`;
-    instructions += `\n\nCRITICAL: After you finish speaking, you MUST stop and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking and you need to respond. Wait for the caller's input before speaking again.`;
+    instructions += `\n\nCRITICAL TURN-TAKING RULES: 
+1. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond.
+2. Do NOT continue talking after your response is complete.
+3. Do NOT repeat yourself or add additional comments.
+4. Do NOT speak again until the caller has finished speaking.
+5. Only create ONE response per user input - do not generate multiple responses.
+6. When your response is done, STOP completely and wait for the next user input.`;
     
     return instructions;
   }

@@ -291,7 +291,7 @@ async function startOpenAIRealtime(callId) {
         session: {
           modalities: ["audio", "text"], // Keep both - we need audio for input, text for output extraction
           instructions:
-            "You are Tavari's phone receptionist. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time.",
+            "You are Tavari's phone receptionist. CRITICAL: You MUST speak ONLY in English (US). Never respond in any other language. When a call starts, immediately greet the caller by saying: 'Hello! Thanks for calling Tavari. How can I help you today?' Be concise, friendly, and ask one question at a time. After you finish speaking, you MUST IMMEDIATELY STOP and wait for the caller to respond. Do not continue talking. Do not repeat yourself. Only speak when the caller has finished speaking.",
           voice: "alloy",
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
