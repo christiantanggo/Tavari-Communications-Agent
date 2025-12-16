@@ -120,6 +120,7 @@ async function handleCallInitiated(payload, callId) {
     telnyxWs: null,
     streamId: null,
     ready: false,
+    isResponding: false, // Track if AI is currently generating a response
     audioFrameCount: 0,
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
@@ -149,6 +150,7 @@ async function handleCallAnswered(payload, callId) {
       telnyxWs: null,
       streamId: null,
       ready: false,
+      isResponding: false, // Track if AI is currently generating a response
       audioFrameCount: 0,
       audioOutFrameCount: 0,
       transcriptLogCount: 0,
@@ -268,6 +270,7 @@ async function startOpenAIRealtime(callId) {
     telnyxWs: null,
     streamId: null,
     ready: false,
+    isResponding: false, // Track if AI is currently generating a response
     audioFrameCount: 0,
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
@@ -297,7 +300,7 @@ async function startOpenAIRealtime(callId) {
             type: "server_vad",
             threshold: 0.5,
             prefix_padding_ms: 300,
-            silence_duration_ms: 500,
+            silence_duration_ms: 800, // Increased to wait longer for user to finish speaking
           },
           temperature: 0.7,
           max_response_output_tokens: 800,
@@ -306,14 +309,16 @@ async function startOpenAIRealtime(callId) {
     );
 
     s.ready = true;
+    s.isResponding = false; // Track if AI is currently generating a response
     sessions.set(callId, s);
 
     // Trigger initial greeting by creating a response after a short delay
     // This ensures the session is fully configured first
     setTimeout(() => {
       const session = sessions.get(callId);
-      if (session?.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+      if (session?.openaiWs && session.openaiWs.readyState === WebSocket.OPEN && !session.isResponding) {
         console.log(`👋 [${callId}] Triggering initial greeting...`);
+        session.isResponding = true;
         session.openaiWs.send(
           JSON.stringify({
             type: "response.create",
@@ -379,9 +384,32 @@ async function startOpenAIRealtime(callId) {
       }
     }
     
+    // Handle user input transcription completion - this is when we should create a response
+    if (msg.type === "conversation.item.input_audio_transcription.completed") {
+      const session = sessions.get(callId);
+      if (session && msg.item && msg.item.role === "user") {
+        const userText = msg.item.transcript || msg.item.text || "";
+        console.log(`👤 [${callId}] User speech transcribed: "${userText}"`);
+        // Only create a response if we're not already responding
+        if (!session.isResponding && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+          console.log(`💭 [${callId}] Creating response to user input...`);
+          session.isResponding = true;
+          session.openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["text"], // Only generate text for Telnyx TTS
+              },
+            })
+          );
+        } else if (session.isResponding) {
+          console.log(`⏸️ [${callId}] Already responding, ignoring user input until current response completes`);
+        }
+      }
+    }
+    
     // Check for text in conversation items - multiple event types
     if (msg.type === "conversation.item.created" || 
-        msg.type === "conversation.item.input_audio_transcription.completed" ||
         msg.type === "conversation.item.output_item.created" ||
         msg.type === "conversation.item.output_item.completed") {
       const session = sessions.get(callId);
@@ -444,6 +472,22 @@ async function startOpenAIRealtime(callId) {
           }
         } else if (itemText && role === "user") {
           console.log(`👤 [${callId}] User input detected: "${itemText}"`);
+          // Only create a response if we're not already responding
+          const session = sessions.get(callId);
+          if (session && !session.isResponding && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+            console.log(`💭 [${callId}] Creating response to user input...`);
+            session.isResponding = true;
+            session.openaiWs.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  modalities: ["text"], // Only generate text for Telnyx TTS
+                },
+              })
+            );
+          } else if (session?.isResponding) {
+            console.log(`⏸️ [${callId}] Already responding, ignoring user input until current response completes`);
+          }
         }
       }
     }
@@ -490,9 +534,12 @@ async function startOpenAIRealtime(callId) {
     // Log response creation/start events
     if (msg.type === "response.created") {
       console.log(`🎬 [${callId}] OpenAI response created`);
-      // Initialize transcript text
+      // Initialize transcript text and mark as responding
       const session = sessions.get(callId);
-      if (session) session.transcriptText = "";
+      if (session) {
+        session.transcriptText = "";
+        session.isResponding = true; // Mark that we're generating a response
+      }
     }
     
     if (msg.type === "response.audio_started") {
@@ -501,8 +548,13 @@ async function startOpenAIRealtime(callId) {
     
     if (msg.type === "response.done") {
       console.log(`✅ [${callId}] OpenAI response done`);
-      // Check if response has text content we can use
+      // Mark that we're no longer responding - wait for user input
       const session = sessions.get(callId);
+      if (session) {
+        session.isResponding = false; // Response complete, wait for user input
+      }
+      
+      // Check if response has text content we can use
       if (session && msg.response) {
         // Log the full response object to see what's available
         console.log(`📋 [${callId}] Response object:`, JSON.stringify(msg.response, null, 2));
@@ -597,6 +649,7 @@ wss.on("connection", (socket, req) => {
     telnyxWs: null,
     streamId: null,
     ready: false,
+    isResponding: false, // Track if AI is currently generating a response
     audioFrameCount: 0,
     audioOutFrameCount: 0,
     transcriptLogCount: 0,
