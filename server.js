@@ -173,6 +173,7 @@ async function handleCallInitiated(payload, callId) {
     messageCount: 0,
     transcriptText: "", // For collecting transcript for Telnyx TTS
     lastTtsText: "", // Track last TTS to prevent duplicates
+    userLanguage: "unknown", // Track detected language of user input
   });
 
   // Answer immediately
@@ -203,6 +204,7 @@ async function handleCallAnswered(payload, callId) {
       messageCount: 0,
       transcriptText: "",
       lastTtsText: "", // Track last TTS to prevent duplicates
+      userLanguage: "unknown", // Track detected language of user input
     });
   }
 
@@ -703,6 +705,7 @@ wss.on("connection", (socket, req) => {
     messageCount: 0,
     transcriptText: "",
     lastTtsText: "",
+    userLanguage: "unknown", // Track detected language of user input
   };
   s.telnyxWs = socket;
   sessions.set(callId, s);
