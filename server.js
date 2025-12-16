@@ -277,6 +277,9 @@ async function startOpenAIRealtime(callId) {
     messageCount: 0,
     transcriptText: "",
     lastTtsText: "",
+    lastResponseTime: 0, // Track when last response was created (VAPI-style)
+    speechStopTime: 0, // Track when speech stopped (VAPI-style)
+    speechStartedAfterStop: false, // Track if caller started speaking again (VAPI-style)
   };
   s.openaiWs = ws;
   sessions.set(callId, s);
@@ -296,11 +299,11 @@ async function startOpenAIRealtime(callId) {
           input_audio_format: "g711_ulaw", // We still receive audio from Telnyx
           output_audio_format: "g711_ulaw", // Set to match Telnyx (but we'll use Telnyx TTS instead)
           input_audio_transcription: { model: "whisper-1" }, // Transcribe input audio
+          // VAPI-style turn detection: less aggressive, wait longer before responding
           turn_detection: {
-            type: "server_vad",
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 800, // Increased to wait longer for user to finish speaking
+            type: "semantic_vad",
+            eagerness: 0.5, // Lower eagerness = less aggressive (VAPI-style)
+            // Note: semantic_vad doesn't use silence_duration_ms, but we'll add delay in code
           },
           temperature: 0.7,
           max_response_output_tokens: 800,
@@ -385,26 +388,69 @@ async function startOpenAIRealtime(callId) {
     }
     
     // Handle user input transcription completion - this is when we should create a response
+    // VAPI-style: Wait before responding to ensure caller is done speaking
     if (msg.type === "conversation.item.input_audio_transcription.completed") {
       const session = sessions.get(callId);
       if (session && msg.item && msg.item.role === "user") {
         const userText = msg.item.transcript || msg.item.text || "";
         console.log(`👤 [${callId}] User speech transcribed: "${userText}"`);
-        // Only create a response if we're not already responding
+        
+        // VAPI-style: Only create a response if we're not already responding
         if (!session.isResponding && session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
-          console.log(`💭 [${callId}] Creating response to user input...`);
-          session.isResponding = true;
-          session.openaiWs.send(
-            JSON.stringify({
-              type: "response.create",
-              response: {
-                modalities: ["text"], // Only generate text for Telnyx TTS
-              },
-            })
-          );
+          const now = Date.now();
+          const timeSinceLastResponse = now - (session.lastResponseTime || 0);
+          
+          // Prevent rapid consecutive responses (minimum 1 second between responses)
+          if (timeSinceLastResponse < 1000) {
+            console.log(`⏸️ [${callId}] Skipping response - too soon after last response (${timeSinceLastResponse}ms)`);
+            return;
+          }
+          
+          // VAPI-style delay: Wait 1 second before responding to ensure caller is done
+          console.log(`⏳ [${callId}] Waiting 1000ms before responding (VAPI-style turn-taking)`);
+          session.speechStopTime = now;
+          session.speechStartedAfterStop = false;
+          
+          setTimeout(() => {
+            // Check if caller started speaking again during the delay
+            if (session.speechStartedAfterStop) {
+              console.log(`⏸️ [${callId}] Caller started speaking again - canceling response`);
+              return;
+            }
+            
+            // Double-check we're still not responding (safety check)
+            if (session.isResponding) {
+              console.log(`⏸️ [${callId}] Already responding - canceling delayed response`);
+              return;
+            }
+            
+            console.log(`💭 [${callId}] Creating response to user input after VAPI-style delay...`);
+            session.isResponding = true;
+            session.lastResponseTime = Date.now();
+            session.speechStopTime = 0;
+            
+            session.openaiWs.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  modalities: ["text"], // Only generate text for Telnyx TTS
+                  instructions: "Respond naturally and briefly. Keep your response to 1-2 sentences maximum. After you finish your response, you MUST IMMEDIATELY STOP speaking and wait for the caller to speak again. Do not continue talking. Do not repeat yourself."
+                },
+              })
+            );
+          }, 1000); // 1 second delay (VAPI-style)
         } else if (session.isResponding) {
           console.log(`⏸️ [${callId}] Already responding, ignoring user input until current response completes`);
         }
+      }
+    }
+    
+    // VAPI-style: Track if caller starts speaking again after speech_stopped
+    if (msg.type === "input_audio_buffer.speech_started") {
+      const session = sessions.get(callId);
+      if (session && session.speechStopTime > 0 && !session.isResponding) {
+        console.log(`🔄 [${callId}] Caller started speaking again - will cancel pending response`);
+        session.speechStartedAfterStop = true;
       }
     }
     
@@ -552,6 +598,8 @@ async function startOpenAIRealtime(callId) {
       const session = sessions.get(callId);
       if (session) {
         session.isResponding = false; // Response complete, wait for user input
+        session.speechStopTime = 0; // Reset speech tracking (VAPI-style)
+        session.speechStartedAfterStop = false; // Reset flag (VAPI-style)
       }
       
       // Check if response has text content we can use
