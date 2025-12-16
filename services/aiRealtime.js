@@ -21,6 +21,8 @@ export class AIRealtimeService {
     this.onTranscriptComplete = null;
     this.lastResponseTime = 0; // Track when last response was created to prevent rapid responses
     this.greetingSent = false; // Track if initial greeting has been sent
+    this.speechStartedAfterStop = false; // Track if caller started speaking again after speech_stopped
+    this.speechStopTime = 0; // Track when speech stopped to implement VAPI-style delay
   }
   
   // Connect to OpenAI Realtime API
@@ -82,8 +84,7 @@ export class AIRealtimeService {
               
               // Now send session.update to configure audio format
               try {
-                // ABSOLUTE MINIMUM - Only parameters valid for session.update
-                // temperature and max_output_tokens are NOT valid for session.update (only for session creation)
+                // Configure session with turn detection (VAPI-style: wait longer for caller to finish)
                 const sessionConfig = {
                   type: 'session.update',
                   session: {
@@ -91,6 +92,16 @@ export class AIRealtimeService {
                     instructions: this.buildSystemInstructions(),
                     // CRITICAL: output_audio_format must be inside session object (not at top level)
                     output_audio_format: 'pcm16',
+                    // VAPI-style turn detection: wait longer before responding to ensure caller is done
+                    turn_detection: {
+                      type: 'semantic_vad',
+                      eagerness: 0.5, // Lower eagerness = less aggressive (VAPI uses similar approach)
+                      // Note: silence_duration_ms is not available for semantic_vad, 
+                      // but we'll add a delay in our code before creating responses
+                    },
+                    input_audio_transcription: {
+                      model: 'whisper-1', // Helps with speech detection
+                    },
                   },
                 };
                 
@@ -308,10 +319,21 @@ export class AIRealtimeService {
     switch (message.type) {
       case 'input_audio_buffer.speech_started':
         console.log('🔵 [OPENAI] Speech started detected');
+        // VAPI-style: If caller starts speaking again after we detected speech_stopped, cancel the response
+        if (this.speechStopTime > 0 && !this.isResponding) {
+          console.log('🔄 [OPENAI] Caller started speaking again - canceling pending response');
+          this.speechStartedAfterStop = true;
+          this.responseLock = false; // Cancel any pending response
+        }
         break;
         
       case 'input_audio_buffer.speech_stopped':
-        console.log('🔵 [OPENAI] Speech stopped - triggering response.create');
+        console.log('🔵 [OPENAI] Speech stopped - will wait before responding (VAPI-style delay)');
+        
+        // VAPI-style approach: Wait longer to ensure caller is truly done speaking
+        // Reset the flag for this new speech stop event
+        this.speechStartedAfterStop = false;
+        this.speechStopTime = Date.now();
         
         // CRITICAL: OpenAI detects speech boundaries but does NOT automatically create responses
         // We MUST explicitly send response.create after speech stops
@@ -321,8 +343,8 @@ export class AIRealtimeService {
           const now = Date.now();
           const timeSinceLastResponse = now - (this.lastResponseTime || 0);
           
-          // Prevent rapid consecutive responses (minimum 500ms between responses)
-          if (timeSinceLastResponse < 500) {
+          // Prevent rapid consecutive responses (minimum 1 second between responses)
+          if (timeSinceLastResponse < 1000) {
             console.log('⚠️ [OPENAI] Skipping response - too soon after last response');
             return;
           }
@@ -335,8 +357,27 @@ export class AIRealtimeService {
             process.stdout.write(`\n🟢 Committed audio buffer\n`);
             console.log('🟢 Sent input_audio_buffer.commit');
             
-            // Small delay before creating response to ensure audio buffer is fully committed
+            // VAPI-style delay: Wait 800-1000ms before responding to ensure caller is done
+            // This prevents the AI from talking over the caller
+            const responseDelay = 1000; // 1 second delay (VAPI uses similar approach)
+            console.log(`⏳ [OPENAI] Waiting ${responseDelay}ms before responding (VAPI-style turn-taking)`);
+            
             setTimeout(() => {
+              // Check if caller started speaking again during the delay
+              if (this.speechStartedAfterStop) {
+                console.log('⏸️ [OPENAI] Caller started speaking again - canceling response');
+                this.responseLock = false;
+                this.speechStopTime = 0;
+                return;
+              }
+              
+              // Double-check we're still not responding (safety check)
+              if (this.isResponding) {
+                console.log('⚠️ [OPENAI] Already responding - canceling delayed response');
+                this.responseLock = false;
+                return;
+              }
+              
               // Then explicitly trigger a response with explicit turn-taking instructions
               this.ws.send(JSON.stringify({
                 type: 'response.create',
@@ -345,12 +386,14 @@ export class AIRealtimeService {
                 }
               }));
               
-              console.log('🔵 [OPENAI] Triggering response.create after speech stopped');
+              console.log('🔵 [OPENAI] Triggering response.create after VAPI-style delay');
               this.lastResponseTime = Date.now();
-            }, 100);
+              this.speechStopTime = 0; // Reset
+            }, responseDelay);
           } catch (error) {
             console.error('❌ [OPENAI] Error triggering response.create:', error.message);
             this.responseLock = false; // Reset lock on error
+            this.speechStopTime = 0;
           }
         } else {
           console.log('⚠️ [OPENAI] Skipping response.create - already responding or locked');
@@ -441,6 +484,8 @@ export class AIRealtimeService {
         this.isResponding = false;
         this.responseLock = false;
         this.lastResponseTime = Date.now();
+        this.speechStopTime = 0; // Reset speech tracking
+        this.speechStartedAfterStop = false; // Reset flag
         console.log('✅ [OPENAI] Response complete - waiting for user input (response state reset)');
         
         // Ensure no further responses are triggered until user speaks again
