@@ -7,7 +7,9 @@ import { Business } from "../models/Business.js";
 import { Message } from "../models/Message.js";
 import { getCallSummary, forwardCallToBusiness } from "../services/vapi.js";
 import { checkMinutesAvailable, recordCallUsage } from "../services/usage.js";
-import { sendCallSummaryEmail, sendSMSNotification } from "../services/notifications.js";
+import { sendCallSummaryEmail, sendSMSNotification, sendMissedCallEmail } from "../services/notifications.js";
+import { isBusinessOpenAtTime } from "../utils/businessHours.js";
+import { AIAgent } from "../models/AIAgent.js";
 
 const router = express.Router();
 
@@ -231,6 +233,30 @@ async function handleCallEnd(event) {
       ended_at: new Date(),
       duration_seconds: duration,
     });
+    
+    // Send missed call email if enabled (only during business hours)
+    if (business.email_missed_calls) {
+      // Get AI agent to check business hours
+      const agent = await AIAgent.findByBusinessId(business.id);
+      const businessHours = agent?.business_hours || {};
+      const timezone = business.timezone || 'America/New_York';
+      
+      // Check if call occurred during business hours
+      // Use the call start time to determine if it was during business hours
+      const callStartTime = new Date(callSession.started_at);
+      const isOpen = isBusinessOpenAtTime(businessHours, timezone, callStartTime);
+      
+      if (isOpen) {
+        console.log(`[VAPI Webhook] Call was forwarded during business hours, sending missed call email`);
+        await sendMissedCallEmail(business, {
+          ...callSession,
+          duration_seconds: duration,
+        });
+      } else {
+        console.log(`[VAPI Webhook] Call was forwarded outside business hours, skipping missed call email`);
+      }
+    }
+    
     return;
   }
 

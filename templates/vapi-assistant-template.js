@@ -121,7 +121,22 @@ REMEMBER:
 }
 
 /**
- * Format business hours for prompt
+ * Convert 24-hour time to 12-hour format
+ */
+function convertTo12Hour(time24) {
+  if (!time24 || typeof time24 !== 'string') return time24;
+  
+  const [hours, minutes] = time24.split(':').map(Number);
+  if (isNaN(hours) || isNaN(minutes)) return time24;
+  
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hours12 = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+  
+  return `${hours12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
+/**
+ * Format business hours for prompt (12-hour format)
  */
 function formatBusinessHours(businessHours) {
   if (!businessHours || typeof businessHours !== "object") {
@@ -138,7 +153,9 @@ function formatBusinessHours(businessHours) {
     if (!hours || hours.closed) {
       formatted.push(`${day}: Closed`);
     } else {
-      formatted.push(`${day}: ${hours.open || "9:00 AM"} - ${hours.close || "5:00 PM"}`);
+      const open12 = convertTo12Hour(hours.open || "09:00");
+      const close12 = convertTo12Hour(hours.close || "17:00");
+      formatted.push(`${day}: ${open12} - ${close12}`);
     }
   }
 

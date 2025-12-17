@@ -720,5 +720,72 @@ router.post("/test-email", authenticate, async (req, res) => {
   }
 });
 
+// Send test missed call email
+router.post("/test-missed-call", authenticate, async (req, res) => {
+  console.log("[Test Missed Call] ========== TEST MISSED CALL REQUEST START ==========");
+  console.log("[Test Missed Call] Business ID:", req.businessId);
+  
+  try {
+    console.log("[Test Missed Call] Step 1: Fetching business...");
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      console.error("[Test Missed Call] ❌ Business not found");
+      return res.status(404).json({ error: "Business not found" });
+    }
+    console.log("[Test Missed Call] ✅ Business found:", {
+      id: business.id,
+      name: business.name,
+      email: business.email,
+      email_missed_calls: business.email_missed_calls,
+    });
+
+    // Allow test even if not saved - use request body or database value
+    const emailMissedCalls = req.body.email_missed_calls !== undefined ? req.body.email_missed_calls : business.email_missed_calls;
+
+    if (!emailMissedCalls) {
+      console.error("[Test Missed Call] ❌ Email for missed calls not enabled");
+      return res.status(400).json({ error: "Email for missed calls is not enabled. Please enable it first." });
+    }
+
+    console.log("[Test Missed Call] Step 2: Importing notification service...");
+    const { sendMissedCallEmail } = await import("../services/notifications.js");
+    console.log("[Test Missed Call] ✅ Notification service imported");
+
+    // Create a mock call session for the test email (simulating a forwarded call)
+    const mockCallSession = {
+      id: "test-session-" + Date.now(),
+      business_id: business.id,
+      caller_name: "Jane Smith",
+      caller_number: "+15559876543",
+      started_at: new Date(),
+      status: "forwarded", // Simulating a forwarded call
+      duration_seconds: 45,
+    };
+    console.log("[Test Missed Call] Step 3: Created mock call session:", mockCallSession);
+
+    console.log("[Test Missed Call] Step 4: Calling sendMissedCallEmail...");
+    await sendMissedCallEmail(
+      { ...business, email_missed_calls: emailMissedCalls },
+      mockCallSession
+    );
+    console.log("[Test Missed Call] ✅ sendMissedCallEmail completed without error");
+
+    console.log("[Test Missed Call] ========== TEST MISSED CALL REQUEST SUCCESS ==========");
+    res.json({
+      success: true,
+      message: `Test missed call email sent to ${business.email}`,
+    });
+  } catch (error) {
+    console.error("[Test Missed Call] ========== TEST MISSED CALL REQUEST ERROR ==========");
+    console.error("[Test Missed Call] Error message:", error.message);
+    console.error("[Test Missed Call] Error stack:", error.stack);
+    console.error("[Test Missed Call] Full error:", JSON.stringify(error, null, 2));
+    res.status(500).json({
+      error: error.message || "Failed to send test missed call email",
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
+  }
+});
+
 export default router;
 

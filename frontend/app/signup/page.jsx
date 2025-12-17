@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signup } from '@/lib/auth';
 import { formatPhoneInput, toE164, getPhoneValidationError } from '@/lib/phoneFormatter';
+import TimeInput12Hour from '@/components/TimeInput12Hour';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -374,17 +375,15 @@ export default function SignupPage() {
                   </div>
                   {!formData.business_hours[day].closed && (
                     <>
-                      <input
-                        type="time"
+                      <TimeInput12Hour
                         value={formData.business_hours[day].open || '09:00'}
-                        onChange={(e) => handleHoursChange(day, 'open', e.target.value)}
+                        onChange={(value) => handleHoursChange(day, 'open', value)}
                         className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white text-sm"
                       />
                       <span className="text-gray-600">to</span>
-                      <input
-                        type="time"
+                      <TimeInput12Hour
                         value={formData.business_hours[day].close || '17:00'}
-                        onChange={(e) => handleHoursChange(day, 'close', e.target.value)}
+                        onChange={(value) => handleHoursChange(day, 'close', value)}
                         className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white text-sm"
                       />
                     </>

@@ -16,6 +16,7 @@ function SettingsPage() {
   const [activating, setActivating] = useState(false);
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [sendingTestSMS, setSendingTestSMS] = useState(false);
+  const [sendingTestMissedCall, setSendingTestMissedCall] = useState(false);
   const [settings, setSettings] = useState({
     ai_enabled: true,
     call_forward_rings: 4,
@@ -168,6 +169,47 @@ function SettingsPage() {
     } finally {
       setSendingTestSMS(false);
       console.log('[Test SMS UI] ========== TEST SMS COMPLETE ==========');
+    }
+  };
+
+  const handleSendTestMissedCall = async () => {
+    console.log('[Test Missed Call UI] ========== TEST MISSED CALL BUTTON CLICKED ==========');
+    console.log('[Test Missed Call UI] User business:', user?.business);
+    
+    if (!user?.business?.email) {
+      console.error('[Test Missed Call UI] ❌ No business email found');
+      alert('No email address found for your business. Please update your business email.');
+      return;
+    }
+
+    console.log('[Test Missed Call UI] Business email:', user.business.email);
+    setSendingTestMissedCall(true);
+    
+    try {
+      console.log('[Test Missed Call UI] Step 1: Calling API...');
+      const response = await businessAPI.sendTestMissedCall({
+        email_missed_calls: settings.email_missed_calls,
+      });
+      console.log('[Test Missed Call UI] Step 2: API response received:', response.data);
+      
+      if (response.data?.success) {
+        console.log('[Test Missed Call UI] ✅ Success response from API');
+        alert(`Test missed call email sent successfully to ${user.business.email}! Check your inbox to see what your missed call emails will look like.`);
+      } else {
+        console.error('[Test Missed Call UI] ❌ API returned success=false');
+        alert('Failed to send test missed call email. Please try again.');
+      }
+    } catch (error) {
+      console.error('[Test Missed Call UI] ========== TEST MISSED CALL ERROR ==========');
+      console.error('[Test Missed Call UI] Error:', error);
+      console.error('[Test Missed Call UI] Error response:', error.response);
+      console.error('[Test Missed Call UI] Error data:', error.response?.data);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to send test missed call email';
+      console.error('[Test Missed Call UI] Error message:', errorMessage);
+      alert(`Failed to send test missed call email: ${errorMessage}`);
+    } finally {
+      setSendingTestMissedCall(false);
+      console.log('[Test Missed Call UI] ========== TEST MISSED CALL COMPLETE ==========');
     }
   };
 
@@ -434,15 +476,26 @@ function SettingsPage() {
                   </label>
                   <p className="text-xs text-gray-500">Get email summaries for calls that went unanswered during your business hours</p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.email_missed_calls}
-                    onChange={(e) => setSettings({ ...settings, email_missed_calls: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
+                <div className="flex items-center gap-3">
+                  {settings.email_missed_calls && (
+                    <button
+                      onClick={handleSendTestMissedCall}
+                      disabled={sendingTestMissedCall}
+                      className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    >
+                      {sendingTestMissedCall ? 'Sending...' : 'Test Email'}
+                    </button>
+                  )}
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.email_missed_calls}
+                      onChange={(e) => setSettings({ ...settings, email_missed_calls: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
               </div>
 
               <div className="border-t pt-4">

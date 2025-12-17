@@ -6,6 +6,7 @@ import AuthGuard from '@/components/AuthGuard';
 import { agentsAPI, authAPI, telnyxPhoneNumbersAPI } from '@/lib/api';
 import api from '@/lib/api';
 import TelnyxPhoneNumberSelector from '@/components/TelnyxPhoneNumberSelector';
+import TimeInput12Hour from '@/components/TimeInput12Hour';
 
 function SetupPage() {
   const router = useRouter();
@@ -328,23 +329,21 @@ function SetupPage() {
                           </label>
                           {!dayHours.closed && (
                             <>
-                              <input
-                                type="time"
+                              <TimeInput12Hour
                                 value={dayHours.open || '09:00'}
-                                onChange={(e) => {
+                                onChange={(value) => {
                                   const newHours = { ...formData.step3.business_hours };
-                                  newHours[day] = { ...newHours[day], open: e.target.value };
+                                  newHours[day] = { ...newHours[day], open: value };
                                   updateFormData('step3', 'business_hours', newHours);
                                 }}
                                 className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                               />
                               <span className="text-gray-600">to</span>
-                              <input
-                                type="time"
+                              <TimeInput12Hour
                                 value={dayHours.close || '17:00'}
-                                onChange={(e) => {
+                                onChange={(value) => {
                                   const newHours = { ...formData.step3.business_hours };
-                                  newHours[day] = { ...newHours[day], close: e.target.value };
+                                  newHours[day] = { ...newHours[day], close: value };
                                   updateFormData('step3', 'business_hours', newHours);
                                 }}
                                 className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
@@ -647,23 +646,21 @@ function SetupPage() {
                         </label>
                         {!dayHours.closed && (
                           <>
-                            <input
-                              type="time"
+                            <TimeInput12Hour
                               value={dayHours.open || '09:00'}
-                              onChange={(e) => {
+                              onChange={(value) => {
                                 const newHours = { ...formData.step3.business_hours };
-                                newHours[day] = { ...newHours[day], open: e.target.value };
+                                newHours[day] = { ...newHours[day], open: value };
                                 updateFormData('step3', 'business_hours', newHours);
                               }}
                               className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                             />
                             <span className="text-gray-600">to</span>
-                            <input
-                              type="time"
+                            <TimeInput12Hour
                               value={dayHours.close || '17:00'}
-                              onChange={(e) => {
+                              onChange={(value) => {
                                 const newHours = { ...formData.step3.business_hours };
-                                newHours[day] = { ...newHours[day], close: e.target.value };
+                                newHours[day] = { ...newHours[day], close: value };
                                 updateFormData('step3', 'business_hours', newHours);
                               }}
                               className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"

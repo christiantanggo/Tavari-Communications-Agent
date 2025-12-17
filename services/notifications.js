@@ -420,6 +420,82 @@ export async function sendInvoiceEmail(business, invoice, pdfBuffer) {
 }
 
 /**
+ * Send missed call notification (for calls forwarded during business hours)
+ */
+export async function sendMissedCallEmail(business, callSession) {
+  console.log("[Missed Call Email] ========== MISSED CALL EMAIL START ==========");
+  console.log("[Missed Call Email] Business:", {
+    id: business.id,
+    name: business.name,
+    email: business.email,
+    email_missed_calls: business.email_missed_calls,
+  });
+  
+  if (!business.email_missed_calls) {
+    console.log("[Missed Call Email] ⚠️ Email disabled for missed calls, skipping");
+    return; // Email disabled for missed calls
+  }
+
+  try {
+    console.log("[Missed Call Email] Step 1: Building template data...");
+    const templateData = {
+      business_name: business.name,
+      caller_name: callSession.caller_name || "Unknown",
+      caller_phone: formatPhoneNumber(callSession.caller_number) || "Unknown",
+      call_time: new Date(callSession.started_at).toLocaleString(),
+      call_duration: callSession.duration_seconds ? `${Math.floor(callSession.duration_seconds / 60)}m ${callSession.duration_seconds % 60}s` : "N/A",
+      forward_reason: callSession.status === "forwarded_no_minutes" 
+        ? "AI minutes exhausted" 
+        : callSession.status === "forwarded_overage_cap" 
+        ? "Overage cap reached" 
+        : "AI disabled or call forwarded",
+    };
+
+    // Try to use template, fallback to simple email if template doesn't exist
+    let subject, bodyText, bodyHtml;
+    try {
+      const rendered = await renderEmailTemplate("missed_call", templateData);
+      subject = rendered.subject;
+      bodyText = rendered.bodyText;
+      bodyHtml = rendered.bodyHtml;
+    } catch (templateError) {
+      // Template doesn't exist - create simple email
+      console.warn(`[Missed Call Email] Template not found, using fallback email`);
+      subject = `Missed Call - ${business.name}`;
+      
+      bodyText = `A call was forwarded to your business but couldn't be answered:\n\nCaller: ${templateData.caller_name}\nPhone: ${templateData.caller_phone}\nTime: ${templateData.call_time}\nDuration: ${templateData.call_duration}\nReason: ${templateData.forward_reason}\n\nThis call was forwarded to your business number but may not have been answered.`;
+      
+      bodyHtml = `<h2>Missed Call Notification</h2>
+        <p>A call was forwarded to your business but couldn't be answered:</p>
+        <ul>
+          <li><strong>Caller:</strong> ${templateData.caller_name}</li>
+          <li><strong>Phone:</strong> ${templateData.caller_phone}</li>
+          <li><strong>Time:</strong> ${templateData.call_time}</li>
+          <li><strong>Duration:</strong> ${templateData.call_duration}</li>
+          <li><strong>Reason:</strong> ${templateData.forward_reason}</li>
+        </ul>
+        <p>This call was forwarded to your business number but may not have been answered.</p>`;
+    }
+
+    const displayName = `Tavari for ${business.name}`;
+    
+    console.log(`[Missed Call Email] Step 2: Sending email...`);
+    console.log(`[Missed Call Email] To: ${business.email}`);
+    console.log(`[Missed Call Email] Subject: ${subject}`);
+    console.log(`[Missed Call Email] Display Name: ${displayName}`);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
+    console.log(`[Missed Call Email] ✅ Missed call email sent successfully`);
+    console.log("[Missed Call Email] ========== MISSED CALL EMAIL SUCCESS ==========");
+  } catch (error) {
+    console.error(`[Missed Call Email] ========== MISSED CALL EMAIL ERROR ==========`);
+    console.error(`[Missed Call Email] Error sending missed call email:`, error.message);
+    console.error(`[Missed Call Email] Error stack:`, error.stack);
+    console.error(`[Missed Call Email] Full error:`, JSON.stringify(error, null, 2));
+    // Don't throw - email failures shouldn't break the call flow
+  }
+}
+
+/**
  * Send support ticket notification to Tavari staff
  */
 export async function sendSupportTicketNotification(ticket, business) {
