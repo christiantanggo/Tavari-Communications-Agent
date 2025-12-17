@@ -38,8 +38,11 @@ app.use((req, _res, next) => {
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
+    version: "VAPI_VERSION",
+    server: "Tavari VAPI Server",
     timestamp: new Date().toISOString(),
-    service: "tavari-voice-agent",
+    webhook: "/api/vapi/webhook",
+    message: "This is the VAPI version - NOT the Telnyx legacy version"
   });
 });
 
@@ -112,10 +115,14 @@ app.use(errorHandler);
 
 // Start server
 const server = app.listen(PORT, () => {
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 TAVARI SERVER - VAPI VERSION - DO NOT USE TELNYX CODE');
+  console.log('='.repeat(60));
   console.log(`✅ Tavari server running on port ${PORT} [VAPI VERSION]`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
   console.log(`   Readiness check: http://localhost:${PORT}/ready`);
   console.log(`   VAPI Webhook: http://localhost:${PORT}/api/vapi/webhook`);
+  console.log('='.repeat(60) + '\n');
 });
 
 // Graceful shutdown
