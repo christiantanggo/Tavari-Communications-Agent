@@ -495,6 +495,75 @@ router.post("/retry-activation", authenticate, async (req, res) => {
   }
 });
 
+// Send test SMS
+router.post("/test-sms", authenticate, async (req, res) => {
+  console.log("[Test SMS] ========== TEST SMS REQUEST START ==========");
+  console.log("[Test SMS] Business ID:", req.businessId);
+  
+  try {
+    console.log("[Test SMS] Step 1: Fetching business...");
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      console.error("[Test SMS] ❌ Business not found");
+      return res.status(404).json({ error: "Business not found" });
+    }
+    console.log("[Test SMS] ✅ Business found:", {
+      id: business.id,
+      name: business.name,
+      sms_enabled: business.sms_enabled,
+      sms_notification_number: business.sms_notification_number,
+    });
+
+    if (!business.sms_enabled) {
+      console.error("[Test SMS] ❌ SMS not enabled for business");
+      return res.status(400).json({ error: "SMS is not enabled for this business" });
+    }
+
+    if (!business.sms_notification_number) {
+      console.error("[Test SMS] ❌ SMS notification number not configured");
+      return res.status(400).json({ error: "SMS notification number is not configured" });
+    }
+
+    console.log("[Test SMS] Step 2: Importing notification service...");
+    const { sendSMSNotification } = await import("../services/notifications.js");
+    console.log("[Test SMS] ✅ Notification service imported");
+
+    // Create a mock call session for the test SMS
+    const mockCallSession = {
+      id: "test-session-" + Date.now(),
+      business_id: business.id,
+      caller_name: "John Doe",
+      caller_number: "+15551234567",
+      started_at: new Date(),
+      status: "completed",
+      duration_seconds: 120,
+    };
+    console.log("[Test SMS] Step 3: Created mock call session:", mockCallSession);
+
+    const mockSummary = "Test SMS: Customer called requesting urgent callback. This is a test message from Tavari.";
+    console.log("[Test SMS] Step 4: Created mock summary:", mockSummary);
+
+    console.log("[Test SMS] Step 5: Calling sendSMSNotification...");
+    await sendSMSNotification(business, mockCallSession, mockSummary);
+    console.log("[Test SMS] ✅ sendSMSNotification completed without error");
+
+    console.log("[Test SMS] ========== TEST SMS REQUEST SUCCESS ==========");
+    res.json({
+      success: true,
+      message: `Test SMS sent to ${business.sms_notification_number}`,
+    });
+  } catch (error) {
+    console.error("[Test SMS] ========== TEST SMS REQUEST ERROR ==========");
+    console.error("[Test SMS] Error message:", error.message);
+    console.error("[Test SMS] Error stack:", error.stack);
+    console.error("[Test SMS] Full error:", JSON.stringify(error, null, 2));
+    res.status(500).json({
+      error: error.message || "Failed to send test SMS",
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
+  }
+});
+
 // Send test email
 router.post("/test-email", authenticate, async (req, res) => {
   console.log("[Test Email] ========== TEST EMAIL REQUEST START ==========");

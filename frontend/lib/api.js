@@ -114,6 +114,7 @@ export const businessAPI = {
   provisionPhoneNumber: (data) => api.post('/business/phone-numbers/provision', data),
   linkAssistant: () => api.post('/business/link-assistant'),
   sendTestEmail: () => api.post('/business/test-email'),
+  sendTestSMS: () => api.post('/business/test-sms'),
 };
 
 // Phone Numbers API (Voximplant - legacy)

@@ -15,6 +15,7 @@ function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [sendingTestSMS, setSendingTestSMS] = useState(false);
   const [settings, setSettings] = useState({
     ai_enabled: true,
     call_forward_rings: 4,
@@ -118,6 +119,51 @@ function SettingsPage() {
       alert(`Failed to provision phone number: ${errorMessage}`);
     } finally {
       setActivating(false);
+    }
+  };
+
+  const handleSendTestSMS = async () => {
+    console.log('[Test SMS UI] ========== TEST SMS BUTTON CLICKED ==========');
+    console.log('[Test SMS UI] User business:', user?.business);
+    
+    if (!user?.business?.sms_enabled) {
+      console.error('[Test SMS UI] ❌ SMS not enabled');
+      alert('SMS is not enabled. Please enable SMS notifications first.');
+      return;
+    }
+
+    if (!user?.business?.sms_notification_number) {
+      console.error('[Test SMS UI] ❌ No SMS number configured');
+      alert('SMS notification number is not configured. Please add a phone number first.');
+      return;
+    }
+
+    console.log('[Test SMS UI] SMS number:', user.business.sms_notification_number);
+    setSendingTestSMS(true);
+    
+    try {
+      console.log('[Test SMS UI] Step 1: Calling API...');
+      const response = await businessAPI.sendTestSMS();
+      console.log('[Test SMS UI] Step 2: API response received:', response.data);
+      
+      if (response.data?.success) {
+        console.log('[Test SMS UI] ✅ Success response from API');
+        alert(`Test SMS sent successfully to ${user.business.sms_notification_number}! Check your phone.`);
+      } else {
+        console.error('[Test SMS UI] ❌ API returned success=false');
+        alert('Failed to send test SMS. Please try again.');
+      }
+    } catch (error) {
+      console.error('[Test SMS UI] ========== TEST SMS ERROR ==========');
+      console.error('[Test SMS UI] Error:', error);
+      console.error('[Test SMS UI] Error response:', error.response);
+      console.error('[Test SMS UI] Error data:', error.response?.data);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to send test SMS';
+      console.error('[Test SMS UI] Error message:', errorMessage);
+      alert(`Failed to send test SMS: ${errorMessage}`);
+    } finally {
+      setSendingTestSMS(false);
+      console.log('[Test SMS UI] ========== TEST SMS COMPLETE ==========');
     }
   };
 
