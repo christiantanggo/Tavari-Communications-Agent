@@ -80,15 +80,30 @@ export class Business {
   }
 
   static async findByVapiAssistantId(assistantId) {
-    const { data, error } = await supabaseClient
-      .from('businesses')
-      .select('*')
-      .eq('vapi_assistant_id', assistantId)
-      .is('deleted_at', null)
-      .single();
-    
-    if (error && error.code !== 'PGRST116') throw error;
-    return data;
+    try {
+      const { data, error } = await supabaseClient
+        .from('businesses')
+        .select('*')
+        .eq('vapi_assistant_id', assistantId)
+        .is('deleted_at', null)
+        .single();
+      
+      // If column doesn't exist, return null (migration not run)
+      if (error) {
+        if (error.message && (error.message.includes('column') || error.message.includes('does not exist'))) {
+          console.warn('⚠️ vapi_assistant_id column missing. Run RUN_THIS_MIGRATION.sql');
+          return null;
+        }
+        if (error.code !== 'PGRST116') throw error;
+      }
+      return data;
+    } catch (err) {
+      if (err.message && (err.message.includes('column') || err.message.includes('does not exist'))) {
+        console.warn('⚠️ vapi_assistant_id column missing. Run RUN_THIS_MIGRATION.sql');
+        return null;
+      }
+      throw err;
+    }
   }
 
   static async setVapiAssistant(id, assistantId, phoneNumber) {
