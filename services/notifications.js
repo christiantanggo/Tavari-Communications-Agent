@@ -86,7 +86,7 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
     console.log("[Notifications] ========== SEND EMAIL SUCCESS ==========");
     return result;
   } catch (error) {
-    console.error(`[Notifications] ========== SEND EMAIL ERROR ==========");
+    console.error(`[Notifications] ========== SEND EMAIL ERROR ==========`);
     console.error(`[Notifications] Error sending email to ${to}:`, error.message);
     console.error(`[Notifications] Error stack:`, error.stack);
     console.error(`[Notifications] Full error:`, JSON.stringify(error, null, 2));
@@ -159,7 +159,7 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
     console.log(`[Call Summary Email] ✅ Call summary email sent successfully`);
     console.log("[Call Summary Email] ========== CALL SUMMARY EMAIL SUCCESS ==========");
   } catch (error) {
-    console.error(`[Call Summary Email] ========== CALL SUMMARY EMAIL ERROR ==========");
+    console.error(`[Call Summary Email] ========== CALL SUMMARY EMAIL ERROR ==========`);
     console.error(`[Call Summary Email] Error sending call summary email:`, error.message);
     console.error(`[Call Summary Email] Error stack:`, error.stack);
     console.error(`[Call Summary Email] Full error:`, JSON.stringify(error, null, 2));
