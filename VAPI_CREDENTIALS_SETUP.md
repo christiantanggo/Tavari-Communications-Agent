@@ -55,12 +55,39 @@ VAPI_WEBHOOK_SECRET=your-webhook-secret-here
 
 5. Railway will automatically redeploy after adding variables
 
-## How to Get Your VAPI API Key
+## How to Get Your VAPI Credentials
+
+### VAPI_API_KEY (Required)
 
 1. Go to https://dashboard.vapi.ai
 2. Log in to your account
 3. Go to **Settings** → **API Keys**
 4. Copy your API key (or create a new one)
+   - Format: UUID like `12345678-1234-1234-1234-123456789abc`
+
+### VAPI_BASE_URL (Optional - Use Default)
+
+**You don't need to find this!** Just use:
+```
+https://api.vapi.ai
+```
+
+This is the standard VAPI API endpoint. Only change it if VAPI tells you to use a different endpoint (very rare).
+
+### VAPI_WEBHOOK_SECRET (Optional)
+
+1. Go to https://dashboard.vapi.ai
+2. Log in to your account
+3. Go to **Settings** → **Webhooks** (or **Security** → **Webhooks**)
+4. Look for "Webhook Secret" or "Signature Secret"
+5. Copy the secret value
+
+**Note:** This is OPTIONAL. Your webhooks will work without it. It's only used for verifying that webhooks actually came from VAPI (security feature).
+
+If you can't find it:
+- It might not be shown in the dashboard
+- You can leave it blank - webhooks will still work
+- The code has a TODO to implement signature verification anyway
 
 ## Verification
 
