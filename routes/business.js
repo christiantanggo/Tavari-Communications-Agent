@@ -258,6 +258,61 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
       console.log(`[Business Provision] Phone number provisioned but not linked. Please link manually in VAPI dashboard.`);
     }
 
+    // CRITICAL: Assign phone number to Voice API Application in Telnyx
+    // This is required for calls to work - VAPI needs the number assigned to the Voice API Application
+    try {
+      const { getTelnyxCredentials } = await import("../services/vapi.js");
+      const credentials = await getTelnyxCredentials();
+      
+      if (credentials.length > 0) {
+        const credential = credentials[0];
+        const voiceAppId = credential.telnyxApplicationId;
+        
+        if (voiceAppId) {
+          console.log(`[Business Provision] Assigning number to Voice API Application: ${voiceAppId}`);
+          
+          const axios = (await import("axios")).default;
+          const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+          const TELNYX_API_BASE_URL = "https://api.telnyx.com/v2";
+          
+          // Get phone number ID from Telnyx
+          const cleanNumber = phoneNumber.replace(/[^0-9+]/g, "");
+          const telnyxResponse = await axios.get(
+            `${TELNYX_API_BASE_URL}/phone_numbers?filter[phone_number]=${encodeURIComponent(cleanNumber)}`,
+            {
+              headers: { Authorization: `Bearer ${TELNYX_API_KEY}` },
+            }
+          );
+          
+          const telnyxNumbers = telnyxResponse.data?.data || [];
+          if (telnyxNumbers.length > 0) {
+            const telnyxNumberId = telnyxNumbers[0].id;
+            
+            // Assign to Voice API Application
+            await axios.patch(
+              `${TELNYX_API_BASE_URL}/phone_numbers/${telnyxNumberId}/voice`,
+              { connection_id: voiceAppId },
+              {
+                headers: {
+                  Authorization: `Bearer ${TELNYX_API_KEY}`,
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+            
+            console.log(`[Business Provision] ✅ Number assigned to Voice API Application`);
+          }
+        } else {
+          console.warn(`[Business Provision] ⚠️  No Voice API Application ID in credential`);
+        }
+      } else {
+        console.warn(`[Business Provision] ⚠️  No Telnyx credentials found`);
+      }
+    } catch (assignError) {
+      console.error(`[Business Provision] ⚠️  Failed to assign number to Voice API Application:`, assignError.message);
+      // Don't fail provisioning - number still works, just needs manual assignment
+    }
+
     // Store VAPI phone number in database
     await Business.update(req.businessId, { 
       vapi_phone_number: provisionedNumber,

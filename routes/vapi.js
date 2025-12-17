@@ -238,14 +238,24 @@ async function handleCallEnd(event) {
   let transcript = "";
   let summary = "";
   let intent = "general";
+  let vapiCallData = null;
 
   try {
     const callSummary = await getCallSummary(callId);
     transcript = callSummary.transcript || "";
     summary = callSummary.summary || "";
     
+    // Get full call data for better message extraction
+    const { getVapiClient } = await import("../services/vapi.js");
+    const vapiClient = getVapiClient();
+    const callResponse = await vapiClient.get(`/call/${callId}`);
+    vapiCallData = callResponse.data;
+    
+    console.log(`[VAPI Webhook] Full call data:`, JSON.stringify(vapiCallData, null, 2).substring(0, 1000));
+    
     // Determine intent from summary
     intent = determineIntent(summary, transcript);
+    console.log(`[VAPI Webhook] Detected intent: ${intent}`);
   } catch (error) {
     console.error(`[VAPI Webhook] Error getting call summary:`, error);
   }
@@ -263,26 +273,56 @@ async function handleCallEnd(event) {
   // Record usage (minutes)
   await recordCallUsage(business.id, callSession.id, durationMinutes);
 
-  // Extract message if callback/message intent
-  if (intent === "callback" || intent === "message") {
-    const messageData = extractMessageFromTranscript(transcript, summary);
-    if (messageData) {
-      await Message.create({
-        business_id: business.id,
-        call_session_id: callSession.id,
-        caller_name: messageData.name,
-        caller_phone: callSession.caller_number,
-        caller_email: messageData.email,
-        message_text: messageData.message,
-        reason: messageData.reason,
-        status: "new",
-      });
+  // Extract message if callback/message intent OR if summary/transcript indicates a message was taken
+  // Be more lenient - if transcript mentions taking a message, callback, or contact info, create message
+  const shouldCreateMessage = intent === "callback" || 
+                              intent === "message" || 
+                              summary.toLowerCase().includes("message") ||
+                              summary.toLowerCase().includes("callback") ||
+                              summary.toLowerCase().includes("call back") ||
+                              transcript.toLowerCase().includes("taking a message") ||
+                              transcript.toLowerCase().includes("leave a message");
+  
+  if (shouldCreateMessage) {
+    console.log(`[VAPI Webhook] Creating message record - Intent: ${intent}`);
+    const messageData = extractMessageFromTranscript(transcript, summary, vapiCallData);
+    
+    if (messageData && (messageData.name !== "Unknown" || messageData.phone || messageData.message)) {
+      try {
+        const createdMessage = await Message.create({
+          business_id: business.id,
+          call_session_id: callSession.id,
+          caller_name: messageData.name,
+          caller_phone: messageData.phone || callSession.caller_number,
+          caller_email: messageData.email,
+          message_text: messageData.message || summary || transcript,
+          reason: messageData.reason || intent,
+          status: "new",
+        });
+        console.log(`[VAPI Webhook] ✅ Message created: ${createdMessage.id}`);
+      } catch (msgError) {
+        console.error(`[VAPI Webhook] ❌ Error creating message:`, msgError);
+      }
+    } else {
+      console.log(`[VAPI Webhook] ⚠️  Message data insufficient, not creating message record`);
     }
   }
 
   // Send notifications
   if (business.email_ai_answered) {
-    await sendCallSummaryEmail(business, callSession, transcript, summary, intent);
+    // Check if a message was created - if so, include message details in email
+    const messages = await Message.findByBusinessId(business.id, 1);
+    const latestMessage = messages && messages.length > 0 && 
+                         messages[0].call_session_id === callSession.id ? messages[0] : null;
+    
+    await sendCallSummaryEmail(
+      business, 
+      callSession, 
+      transcript, 
+      summary, 
+      intent,
+      latestMessage // Pass message if one was created
+    );
   }
 
   // Send SMS if enabled and urgent
@@ -372,38 +412,120 @@ function determineIntent(summary, transcript) {
 }
 
 /**
- * Extract message data from transcript
+ * Extract message data from transcript, summary, and VAPI call data
  */
-function extractMessageFromTranscript(transcript, summary) {
-  // Simple extraction - can be enhanced with AI parsing
-  const lines = transcript.split("\n");
+function extractMessageFromTranscript(transcript, summary, vapiCallData = null) {
+  // Combine all text for extraction
+  const fullText = `${summary || ""} ${transcript || ""}`.toLowerCase();
+  
   let name = "";
   let phone = "";
   let email = "";
-  let message = summary || transcript;
+  let message = summary || transcript || "";
   let reason = "";
 
-  // Try to extract name and phone from transcript
-  for (const line of lines) {
-    if (line.toLowerCase().includes("name") || line.toLowerCase().includes("caller")) {
-      const nameMatch = line.match(/(?:name|caller)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
-      if (nameMatch) name = nameMatch[1];
+  // Try to extract from VAPI structured data first (if available)
+  if (vapiCallData) {
+    // Check for structured message data in VAPI response
+    if (vapiCallData.metadata?.callerName) {
+      name = vapiCallData.metadata.callerName;
     }
-    if (line.includes("phone") || line.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
-      const phoneMatch = line.match(/(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/);
-      if (phoneMatch) phone = phoneMatch[1];
+    if (vapiCallData.metadata?.callerPhone) {
+      phone = vapiCallData.metadata.callerPhone;
     }
-    if (line.includes("@")) {
-      const emailMatch = line.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-      if (emailMatch) email = emailMatch[1];
+    if (vapiCallData.metadata?.callerEmail) {
+      email = vapiCallData.metadata.callerEmail;
+    }
+    if (vapiCallData.metadata?.message) {
+      message = vapiCallData.metadata.message;
     }
   }
+
+  // Fallback: Extract from transcript/summary text
+  const lines = (transcript || "").split("\n");
+  
+  // Extract name - look for patterns like "name is John" or "my name is John"
+  if (!name || name === "Unknown") {
+    const namePatterns = [
+      /(?:name is|my name is|this is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+      /(?:name|caller)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+      /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:here|speaking|calling)/i,
+    ];
+    
+    for (const pattern of namePatterns) {
+      const match = fullText.match(pattern);
+      if (match && match[1]) {
+        name = match[1].trim();
+        break;
+      }
+    }
+  }
+
+  // Extract phone - look for phone number patterns
+  if (!phone) {
+    const phonePatterns = [
+      /(?:phone|number|call me at|reach me at)[:\s]*([+]?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i,
+      /(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/,
+      /([+]?1[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/,
+    ];
+    
+    for (const pattern of phonePatterns) {
+      const match = fullText.match(pattern);
+      if (match && match[1]) {
+        phone = match[1].replace(/[-.\s()]/g, "");
+        if (phone.length === 10 && !phone.startsWith("+")) {
+          phone = "+1" + phone;
+        } else if (phone.length === 11 && phone.startsWith("1")) {
+          phone = "+" + phone;
+        }
+        break;
+      }
+    }
+  }
+
+  // Extract email
+  if (!email) {
+    const emailPattern = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+    const match = fullText.match(emailPattern);
+    if (match) {
+      email = match[1];
+    }
+  }
+
+  // Extract message/reason from summary or transcript
+  if (summary) {
+    // Look for key phrases that indicate what the caller wants
+    if (summary.toLowerCase().includes("reservation") || summary.toLowerCase().includes("book")) {
+      reason = "Reservation";
+    } else if (summary.toLowerCase().includes("catering")) {
+      reason = "Catering";
+    } else if (summary.toLowerCase().includes("hours") || summary.toLowerCase().includes("open")) {
+      reason = "Hours Inquiry";
+    } else if (summary.toLowerCase().includes("complaint")) {
+      reason = "Complaint";
+    } else {
+      reason = "General Inquiry";
+    }
+    
+    // Use summary as message if it's detailed
+    if (summary.length > 50) {
+      message = summary;
+    }
+  }
+
+  console.log(`[Message Extraction] Extracted:`, {
+    name: name || "Unknown",
+    phone: phone || "None",
+    email: email || "None",
+    reason: reason || "General inquiry",
+    messageLength: message.length,
+  });
 
   return {
     name: name || "Unknown",
     phone: phone || "",
     email: email || "",
-    message: message,
+    message: message || summary || transcript || "No message provided",
     reason: reason || "General inquiry",
   };
 }

@@ -1,56 +1,60 @@
 // services/notifications.js
-// Email and SMS notification service using AWS SES and Telnyx
+// Email and SMS notification service using Supabase Edge Function (mail-send) and Telnyx
 
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import axios from "axios";
 import { renderEmailTemplate } from "./emailTemplates.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
+import { supabaseClient } from "../config/database.js";
 
-const sesClient = new SESClient({
-  region: process.env.AWS_SES_REGION || "us-east-1",
-});
-
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || "noreply@tavari.com";
+const FROM_NAME = "Tavari";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_SMS_NUMBER = process.env.TELNYX_SMS_NUMBER;
 
 /**
- * Send email using AWS SES
+ * Send email using Supabase Edge Function (mail-send)
  */
-async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = null) {
+async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = null, businessId = null, attachments = null) {
   try {
-    const source = displayName ? `${displayName} <${FROM_EMAIL}>` : FROM_EMAIL;
-    
-    const params = {
-      Source: source,
-      Destination: {
-        ToAddresses: [to],
-      },
-      Message: {
-        Subject: {
-          Data: subject,
-          Charset: "UTF-8",
-        },
-        Body: {
-          Text: {
-            Data: bodyText,
-            Charset: "UTF-8",
-          },
-        },
-      },
-    };
-
-    if (bodyHtml) {
-      params.Message.Body.Html = {
-        Data: bodyHtml,
-        Charset: "UTF-8",
-      };
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY must be set");
     }
 
-    const command = new SendEmailCommand(params);
-    const result = await sesClient.send(command);
+    const emailPayload = {
+      businessId: businessId || "system",
+      campaignId: `email-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      contactId: `email-${to}-${Date.now()}`,
+      to: to,
+      fromEmail: FROM_EMAIL,
+      fromName: displayName || FROM_NAME,
+      subject: subject,
+      html: bodyHtml || bodyText,
+      text: bodyText,
+    };
+
+    if (attachments && attachments.length > 0) {
+      emailPayload.attachments = attachments;
+    }
+
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/mail-send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify(emailPayload),
+    });
+
+    const result = await response.json();
     
-    console.log(`[Notifications] Email sent to ${to}: ${result.MessageId}`);
+    if (!response.ok) {
+      throw new Error(result.error || `Email send failed: ${response.status}`);
+    }
+    
+    console.log(`[Notifications] Email sent to ${to}: ${result.messageId || "success"}`);
     return result;
   } catch (error) {
     console.error(`[Notifications] Error sending email to ${to}:`, error);
@@ -61,7 +65,7 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
 /**
  * Send call summary email
  */
-export async function sendCallSummaryEmail(business, callSession, transcript, summary, intent) {
+export async function sendCallSummaryEmail(business, callSession, transcript, summary, intent, message = null) {
   if (!business.email_ai_answered) {
     return; // Email disabled for AI-answered calls
   }
@@ -69,17 +73,45 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
   try {
     const templateData = {
       business_name: business.name,
-      caller_name: callSession.caller_name || "Unknown",
-      caller_phone: formatPhoneNumber(callSession.caller_number) || "Unknown",
+      caller_name: callSession.caller_name || message?.caller_name || "Unknown",
+      caller_phone: formatPhoneNumber(callSession.caller_number || message?.caller_phone) || "Unknown",
       call_time: new Date(callSession.started_at).toLocaleString(),
       call_summary: summary || "No summary available",
-      message: intent === "callback" || intent === "message" ? "Message taken" : null,
+      transcript: transcript || "No transcript available",
+      message_taken: message ? true : false,
+      message_text: message?.message_text || null,
+      message_reason: message?.reason || null,
+      caller_email: message?.caller_email || null,
     };
 
-    const { subject, bodyText, bodyHtml } = await renderEmailTemplate("call_summary", templateData);
-    const displayName = `Tavari for ${business.name}`;
+    // Try to use template, fallback to simple email if template doesn't exist
+    let subject, bodyText, bodyHtml;
+    try {
+      const rendered = await renderEmailTemplate("call_summary", templateData);
+      subject = rendered.subject;
+      bodyText = rendered.bodyText;
+      bodyHtml = rendered.bodyHtml;
+    } catch (templateError) {
+      // Template doesn't exist - create simple email
+      console.warn(`[Notifications] Template not found, using fallback email`);
+      subject = message 
+        ? `New Message from ${templateData.caller_name} - ${business.name}`
+        : `Call Summary - ${business.name}`;
+      
+      bodyText = message
+        ? `New message received:\n\nCaller: ${templateData.caller_name}\nPhone: ${templateData.caller_phone}\n${templateData.caller_email ? `Email: ${templateData.caller_email}\n` : ''}Message: ${templateData.message_text}\n\nCall Summary: ${templateData.call_summary}`
+        : `Call received from ${templateData.caller_name} (${templateData.caller_phone})\n\nSummary: ${templateData.call_summary}`;
+      
+      bodyHtml = message
+        ? `<h2>New Message Received</h2><p><strong>Caller:</strong> ${templateData.caller_name}<br><strong>Phone:</strong> ${templateData.caller_phone}${templateData.caller_email ? `<br><strong>Email:</strong> ${templateData.caller_email}` : ''}</p><p><strong>Message:</strong> ${templateData.message_text}</p><p><strong>Call Summary:</strong> ${templateData.call_summary}</p>`
+        : `<h2>Call Summary</h2><p><strong>Caller:</strong> ${templateData.caller_name}<br><strong>Phone:</strong> ${templateData.caller_phone}</p><p><strong>Summary:</strong> ${templateData.call_summary}</p>`;
+    }
 
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    const displayName = `Tavari for ${business.name}`;
+    
+    console.log(`[Notifications] Sending call summary email to ${business.email}`);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
+    console.log(`[Notifications] ✅ Call summary email sent successfully`);
   } catch (error) {
     console.error(`[Notifications] Error sending call summary email:`, error);
     // Don't throw - email failures shouldn't break the call flow
@@ -149,7 +181,7 @@ export async function sendMinutesAlmostUsedNotification(business, minutesUsed, m
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate("minutes_almost_used", templateData);
     const displayName = `Tavari for ${business.name}`;
 
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending minutes almost used notification:`, error);
   }
@@ -174,7 +206,7 @@ export async function sendMinutesFullyUsedNotification(business, minutesTotal, r
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate("minutes_fully_used", templateData);
     const displayName = `Tavari for ${business.name}`;
 
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending minutes fully used notification:`, error);
   }
@@ -199,7 +231,7 @@ export async function sendOverageChargesNotification(business, overageMinutes, o
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate("overage_charges", templateData);
     const displayName = `Tavari for ${business.name}`;
 
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending overage charges notification:`, error);
   }
@@ -233,7 +265,7 @@ export async function sendAIDisabledNotification(business, reason, details = {})
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate(templateKey, templateData);
     const displayName = `Tavari for ${business.name}`;
 
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending AI disabled notification:`, error);
   }
@@ -252,7 +284,7 @@ export async function sendAIResumedNotification(business, minutesTotal, resetDat
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate("ai_resumed", templateData);
     const displayName = `Tavari for ${business.name}`;
 
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending AI resumed notification:`, error);
   }
@@ -278,7 +310,7 @@ export async function sendInvoiceEmail(business, invoice, pdfBuffer) {
 
     // TODO: Add PDF attachment support to SES
     // For now, send email with link to download PDF
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName);
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending invoice email:`, error);
     throw error;
@@ -302,7 +334,7 @@ export async function sendSupportTicketNotification(ticket, business) {
 
     // Send to Tavari support email
     const supportEmail = process.env.SUPPORT_EMAIL || "support@tavari.com";
-    await sendEmail(supportEmail, subject, bodyText, bodyHtml);
+    await sendEmail(supportEmail, subject, bodyText, bodyHtml, "Tavari Support", business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending support ticket notification:`, error);
   }
