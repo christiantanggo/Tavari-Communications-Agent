@@ -112,9 +112,10 @@ app.use(errorHandler);
 
 // Start server
 const server = app.listen(PORT, () => {
-  console.log(`✅ Tavari server running on port ${PORT}`);
+  console.log(`✅ Tavari server running on port ${PORT} [VAPI VERSION]`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
   console.log(`   Readiness check: http://localhost:${PORT}/ready`);
+  console.log(`   VAPI Webhook: http://localhost:${PORT}/api/vapi/webhook`);
 });
 
 // Graceful shutdown
