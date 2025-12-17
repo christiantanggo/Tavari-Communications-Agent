@@ -137,7 +137,19 @@ export async function checkMinutesAvailable(businessId, callDurationMinutes = 0)
  * Record call usage
  */
 export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
-  console.log(`[Usage] Recording call usage: businessId=${businessId}, callSessionId=${callSessionId}, minutes=${minutesUsed}`);
+  console.log(`[Usage] ========== RECORD CALL USAGE START ==========`);
+  console.log(`[Usage] businessId: ${businessId}`);
+  console.log(`[Usage] callSessionId: ${callSessionId}`);
+  console.log(`[Usage] minutesUsed: ${minutesUsed} (type: ${typeof minutesUsed})`);
+  
+  // Ensure minutesUsed is a number
+  const minutes = typeof minutesUsed === 'number' ? minutesUsed : parseFloat(minutesUsed) || 0;
+  console.log(`[Usage] Normalized minutes: ${minutes}`);
+  
+  if (minutes <= 0) {
+    console.warn(`[Usage] ⚠️ Minutes is 0 or negative, skipping usage record`);
+    return;
+  }
   
   const business = await Business.findById(businessId);
   if (!business) {
@@ -160,19 +172,26 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
 
   // Record usage
   try {
-    const created = await UsageMinutes.create({
+    const usageData = {
       business_id: businessId,
       call_session_id: callSessionId,
-      minutes_used: minutesUsed,
+      minutes_used: minutes,
       date: now.toISOString().split("T")[0],
       month: now.getMonth() + 1,
       year: now.getFullYear(),
       billing_cycle_start: billingCycle.start,
       billing_cycle_end: billingCycle.end,
-    });
-    console.log(`[Usage] ✅ Usage record created:`, created);
+    };
+    console.log(`[Usage] Creating usage record with data:`, JSON.stringify(usageData, null, 2));
+    
+    const created = await UsageMinutes.create(usageData);
+    console.log(`[Usage] ✅ Usage record created successfully:`, JSON.stringify(created, null, 2));
+    console.log(`[Usage] ========== RECORD CALL USAGE SUCCESS ==========`);
   } catch (error) {
-    console.error(`[Usage] ❌ Error creating usage record:`, error);
+    console.error(`[Usage] ========== RECORD CALL USAGE ERROR ==========`);
+    console.error(`[Usage] Error creating usage record:`, error);
+    console.error(`[Usage] Error message:`, error.message);
+    console.error(`[Usage] Error stack:`, error.stack);
     throw error;
   }
 
@@ -191,22 +210,37 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
  * Get current billing cycle usage
  */
 export async function getCurrentCycleUsage(businessId, cycleStart, cycleEnd) {
+  console.log(`[Usage] ========== GET CURRENT CYCLE USAGE START ==========`);
+  console.log(`[Usage] businessId: ${businessId}`);
+  console.log(`[Usage] cycleStart: ${cycleStart}`);
+  console.log(`[Usage] cycleEnd: ${cycleEnd}`);
+  
   // Use the model method which has proper fallback handling
   try {
     const usage = await UsageMinutes.getCurrentCycleUsage(businessId, cycleStart, cycleEnd);
-    console.log(`[Usage] Current cycle usage for business ${businessId}:`, usage);
-    return {
+    console.log(`[Usage] Current cycle usage for business ${businessId}:`, JSON.stringify(usage, null, 2));
+    const result = {
       totalMinutes: usage.totalMinutes || 0,
       overageMinutes: usage.overageMinutes || 0,
       thresholdNotificationSent: false, // TODO: Track in database
       minutesExhaustedNotificationSent: false, // TODO: Track in database
     };
+    console.log(`[Usage] Returning usage result:`, JSON.stringify(result, null, 2));
+    console.log(`[Usage] ========== GET CURRENT CYCLE USAGE SUCCESS ==========`);
+    return result;
   } catch (error) {
+    console.error("[Usage] ========== GET CURRENT CYCLE USAGE ERROR ==========");
     console.error("[Usage] Error getting usage:", error);
+    console.error("[Usage] Error message:", error.message);
+    console.error("[Usage] Error stack:", error.stack);
+    
     // Fallback: try date-based query
     try {
+      console.log("[Usage] Attempting fallback date-based query...");
       const cycleStartStr = cycleStart instanceof Date ? cycleStart.toISOString().split("T")[0] : cycleStart;
       const cycleEndStr = cycleEnd instanceof Date ? cycleEnd.toISOString().split("T")[0] : cycleEnd;
+      
+      console.log(`[Usage] Querying usage_minutes table for date range: ${cycleStartStr} to ${cycleEndStr}`);
       
       const { data, error: dateError } = await supabaseClient
         .from("usage_minutes")
@@ -220,7 +254,14 @@ export async function getCurrentCycleUsage(businessId, cycleStart, cycleEnd) {
         return { totalMinutes: 0, overageMinutes: 0 };
       }
 
-      const totalMinutes = data?.reduce((sum, row) => sum + parseFloat(row.minutes_used || 0), 0) || 0;
+      console.log(`[Usage] Found ${data?.length || 0} usage records`);
+      const totalMinutes = data?.reduce((sum, row) => {
+        const minutes = parseFloat(row.minutes_used || 0);
+        console.log(`[Usage] Adding ${minutes} minutes from record`);
+        return sum + minutes;
+      }, 0) || 0;
+      
+      console.log(`[Usage] Total minutes from query: ${totalMinutes}`);
       
       const business = await Business.findById(businessId);
       const planLimit = business?.usage_limit_minutes || 0;
@@ -228,12 +269,14 @@ export async function getCurrentCycleUsage(businessId, cycleStart, cycleEnd) {
       const totalAvailable = planLimit + bonusMinutes;
       const overageMinutes = Math.max(0, totalMinutes - totalAvailable);
 
-      return {
+      const result = {
         totalMinutes,
         overageMinutes,
         thresholdNotificationSent: false,
         minutesExhaustedNotificationSent: false,
       };
+      console.log(`[Usage] Fallback query result:`, JSON.stringify(result, null, 2));
+      return result;
     } catch (fallbackError) {
       console.error("[Usage] Fallback query failed:", fallbackError);
       return { totalMinutes: 0, overageMinutes: 0 };
