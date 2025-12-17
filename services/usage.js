@@ -4,6 +4,7 @@
 import { Business } from "../models/Business.js";
 import { UsageMinutes } from "../models/UsageMinutes.js";
 import { calculateBillingCycle } from "./billing.js";
+import { supabaseClient } from "../config/database.js";
 import {
   sendMinutesAlmostUsedNotification,
   sendMinutesFullyUsedNotification,
@@ -136,6 +137,8 @@ export async function checkMinutesAvailable(businessId, callDurationMinutes = 0)
  * Record call usage
  */
 export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
+  console.log(`[Usage] Recording call usage: businessId=${businessId}, callSessionId=${callSessionId}, minutes=${minutesUsed}`);
+  
   const business = await Business.findById(businessId);
   if (!business) {
     throw new Error("Business not found");
@@ -144,6 +147,8 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
   const now = new Date();
   const billingCycle = calculateBillingCycle(business);
 
+  console.log(`[Usage] Billing cycle: ${billingCycle.start.toISOString()} to ${billingCycle.end.toISOString()}`);
+
   // Determine if this is overage
   const usage = await getCurrentCycleUsage(businessId, billingCycle.start, billingCycle.end);
   const planLimit = business.usage_limit_minutes || 0;
@@ -151,23 +156,32 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
   const totalAvailable = planLimit + bonusMinutes;
   const isOverage = usage.totalMinutes >= totalAvailable;
 
+  console.log(`[Usage] Current usage: ${usage.totalMinutes} / ${totalAvailable}, isOverage: ${isOverage}`);
+
   // Record usage
-  await UsageMinutes.create({
-    business_id: businessId,
-    call_session_id: callSessionId,
-    minutes_used: minutesUsed,
-    date: now.toISOString().split("T")[0],
-    month: now.getMonth() + 1,
-    year: now.getFullYear(),
-    billing_cycle_start: billingCycle.start,
-    billing_cycle_end: billingCycle.end,
-  });
+  try {
+    const created = await UsageMinutes.create({
+      business_id: businessId,
+      call_session_id: callSessionId,
+      minutes_used: minutesUsed,
+      date: now.toISOString().split("T")[0],
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+      billing_cycle_start: billingCycle.start,
+      billing_cycle_end: billingCycle.end,
+    });
+    console.log(`[Usage] ✅ Usage record created:`, created);
+  } catch (error) {
+    console.error(`[Usage] ❌ Error creating usage record:`, error);
+    throw error;
+  }
 
   // If overage, calculate and record overage charges
   if (isOverage && business.overage_billing_enabled) {
     const overageRate = getOverageRate(business);
     const overageCharge = minutesUsed * overageRate;
     
+    console.log(`[Usage] Overage charge: ${overageCharge} for ${minutesUsed} minutes`);
     // Record overage in billing service
     // This will be handled by billing service
   }
@@ -177,33 +191,54 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
  * Get current billing cycle usage
  */
 export async function getCurrentCycleUsage(businessId, cycleStart, cycleEnd) {
-  const { data, error } = await supabaseClient
-    .from("usage_minutes")
-    .select("minutes_used")
-    .eq("business_id", businessId)
-    .gte("billing_cycle_start", cycleStart.toISOString().split("T")[0])
-    .lte("billing_cycle_end", cycleEnd.toISOString().split("T")[0]);
+  // Use the model method which has proper fallback handling
+  try {
+    const usage = await UsageMinutes.getCurrentCycleUsage(businessId, cycleStart, cycleEnd);
+    console.log(`[Usage] Current cycle usage for business ${businessId}:`, usage);
+    return {
+      totalMinutes: usage.totalMinutes || 0,
+      overageMinutes: usage.overageMinutes || 0,
+      thresholdNotificationSent: false, // TODO: Track in database
+      minutesExhaustedNotificationSent: false, // TODO: Track in database
+    };
+  } catch (error) {
+    console.error("[Usage] Error getting usage:", error);
+    // Fallback: try date-based query
+    try {
+      const cycleStartStr = cycleStart instanceof Date ? cycleStart.toISOString().split("T")[0] : cycleStart;
+      const cycleEndStr = cycleEnd instanceof Date ? cycleEnd.toISOString().split("T")[0] : cycleEnd;
+      
+      const { data, error: dateError } = await supabaseClient
+        .from("usage_minutes")
+        .select("minutes_used")
+        .eq("business_id", businessId)
+        .gte("date", cycleStartStr)
+        .lte("date", cycleEndStr);
 
-  if (error) {
-    console.error("Error getting usage:", error);
-    return { totalMinutes: 0, overageMinutes: 0 };
+      if (dateError) {
+        console.error("[Usage] Date-based query also failed:", dateError);
+        return { totalMinutes: 0, overageMinutes: 0 };
+      }
+
+      const totalMinutes = data?.reduce((sum, row) => sum + parseFloat(row.minutes_used || 0), 0) || 0;
+      
+      const business = await Business.findById(businessId);
+      const planLimit = business?.usage_limit_minutes || 0;
+      const bonusMinutes = business?.bonus_minutes || 0;
+      const totalAvailable = planLimit + bonusMinutes;
+      const overageMinutes = Math.max(0, totalMinutes - totalAvailable);
+
+      return {
+        totalMinutes,
+        overageMinutes,
+        thresholdNotificationSent: false,
+        minutesExhaustedNotificationSent: false,
+      };
+    } catch (fallbackError) {
+      console.error("[Usage] Fallback query failed:", fallbackError);
+      return { totalMinutes: 0, overageMinutes: 0 };
+    }
   }
-
-  const totalMinutes = data?.reduce((sum, row) => sum + parseFloat(row.minutes_used || 0), 0) || 0;
-  
-  // Calculate overage (minutes beyond plan limit)
-  const business = await Business.findById(businessId);
-  const planLimit = business?.usage_limit_minutes || 0;
-  const bonusMinutes = business?.bonus_minutes || 0;
-  const totalAvailable = planLimit + bonusMinutes;
-  const overageMinutes = Math.max(0, totalMinutes - totalAvailable);
-
-  return {
-    totalMinutes,
-    overageMinutes,
-    thresholdNotificationSent: false, // TODO: Track in database
-    minutesExhaustedNotificationSent: false, // TODO: Track in database
-  };
 }
 
 /**

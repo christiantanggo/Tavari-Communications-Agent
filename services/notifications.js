@@ -4,7 +4,6 @@
 import axios from "axios";
 import { renderEmailTemplate } from "./emailTemplates.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
-import { supabaseClient } from "../config/database.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -308,9 +307,18 @@ export async function sendInvoiceEmail(business, invoice, pdfBuffer) {
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate("invoice", templateData);
     const displayName = `Tavari for ${business.name}`;
 
-    // TODO: Add PDF attachment support to SES
-    // For now, send email with link to download PDF
-    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
+    // Convert PDF buffer to base64
+    let attachments = null;
+    if (pdfBuffer) {
+      const base64PDF = pdfBuffer.toString('base64');
+      attachments = [{
+        filename: `Invoice-${invoice.invoice_number}.pdf`,
+        content: base64PDF,
+        contentType: 'application/pdf'
+      }];
+    }
+
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id, attachments);
   } catch (error) {
     console.error(`[Notifications] Error sending invoice email:`, error);
     throw error;

@@ -26,9 +26,11 @@ export const login = async (email, password) => {
 
 export const signup = async (data) => {
   const response = await authAPI.signup(data);
-  const { token } = response.data;
-  setToken(token);
-  return response.data;
+  const { token, activation } = response.data;
+  if (token) {
+    setToken(token);
+  }
+  return { ...response.data, activation }; // Include activation data in response
 };
 
 export const logout = async () => {

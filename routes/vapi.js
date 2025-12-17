@@ -271,7 +271,14 @@ async function handleCallEnd(event) {
   });
 
   // Record usage (minutes)
-  await recordCallUsage(business.id, callSession.id, durationMinutes);
+  try {
+    console.log(`[VAPI Webhook] Recording ${durationMinutes} minutes for business ${business.id}, call session ${callSession.id}`);
+    await recordCallUsage(business.id, callSession.id, durationMinutes);
+    console.log(`[VAPI Webhook] ✅ Usage recorded successfully`);
+  } catch (error) {
+    console.error(`[VAPI Webhook] ❌ Error recording usage:`, error);
+    // Don't throw - we still want to process the rest of the call end event
+  }
 
   // Extract message if callback/message intent OR if summary/transcript indicates a message was taken
   // Be more lenient - if transcript mentions taking a message, callback, or contact info, create message

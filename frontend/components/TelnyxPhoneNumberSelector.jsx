@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { telnyxPhoneNumbersAPI } from '@/lib/api';
+import { businessAPI } from '@/lib/api';
 
 const countries = [
   { code: 'US', name: 'United States' },
@@ -17,14 +17,14 @@ const phoneTypes = [
   { value: 'mobile', label: 'Mobile' },
 ];
 
-export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, countryCode: initialCountryCode = 'US' }) {
+export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, countryCode: initialCountryCode = 'US', areaCode: initialAreaCode = null }) {
   const [countryCode, setCountryCode] = useState(initialCountryCode);
   const [phoneType, setPhoneType] = useState('local');
   const [phoneNumberSearch, setPhoneNumberSearch] = useState('');
   const [searchMode, setSearchMode] = useState('browse'); // 'browse' or 'search'
   const [locality, setLocality] = useState(''); // City/Region
   const [administrativeArea, setAdministrativeArea] = useState(''); // State/Province
-  const [areaCode, setAreaCode] = useState(''); // Area Code
+  const [areaCode, setAreaCode] = useState(initialAreaCode || ''); // Area Code (pre-filled from business phone if provided)
   const [availableNumbers, setAvailableNumbers] = useState([]);
   const [filteredNumbers, setFilteredNumbers] = useState([]);
   const [sortBy, setSortBy] = useState('none'); // 'none', 'price'
@@ -37,7 +37,7 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
     if (searchMode === 'browse') {
       searchNumbers();
     }
-  }, [countryCode, phoneType, searchMode]);
+  }, [countryCode, phoneType, searchMode, areaCode]);
 
   // Filter and sort numbers when they change or sort option changes
   useEffect(() => {
@@ -89,7 +89,7 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
         }
       }
       
-      const response = await telnyxPhoneNumbersAPI.search(searchParams);
+      const response = await businessAPI.searchPhoneNumbers(searchParams);
       if (response.data.numbers.length === 0) {
         if (searchMode === 'search') {
           setError(`No phone numbers found matching "${phoneNumberSearch}". Try a different number or browse available numbers.`);

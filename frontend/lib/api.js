@@ -86,6 +86,35 @@ export const billingAPI = {
   createCheckout: (priceId) => api.post('/billing/checkout', { priceId }),
 };
 
+// Invoices API
+export const invoicesAPI = {
+  list: () => api.get('/invoices'),
+  get: (id) => api.get(`/invoices/${id}`),
+  downloadPDF: (id) => api.get(`/invoices/${id}/pdf`, { responseType: 'blob' }),
+};
+
+// Support API
+export const supportAPI = {
+  createTicket: (data) => api.post('/support/tickets', data),
+  getTickets: () => api.get('/support/tickets'),
+};
+
+// Account API
+export const accountAPI = {
+  cancel: (data) => api.post('/account/cancel', data),
+  delete: (data) => api.post('/account/delete', data),
+  export: () => api.get('/account/export'),
+};
+
+// Business API
+export const businessAPI = {
+  updateSettings: (data) => api.put('/business/settings', data),
+  retryActivation: () => api.post('/business/retry-activation'),
+  searchPhoneNumbers: (params) => api.get('/business/phone-numbers/search', { params }),
+  provisionPhoneNumber: (data) => api.post('/business/phone-numbers/provision', data),
+  linkAssistant: () => api.post('/business/link-assistant'),
+};
+
 // Phone Numbers API (Voximplant - legacy)
 export const phoneNumbersAPI = {
   search: (params) => api.get('/phone-numbers/search', { params }),
