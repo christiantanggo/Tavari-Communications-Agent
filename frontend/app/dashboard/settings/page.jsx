@@ -125,20 +125,21 @@ function SettingsPage() {
   const handleSendTestSMS = async () => {
     console.log('[Test SMS UI] ========== TEST SMS BUTTON CLICKED ==========');
     console.log('[Test SMS UI] User business:', user?.business);
+    console.log('[Test SMS UI] Settings:', settings);
     
-    if (!user?.business?.sms_enabled) {
-      console.error('[Test SMS UI] ❌ SMS not enabled');
+    if (!settings.sms_enabled) {
+      console.error('[Test SMS UI] ❌ SMS not enabled in settings');
       alert('SMS is not enabled. Please enable SMS notifications first.');
       return;
     }
 
-    if (!user?.business?.sms_notification_number) {
-      console.error('[Test SMS UI] ❌ No SMS number configured');
+    if (!settings.sms_notification_number) {
+      console.error('[Test SMS UI] ❌ No SMS number configured in settings');
       alert('SMS notification number is not configured. Please add a phone number first.');
       return;
     }
 
-    console.log('[Test SMS UI] SMS number:', user.business.sms_notification_number);
+    console.log('[Test SMS UI] SMS number:', settings.sms_notification_number);
     setSendingTestSMS(true);
     
     try {
@@ -148,7 +149,7 @@ function SettingsPage() {
       
       if (response.data?.success) {
         console.log('[Test SMS UI] ✅ Success response from API');
-        alert(`Test SMS sent successfully to ${user.business.sms_notification_number}! Check your phone.`);
+        alert(`Test SMS sent successfully to ${settings.sms_notification_number}! Check your phone.`);
       } else {
         console.error('[Test SMS UI] ❌ API returned success=false');
         alert('Failed to send test SMS. Please try again.');
