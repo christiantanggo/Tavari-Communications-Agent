@@ -92,6 +92,7 @@ import supportRoutes from "./routes/support.js";
 import invoicesRoutes from "./routes/invoices.js";
 import accountRoutes from "./routes/account.js";
 import businessRoutes from "./routes/business.js";
+import callsRoutes from "./routes/calls.js";
 
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
@@ -112,6 +113,7 @@ app.use("/api/support", supportRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/account", accountRoutes);
 app.use("/api/business", businessRoutes);
+app.use("/api/calls", callsRoutes);
 
 // Error handler
 import { errorHandler } from "./middleware/errorHandler.js";

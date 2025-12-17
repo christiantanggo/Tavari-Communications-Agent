@@ -426,6 +426,14 @@ function DashboardContent() {
           </Link>
 
           <Link
+            href="/dashboard/faqs"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
+          >
+            <h3 className="text-lg font-semibold mb-2 text-gray-900">FAQs</h3>
+            <p className="text-gray-600 text-sm">Add and edit frequently asked questions</p>
+          </Link>
+
+          <Link
             href="/dashboard/calls"
             className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
           >
@@ -439,14 +447,6 @@ function DashboardContent() {
           >
             <h3 className="text-lg font-semibold mb-2 text-gray-900">Messages</h3>
             <p className="text-gray-600 text-sm">View messages left by callers</p>
-          </Link>
-
-          <Link
-            href="/dashboard/billing"
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
-          >
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">Billing</h3>
-            <p className="text-gray-600 text-sm">View usage and manage subscription</p>
           </Link>
         </div>
       </main>
