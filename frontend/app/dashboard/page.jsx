@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
-import { authAPI, usageAPI, agentsAPI } from '@/lib/api';
+import { authAPI, usageAPI, callsAPI, messagesAPI } from '@/lib/api';
 import { logout } from '@/lib/auth';
 import Link from 'next/link';
 
@@ -13,37 +13,42 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState(null);
   const [usage, setUsage] = useState(null);
-  const [agent, setAgent] = useState(null);
+  const [calls, setCalls] = useState([]);
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showSmsBanner, setShowSmsBanner] = useState(false);
   const prevPathnameRef = useRef(pathname);
 
   const loadData = async () => {
     try {
       console.log('[Dashboard] Loading data...');
-      const [userRes, usageRes] = await Promise.all([
+      const [userRes, usageRes, callsRes, messagesRes] = await Promise.all([
         authAPI.getMe(),
         usageAPI.getStatus().catch(() => ({ data: null })),
+        callsAPI.list({ limit: 10 }).catch(() => ({ data: { calls: [] } })),
+        messagesAPI.list({ limit: 10 }).catch(() => ({ data: { messages: [] } })),
       ]);
       
       console.log('[Dashboard] User data:', userRes.data);
-      console.log('[Dashboard] Agent data from /me:', userRes.data?.agent);
-      
       setUser(userRes.data);
       setUsage(usageRes.data);
-      
-      // Use agent from /me endpoint (now includes agent data)
-      if (userRes.data?.agent) {
-        console.log('[Dashboard] Setting agent from /me:', userRes.data.agent);
-        setAgent(userRes.data.agent);
-      } else {
-        // Fallback: fetch agent separately if not in /me response
-        console.log('[Dashboard] Fetching agent separately...');
-        const agentRes = await agentsAPI.get().catch(() => ({ data: null }));
-        console.log('[Dashboard] Agent from separate fetch:', agentRes.data);
-        setAgent(agentRes.data?.agent || { faqs: [] });
+      setCalls(callsRes.data?.calls || []);
+      setMessages(messagesRes.data?.messages || []);
+
+      // Check if SMS banner should be shown (checklist complete but SMS not enabled)
+      const business = userRes.data?.business;
+      if (business) {
+        const checklistComplete = 
+          business.vapi_phone_number &&
+          business.email_ai_answered !== false &&
+          business.ai_enabled;
+        
+        if (checklistComplete && !business.sms_enabled) {
+          // Check if user has dismissed the banner
+          const dismissed = localStorage.getItem('sms_banner_dismissed');
+          setShowSmsBanner(!dismissed);
+        }
       }
-      
-      // Don't redirect to setup wizard - show checklist on dashboard instead
     } catch (error) {
       console.error('[Dashboard] Failed to load dashboard data:', error);
     } finally {
@@ -55,20 +60,17 @@ function DashboardContent() {
     loadData();
   }, []);
 
-  // Reload data whenever pathname changes to /dashboard (user navigated here)
-  // Also reload when search params change (refresh parameter from settings/faqs pages)
+  // Reload data whenever pathname changes to /dashboard
   useEffect(() => {
     if (pathname === '/dashboard') {
-      // Always reload when on dashboard page (handles navigation from other pages)
       loadData();
-      // Clean up refresh parameter from URL if present
       if (searchParams.get('refresh')) {
         router.replace('/dashboard', { scroll: false });
       }
     }
   }, [pathname, searchParams, router]);
 
-  // Reload data when page becomes visible (user switches back to tab or window)
+  // Reload data when page becomes visible
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -80,7 +82,6 @@ function DashboardContent() {
       loadData();
     };
 
-    // Reload when window gets focus (user switches back to tab)
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -90,12 +91,41 @@ function DashboardContent() {
     };
   }, []);
 
-  const copyPhoneNumber = () => {
-    const phoneNumber = user?.business?.vapi_phone_number;
-    if (phoneNumber) {
-      navigator.clipboard.writeText(phoneNumber);
-      alert('Phone number copied to clipboard!');
-    }
+  // Check if checklist should be shown
+  const shouldShowChecklist = () => {
+    if (!user?.business) return true;
+    const business = user.business;
+    
+    // Checklist is complete when everything except SMS is done
+    const isComplete = 
+      business.vapi_phone_number &&
+      business.email_ai_answered !== false &&
+      business.ai_enabled;
+    
+    return !isComplete;
+  };
+
+  // Count AI handled calls (completed calls without messages)
+  const aiHandledCalls = calls.filter(
+    call => call.status === 'completed' && !call.message_taken
+  ).length;
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDuration = (seconds) => {
+    if (!seconds) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const dismissSmsBanner = () => {
+    localStorage.setItem('sms_banner_dismissed', 'true');
+    setShowSmsBanner(false);
   };
 
   if (loading) {
@@ -105,6 +135,9 @@ function DashboardContent() {
       </div>
     );
   }
+
+  const business = user?.business;
+  const showChecklist = shouldShowChecklist();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -122,171 +155,147 @@ function DashboardContent() {
         </div>
       </nav>
 
-      <main className="container mx-auto px-4 py-8 max-w-6xl">
+      <main className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome back!</h2>
           <p className="text-gray-600">
-            {user?.business?.name || 'Business'} • {user?.user?.email}
+            {business?.name || 'Business'} • {user?.user?.email}
           </p>
         </div>
 
-        {/* Setup Checklist */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Setup Checklist</h2>
-          <div className="space-y-3">
-            {/* Phone Number */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {user?.business?.vapi_phone_number ? (
-                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                <span className={`text-sm ${user?.business?.vapi_phone_number ? 'text-gray-900' : 'text-gray-500'}`}>
-                  Phone number provisioned
-                </span>
+        {/* SMS Activation Banner */}
+        {showSmsBanner && !showChecklist && (
+          <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg relative">
+            <button
+              onClick={dismissSmsBanner}
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-blue-900 mb-1">Activate SMS for important messages</h3>
+                <p className="text-sm text-blue-700">Get instant SMS alerts when callers request urgent callbacks</p>
               </div>
-              {!user?.business?.vapi_phone_number && (
-                <Link href="/dashboard/phone-number" className="text-sm text-blue-600 hover:underline">
-                  Select phone number →
-                </Link>
-              )}
-            </div>
-
-            {/* FAQs */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {agent?.faqs && agent.faqs.length > 0 ? (
-                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                <span className={`text-sm ${agent?.faqs && agent.faqs.length > 0 ? 'text-gray-900' : 'text-gray-500'}`}>
-                  FAQs configured ({agent?.faqs?.length || 0} added)
-                </span>
-              </div>
-              {(!agent?.faqs || agent.faqs.length === 0) && (
-                <Link href="/dashboard/faqs" className="text-sm text-blue-600 hover:underline">
-                  Add FAQs →
-                </Link>
-              )}
-            </div>
-
-            {/* Email Notifications */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {user?.business?.email_ai_answered !== false ? (
-                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                <span className={`text-sm ${user?.business?.email_ai_answered !== false ? 'text-gray-900' : 'text-gray-500'}`}>
-                  Email notifications enabled
-                </span>
-              </div>
-              {user?.business?.email_ai_answered === false && (
-                <Link href="/dashboard/settings" className="text-sm text-blue-600 hover:underline">
-                  Enable →
-                </Link>
-              )}
-            </div>
-
-            {/* SMS Notifications */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {user?.business?.sms_enabled ? (
-                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                <span className={`text-sm ${user?.business?.sms_enabled ? 'text-gray-900' : 'text-gray-500'}`}>
-                  SMS notifications {user?.business?.sms_enabled ? 'enabled' : '(optional)'}
-                </span>
-              </div>
-              {!user?.business?.sms_enabled && (
-                <Link href="/dashboard/settings" className="text-sm text-blue-600 hover:underline">
-                  Set up →
-                </Link>
-              )}
-            </div>
-
-            {/* AI Agent Active */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {user?.business?.ai_enabled ? (
-                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                <span className={`text-sm ${user?.business?.ai_enabled ? 'text-gray-900' : 'text-gray-500'}`}>
-                  AI Phone Agent active
-                </span>
-              </div>
-              {!user?.business?.ai_enabled && (
-                <Link href="/dashboard/settings" className="text-sm text-blue-600 hover:underline">
-                  Enable →
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Tavari Phone Number - Prominently Displayed */}
-        {user?.business?.vapi_phone_number && (
-          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Forward calls to</h3>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <span className="text-3xl font-bold text-blue-600">{user.business.vapi_phone_number}</span>
               <button
-                onClick={copyPhoneNumber}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                onClick={() => router.push('/dashboard/settings')}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
               >
-                Copy
+                Activate SMS
               </button>
-            </div>
-            <p className="text-sm text-gray-600 mt-3">
-              Forward calls from <strong>{user.business.public_phone_number || 'your public number'}</strong> to this number after {user.business.call_forward_rings || 4} rings.
-            </p>
-            <div className="mt-3 flex items-center gap-2">
-              <span className={`inline-block w-3 h-3 rounded-full ${user.business.ai_enabled ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-              <span className="text-sm text-gray-700">
-                AI Phone Agent: {user.business.ai_enabled ? 'Active' : 'Inactive'}
-              </span>
             </div>
           </div>
         )}
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        {/* Setup Checklist */}
+        {showChecklist && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Setup Checklist</h2>
+            <div className="space-y-3">
+              {/* Phone Number */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {business?.vapi_phone_number ? (
+                    <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  <span className={`text-sm ${business?.vapi_phone_number ? 'text-gray-900' : 'text-gray-500'}`}>
+                    Phone number provisioned
+                  </span>
+                </div>
+                {!business?.vapi_phone_number && (
+                  <Link href="/dashboard/settings" className="text-sm text-blue-600 hover:underline">
+                    Select phone number →
+                  </Link>
+                )}
+              </div>
+
+              {/* Email Notifications */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {business?.email_ai_answered !== false ? (
+                    <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  <span className={`text-sm ${business?.email_ai_answered !== false ? 'text-gray-900' : 'text-gray-500'}`}>
+                    Email notifications enabled
+                  </span>
+                </div>
+                {business?.email_ai_answered === false && (
+                  <Link href="/dashboard/settings" className="text-sm text-blue-600 hover:underline">
+                    Enable →
+                  </Link>
+                )}
+              </div>
+
+              {/* AI Agent Active */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {business?.ai_enabled ? (
+                    <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  <span className={`text-sm ${business?.ai_enabled ? 'text-gray-900' : 'text-gray-500'}`}>
+                    AI Phone Agent active
+                  </span>
+                </div>
+                {!business?.ai_enabled && (
+                  <Link href="/dashboard/settings" className="text-sm text-blue-600 hover:underline">
+                    Enable →
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          {/* Your AI Agent Number */}
+          {business?.vapi_phone_number && (
+            <button
+              onClick={() => router.push('/dashboard/settings')}
+              className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+                <span className={`inline-block w-3 h-3 rounded-full ${business?.ai_enabled ? 'bg-green-400' : 'bg-gray-400'}`}></span>
+              </div>
+              <h3 className="text-white font-semibold text-lg mb-1">Your AI Agent Number</h3>
+              <p className="text-blue-100 text-sm mb-2">{business.vapi_phone_number}</p>
+              <p className="text-blue-200 text-xs">Click to manage settings</p>
+            </button>
+          )}
+
+          {/* Minutes Used */}
           {usage && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-sm font-semibold text-gray-600 mb-2">Minutes Used This Month</h3>
-              <p className="text-2xl font-bold text-gray-900">
-                {usage.minutes_used?.toFixed(0) || 0} / {usage.minutes_total || 0}
+            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
+              <h3 className="text-sm font-semibold text-gray-600 mb-2">Minutes Used</h3>
+              <p className="text-3xl font-bold text-gray-900 mb-2">
+                {Math.round(usage.minutes_used || 0)} / {usage.minutes_total || 0}
               </p>
-              <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
                 <div
-                  className={`h-2 rounded-full ${
+                  className={`h-2.5 rounded-full transition-all ${
                     usage.usage_percent >= 100
                       ? 'bg-red-500'
                       : usage.usage_percent >= 80
@@ -296,26 +305,113 @@ function DashboardContent() {
                   style={{ width: `${Math.min(usage.usage_percent || 0, 100)}%` }}
                 />
               </div>
-              {usage.usage_percent >= 100 && (
-                <p className="text-xs text-red-600 mt-1">Usage limit reached</p>
-              )}
+              <p className="text-xs text-gray-500">
+                {usage.minutes_remaining || 0} minutes remaining
+              </p>
             </div>
           )}
 
-          <div className="bg-white rounded-lg shadow p-6">
+          {/* AI Handled Calls */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500">
+            <h3 className="text-sm font-semibold text-gray-600 mb-2">AI Handled Calls</h3>
+            <p className="text-3xl font-bold text-gray-900 mb-1">{aiHandledCalls}</p>
+            <p className="text-xs text-gray-500">Calls handled completely by AI</p>
+          </div>
+
+          {/* Recent Calls */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
             <h3 className="text-sm font-semibold text-gray-600 mb-2">Recent Calls</h3>
-            <p className="text-2xl font-bold text-gray-900">-</p>
-            <Link href="/dashboard/calls" className="text-sm text-blue-600 hover:underline mt-2 block">
+            <p className="text-3xl font-bold text-gray-900 mb-1">{calls.length}</p>
+            <Link href="/dashboard/calls" className="text-xs text-blue-600 hover:underline">
               View all →
             </Link>
           </div>
+        </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-sm font-semibold text-gray-600 mb-2">New Messages</h3>
-            <p className="text-2xl font-bold text-gray-900">-</p>
-            <Link href="/dashboard/messages" className="text-sm text-blue-600 hover:underline mt-2 block">
-              View all →
-            </Link>
+        {/* Recent Calls and Messages */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          {/* Recent Calls */}
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Recent Calls</h3>
+              <Link href="/dashboard/calls" className="text-sm text-blue-600 hover:underline">
+                View all →
+              </Link>
+            </div>
+            {calls.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No calls yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {calls.slice(0, 5).map((call) => (
+                  <div key={call.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium text-gray-900">
+                          {call.caller_number || 'Unknown'}
+                        </span>
+                        {call.message_taken && (
+                          <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                            Message
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span>{formatDate(call.started_at)}</span>
+                        <span>•</span>
+                        <span>{formatDuration(call.duration_seconds)}</span>
+                      </div>
+                    </div>
+                    <Link
+                      href={`/dashboard/calls/${call.id}`}
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                    >
+                      View
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Messages */}
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Recent Messages</h3>
+              <Link href="/dashboard/messages" className="text-sm text-blue-600 hover:underline">
+                View all →
+              </Link>
+            </div>
+            {messages.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No messages yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {messages.slice(0, 5).map((message) => (
+                  <div
+                    key={message.id}
+                    className={`p-3 rounded-lg hover:bg-gray-50 transition ${
+                      !message.is_read ? 'bg-blue-50 border-l-4 border-blue-500' : 'bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-gray-900">
+                        {message.caller_name || 'Unknown Caller'}
+                      </span>
+                      {!message.is_read && (
+                        <span className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full">
+                          New
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mb-2">{formatDate(message.created_at)}</p>
+                    <p className="text-sm text-gray-700 line-clamp-2">{message.message_text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -323,7 +419,7 @@ function DashboardContent() {
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Link
             href="/dashboard/settings"
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
           >
             <h3 className="text-lg font-semibold mb-2 text-gray-900">Settings</h3>
             <p className="text-gray-600 text-sm">Manage your account and preferences</p>
@@ -331,7 +427,7 @@ function DashboardContent() {
 
           <Link
             href="/dashboard/calls"
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
           >
             <h3 className="text-lg font-semibold mb-2 text-gray-900">Call History</h3>
             <p className="text-gray-600 text-sm">View and manage your call sessions</p>
@@ -339,7 +435,7 @@ function DashboardContent() {
 
           <Link
             href="/dashboard/messages"
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
           >
             <h3 className="text-lg font-semibold mb-2 text-gray-900">Messages</h3>
             <p className="text-gray-600 text-sm">View messages left by callers</p>
@@ -347,7 +443,7 @@ function DashboardContent() {
 
           <Link
             href="/dashboard/billing"
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
           >
             <h3 className="text-lg font-semibold mb-2 text-gray-900">Billing</h3>
             <p className="text-gray-600 text-sm">View usage and manage subscription</p>
