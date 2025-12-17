@@ -214,6 +214,103 @@ export async function searchAvailablePhoneNumbers(countryCode = 'US', phoneType 
 }
 
 /**
+ * Find unassigned phone numbers in Telnyx (numbers not assigned to any business)
+ * @param {string} preferredAreaCode - Optional area code to prefer
+ * @returns {Promise<Array>} Array of unassigned phone number objects
+ */
+export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
+  try {
+    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+    const TELNYX_API_BASE_URL = process.env.TELNYX_API_BASE_URL || 'https://api.telnyx.com/v2';
+    
+    if (!TELNYX_API_KEY) {
+      console.warn('[VAPI] TELNYX_API_KEY not set, cannot find unassigned numbers');
+      return [];
+    }
+
+    const axios = (await import("axios")).default;
+    const { Business } = await import("../models/Business.js");
+    
+    console.log('[VAPI] Finding unassigned phone numbers in Telnyx...');
+    
+    // Get all phone numbers from Telnyx
+    const telnyxResponse = await axios.get(`${TELNYX_API_BASE_URL}/phone_numbers`, {
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+      },
+      params: {
+        'page[size]': 100, // Get up to 100 numbers
+      },
+    });
+    
+    const allTelnyxNumbers = telnyxResponse.data?.data || [];
+    console.log(`[VAPI] Found ${allTelnyxNumbers.length} phone numbers in Telnyx account`);
+    
+    // Get all phone numbers assigned to businesses in our database
+    const { data: businesses, error } = await supabaseClient
+      .from('businesses')
+      .select('vapi_phone_number')
+      .not('vapi_phone_number', 'is', null);
+    
+    if (error) {
+      console.warn('[VAPI] Error fetching assigned numbers from database:', error);
+      return [];
+    }
+    
+    const assignedNumbers = new Set(
+      (businesses || [])
+        .map(b => b.vapi_phone_number)
+        .filter(n => n)
+        .map(n => {
+          // Normalize phone numbers for comparison
+          let normalized = n.replace(/[^0-9+]/g, '');
+          if (!normalized.startsWith('+')) {
+            normalized = '+' + normalized;
+          }
+          return normalized;
+        })
+    );
+    
+    console.log(`[VAPI] Found ${assignedNumbers.size} phone numbers assigned to businesses`);
+    
+    // Find unassigned numbers
+    const unassignedNumbers = allTelnyxNumbers.filter(telnyxNum => {
+      const telnyxPhone = telnyxNum.phone_number || telnyxNum.number;
+      if (!telnyxPhone) return false;
+      
+      // Normalize for comparison
+      let normalized = telnyxPhone.replace(/[^0-9+]/g, '');
+      if (!normalized.startsWith('+')) {
+        normalized = '+' + normalized;
+      }
+      
+      return !assignedNumbers.has(normalized);
+    });
+    
+    console.log(`[VAPI] Found ${unassignedNumbers.length} unassigned phone numbers`);
+    
+    // If preferred area code is provided, prioritize numbers with that area code
+    if (preferredAreaCode && unassignedNumbers.length > 0) {
+      const cleanAreaCode = preferredAreaCode.replace(/\D/g, '');
+      const preferred = unassignedNumbers.filter(num => {
+        const phone = (num.phone_number || num.number || '').replace(/[^0-9]/g, '');
+        return phone.startsWith(cleanAreaCode) || phone.startsWith('1' + cleanAreaCode);
+      });
+      
+      if (preferred.length > 0) {
+        console.log(`[VAPI] Found ${preferred.length} unassigned numbers with preferred area code ${cleanAreaCode}`);
+        return preferred;
+      }
+    }
+    
+    return unassignedNumbers;
+  } catch (error) {
+    console.error('[VAPI] Error finding unassigned numbers:', error.message);
+    return [];
+  }
+}
+
+/**
  * Purchase a phone number from Telnyx
  * Uses the recommended /number_orders endpoint, with fallback to /phone_numbers
  * @param {string} phoneNumber - Phone number in E.164 format

@@ -232,12 +232,49 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
       assistant = assistantResponse.data;
     }
 
-    // Purchase the selected phone number from Telnyx first
-    const telnyxNumber = await purchaseTelnyxNumber(phoneNumber);
+    // Check for unassigned numbers first, then purchase if needed
+    let telnyxNumber;
+    let numberToUse = phoneNumber;
     
-    // Provision phone number to VAPI (this will use the purchased Telnyx number)
+    // Extract area code from business phone for preference
+    let preferredAreaCode = null;
+    if (business.public_phone_number) {
+      const { extractAreaCode } = await import("../utils/phoneFormatter.js");
+      preferredAreaCode = extractAreaCode(business.public_phone_number);
+    }
+    
+    // First, check if the selected number already exists in Telnyx (might be unassigned)
+    const { findUnassignedTelnyxNumbers, purchaseTelnyxNumber } = await import("../services/vapi.js");
+    const unassignedNumbers = await findUnassignedTelnyxNumbers(preferredAreaCode);
+    
+    // Check if the selected number is in the unassigned list
+    const selectedNumberNormalized = phoneNumber.replace(/[^0-9+]/g, '');
+    const isUnassigned = unassignedNumbers.some(num => {
+      const numPhone = (num.phone_number || num.number || '').replace(/[^0-9+]/g, '');
+      return numPhone === selectedNumberNormalized || numPhone === '+' + selectedNumberNormalized || '+' + numPhone === selectedNumberNormalized;
+    });
+    
+    if (isUnassigned) {
+      console.log(`[Business Provision] ✅ Selected number ${phoneNumber} is unassigned, reusing it`);
+      // Find the matching number object
+      telnyxNumber = unassignedNumbers.find(num => {
+        const numPhone = (num.phone_number || num.number || '').replace(/[^0-9+]/g, '');
+        return numPhone === selectedNumberNormalized || numPhone === '+' + selectedNumberNormalized || '+' + numPhone === selectedNumberNormalized;
+      });
+    } else if (unassignedNumbers.length > 0) {
+      // Use an unassigned number instead of purchasing
+      console.log(`[Business Provision] ✅ Found ${unassignedNumbers.length} unassigned numbers, reusing: ${unassignedNumbers[0].phone_number || unassignedNumbers[0].number}`);
+      telnyxNumber = unassignedNumbers[0];
+      numberToUse = telnyxNumber.phone_number || telnyxNumber.number;
+    } else {
+      // No unassigned numbers, purchase the selected one
+      console.log(`[Business Provision] No unassigned numbers found, purchasing: ${phoneNumber}`);
+      telnyxNumber = await purchaseTelnyxNumber(phoneNumber);
+    }
+    
+    // Provision phone number to VAPI (this will use the Telnyx number)
     const vapiPhoneNumber = await provisionPhoneNumber(
-      phoneNumber, // Use the selected number (already purchased from Telnyx)
+      numberToUse, // Use the number (reused or purchased)
       business.public_phone_number // Business phone for area code matching
     );
 
