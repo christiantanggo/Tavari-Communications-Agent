@@ -295,6 +295,3 @@ export async function resetBillingCycle(businessId) {
     );
   }
 }
-
-import { supabaseClient } from "../config/database.js";
-
