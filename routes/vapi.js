@@ -26,68 +26,78 @@ router.get("/webhook", (_req, res) => {
 /**
  * VAPI Webhook Handler
  * Handles call-start, call-end, transfer-started, transfer-failed, call-returned events
- * Note: express.json() is already applied globally in server.js, so we don't need it here
+ * 
+ * CRITICAL: Respond IMMEDIATELY - do NOT wait for DB operations
+ * VAPI needs a fast response to answer calls properly
  */
 router.post("/webhook", async (req, res) => {
-  try {
-    // Log incoming request for debugging
-    console.log(`[VAPI Webhook] 📥 Incoming POST request to /api/vapi/webhook`);
-    console.log(`[VAPI Webhook] Headers:`, JSON.stringify(req.headers, null, 2));
-    console.log(`[VAPI Webhook] Body:`, JSON.stringify(req.body, null, 2));
+  // 🔥 IMMEDIATE LOG - First thing we do
+  console.log("🔥 INBOUND CALL HIT", JSON.stringify(req.body, null, 2));
+  
+  // RESPOND IMMEDIATELY - Don't wait for anything
+  // This tells VAPI we received the webhook
+  res.status(200).json({ received: true });
+  
+  // Now process asynchronously (don't await - let it run in background)
+  (async () => {
+    try {
+      // Log incoming request for debugging
+      console.log(`[VAPI Webhook] 📥 Incoming POST request to /api/vapi/webhook`);
+      console.log(`[VAPI Webhook] Headers:`, JSON.stringify(req.headers, null, 2));
+      console.log(`[VAPI Webhook] Body:`, JSON.stringify(req.body, null, 2));
 
-    // Verify webhook signature if secret is provided
-    if (process.env.VAPI_WEBHOOK_SECRET) {
-      // TODO: Implement signature verification
-      // const signature = req.headers["vapi-signature"];
-      // verifySignature(req.body, signature);
+      // Verify webhook signature if secret is provided
+      if (process.env.VAPI_WEBHOOK_SECRET) {
+        // TODO: Implement signature verification
+        // const signature = req.headers["vapi-signature"];
+        // verifySignature(req.body, signature);
+      }
+
+      const event = req.body;
+      const eventType = event.type || event.event;
+
+      if (!eventType) {
+        console.warn(`[VAPI Webhook] ⚠️  No event type found in request body`);
+        return;
+      }
+
+      console.log(`[VAPI Webhook] 📞 Received event: ${eventType}`, {
+        callId: event.call?.id,
+        assistantId: event.call?.assistant?.id,
+        businessId: event.call?.assistant?.metadata?.businessId,
+        callerNumber: event.call?.customer?.number,
+        fullEvent: JSON.stringify(event, null, 2).substring(0, 500), // First 500 chars for debugging
+      });
+
+      // Handle different event types (async - don't block)
+      switch (eventType) {
+        case "call-start":
+          await handleCallStart(event);
+          break;
+        case "call-end":
+          await handleCallEnd(event);
+          break;
+        case "transfer-started":
+          await handleTransferStarted(event);
+          break;
+        case "transfer-failed":
+        case "transfer-ended":
+          await handleTransferFailed(event);
+          break;
+        case "call-returned":
+          await handleCallReturned(event);
+          break;
+        case "function-call":
+          await handleFunctionCall(event);
+          break;
+        default:
+          console.log(`[VAPI Webhook] Unhandled event type: ${eventType}`);
+      }
+    } catch (error) {
+      console.error("[VAPI Webhook] Error processing webhook (non-blocking):", error);
+      // Don't throw - we already responded
     }
-
-    const event = req.body;
-    const eventType = event.type || event.event;
-
-    if (!eventType) {
-      console.warn(`[VAPI Webhook] ⚠️  No event type found in request body`);
-      return res.status(400).json({ error: "Missing event type" });
-    }
-
-    console.log(`[VAPI Webhook] 📞 Received event: ${eventType}`, {
-      callId: event.call?.id,
-      assistantId: event.call?.assistant?.id,
-      businessId: event.call?.assistant?.metadata?.businessId,
-      callerNumber: event.call?.customer?.number,
-      fullEvent: JSON.stringify(event, null, 2).substring(0, 500), // First 500 chars for debugging
-    });
-
-    // Handle different event types
-    switch (eventType) {
-      case "call-start":
-        await handleCallStart(event);
-        break;
-      case "call-end":
-        await handleCallEnd(event);
-        break;
-      case "transfer-started":
-        await handleTransferStarted(event);
-        break;
-      case "transfer-failed":
-      case "transfer-ended":
-        await handleTransferFailed(event);
-        break;
-      case "call-returned":
-        await handleCallReturned(event);
-        break;
-      case "function-call":
-        await handleFunctionCall(event);
-        break;
-      default:
-        console.log(`[VAPI Webhook] Unhandled event type: ${eventType}`);
-    }
-
-    res.status(200).json({ received: true });
-  } catch (error) {
-    console.error("[VAPI Webhook] Error:", error);
-    res.status(500).json({ error: error.message });
-  }
+  })();
 });
 
 /**
