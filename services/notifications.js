@@ -171,18 +171,36 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
  * Send SMS notification (premium, 3x Telnyx cost)
  */
 export async function sendSMSNotification(business, callSession, summary) {
+  console.log("[SMS Notification] ========== SMS NOTIFICATION START ==========");
+  console.log("[SMS Notification] Business:", {
+    id: business.id,
+    name: business.name,
+    sms_enabled: business.sms_enabled,
+    sms_notification_number: business.sms_notification_number,
+  });
+  
   if (!business.sms_enabled || !business.sms_notification_number) {
+    console.log("[SMS Notification] ⚠️ SMS disabled or no number configured, skipping");
     return; // SMS disabled or no number configured
   }
 
+  console.log("[SMS Notification] Step 1: Checking Telnyx configuration...");
+  console.log("[SMS Notification] TELNYX_API_KEY:", TELNYX_API_KEY ? "SET" : "MISSING");
+  console.log("[SMS Notification] TELNYX_SMS_NUMBER:", TELNYX_SMS_NUMBER || "MISSING");
+
   if (!TELNYX_API_KEY || !TELNYX_SMS_NUMBER) {
-    console.warn("[Notifications] Telnyx SMS not configured");
+    console.warn("[SMS Notification] ❌ Telnyx SMS not configured");
     return;
   }
 
   try {
     const message = `New callback request from ${callSession.caller_name || "Unknown"} (${formatPhoneNumber(callSession.caller_number)}). ${summary?.substring(0, 100) || "See dashboard for details."}`;
+    console.log("[SMS Notification] Step 2: Building SMS message");
+    console.log("[SMS Notification] Message:", message);
+    console.log("[SMS Notification] From:", TELNYX_SMS_NUMBER);
+    console.log("[SMS Notification] To:", business.sms_notification_number);
 
+    console.log("[SMS Notification] Step 3: Sending SMS via Telnyx API...");
     const response = await axios.post(
       "https://api.telnyx.com/v2/messages",
       {
@@ -198,13 +216,20 @@ export async function sendSMSNotification(business, callSession, summary) {
       }
     );
 
-    console.log(`[Notifications] SMS sent to ${business.sms_notification_number}: ${response.data.data.id}`);
+    console.log(`[SMS Notification] ✅ SMS sent to ${business.sms_notification_number}`);
+    console.log("[SMS Notification] Response:", JSON.stringify(response.data, null, 2));
+    console.log("[SMS Notification] Message ID:", response.data.data.id);
+    console.log("[SMS Notification] ========== SMS NOTIFICATION SUCCESS ==========");
     
     // Track SMS cost (3x Telnyx rate)
     // This will be handled by usage tracking service
     return response.data;
   } catch (error) {
-    console.error(`[Notifications] Error sending SMS:`, error);
+    console.error(`[SMS Notification] ========== SMS NOTIFICATION ERROR ==========`);
+    console.error(`[SMS Notification] Error sending SMS:`, error.message);
+    console.error(`[SMS Notification] Error response:`, error.response?.data);
+    console.error(`[SMS Notification] Error stack:`, error.stack);
+    console.error(`[SMS Notification] Full error:`, JSON.stringify(error, null, 2));
     // Don't throw - SMS failures shouldn't break the call flow
   }
 }
