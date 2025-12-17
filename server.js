@@ -46,6 +46,14 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// Handle Telnyx webhooks (VAPI uses Telnyx as provider, these webhooks are handled by VAPI)
+// Just return 200 OK - VAPI handles the actual call logic
+app.post("/webhook", (req, res) => {
+  // VAPI uses Telnyx as the phone provider, so Telnyx sends webhooks here
+  // But VAPI handles all the call logic, so we just acknowledge receipt
+  res.status(200).json({ received: true });
+});
+
 app.get("/ready", async (_req, res) => {
   try {
     // Check database connection
