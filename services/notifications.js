@@ -10,7 +10,6 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || "noreply@tavari.com";
 const FROM_NAME = "Tavari";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-const TELNYX_SMS_NUMBER = process.env.TELNYX_SMS_NUMBER;
 
 /**
  * Send email using Supabase Edge Function (mail-send)
@@ -177,19 +176,27 @@ export async function sendSMSNotification(business, callSession, summary) {
     name: business.name,
     sms_enabled: business.sms_enabled,
     sms_notification_number: business.sms_notification_number,
+    vapi_phone_number: business.vapi_phone_number,
   });
   
   if (!business.sms_enabled || !business.sms_notification_number) {
-    console.log("[SMS Notification] ⚠️ SMS disabled or no number configured, skipping");
+    console.log("[SMS Notification] ⚠️ SMS disabled or no notification number configured, skipping");
     return; // SMS disabled or no number configured
+  }
+
+  // Use the business's VAPI phone number as the sender (their business number)
+  if (!business.vapi_phone_number) {
+    console.error("[SMS Notification] ❌ Business phone number not provisioned - cannot send SMS");
+    return;
   }
 
   console.log("[SMS Notification] Step 1: Checking Telnyx configuration...");
   console.log("[SMS Notification] TELNYX_API_KEY:", TELNYX_API_KEY ? "SET" : "MISSING");
-  console.log("[SMS Notification] TELNYX_SMS_NUMBER:", TELNYX_SMS_NUMBER || "MISSING");
+  console.log("[SMS Notification] Business phone (FROM):", business.vapi_phone_number);
+  console.log("[SMS Notification] Notification number (TO):", business.sms_notification_number);
 
-  if (!TELNYX_API_KEY || !TELNYX_SMS_NUMBER) {
-    console.warn("[SMS Notification] ❌ Telnyx SMS not configured");
+  if (!TELNYX_API_KEY) {
+    console.warn("[SMS Notification] ❌ Telnyx API key not configured");
     return;
   }
 
@@ -197,15 +204,27 @@ export async function sendSMSNotification(business, callSession, summary) {
     const message = `New callback request from ${callSession.caller_name || "Unknown"} (${formatPhoneNumber(callSession.caller_number)}). ${summary?.substring(0, 100) || "See dashboard for details."}`;
     console.log("[SMS Notification] Step 2: Building SMS message");
     console.log("[SMS Notification] Message:", message);
-    console.log("[SMS Notification] From:", TELNYX_SMS_NUMBER);
-    console.log("[SMS Notification] To:", business.sms_notification_number);
+    
+    // Format phone number for Telnyx (remove any formatting, ensure it starts with +)
+    let fromNumber = business.vapi_phone_number.replace(/[^0-9+]/g, "");
+    if (!fromNumber.startsWith("+")) {
+      fromNumber = "+" + fromNumber;
+    }
+    
+    let toNumber = business.sms_notification_number.replace(/[^0-9+]/g, "");
+    if (!toNumber.startsWith("+")) {
+      toNumber = "+" + toNumber;
+    }
+    
+    console.log("[SMS Notification] From (formatted):", fromNumber);
+    console.log("[SMS Notification] To (formatted):", toNumber);
 
     console.log("[SMS Notification] Step 3: Sending SMS via Telnyx API...");
     const response = await axios.post(
       "https://api.telnyx.com/v2/messages",
       {
-        from: TELNYX_SMS_NUMBER,
-        to: business.sms_notification_number,
+        from: fromNumber,
+        to: toNumber,
         text: message,
       },
       {
