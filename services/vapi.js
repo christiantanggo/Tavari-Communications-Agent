@@ -2,6 +2,7 @@
 // VAPI API client for creating assistants, provisioning numbers, and managing calls
 
 import axios from "axios";
+import { supabaseClient } from "../config/database.js";
 
 // Lazy client creation to ensure env vars are loaded
 let vapiClient = null;
