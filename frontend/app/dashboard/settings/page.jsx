@@ -14,6 +14,7 @@ function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [settings, setSettings] = useState({
     ai_enabled: true,
     call_forward_rings: 4,
@@ -117,6 +118,30 @@ function SettingsPage() {
       alert(`Failed to provision phone number: ${errorMessage}`);
     } finally {
       setActivating(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!user?.business?.email) {
+      alert('No email address found for your business. Please update your business email.');
+      return;
+    }
+
+    setSendingTestEmail(true);
+    try {
+      const response = await businessAPI.sendTestEmail();
+      
+      if (response.data?.success) {
+        alert(`Test email sent successfully to ${user.business.email}! Check your inbox to see what your call summary emails will look like.`);
+      } else {
+        alert('Failed to send test email. Please try again.');
+      }
+    } catch (error) {
+      console.error('Test email error:', error);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to send test email';
+      alert(`Failed to send test email: ${errorMessage}`);
+    } finally {
+      setSendingTestEmail(false);
     }
   };
 
@@ -317,15 +342,24 @@ function SettingsPage() {
                   </label>
                   <p className="text-xs text-gray-500">Get an email summary every time Tavari handles a call</p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.email_ai_answered}
-                    onChange={(e) => setSettings({ ...settings, email_ai_answered: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleSendTestEmail}
+                    disabled={sendingTestEmail}
+                    className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  >
+                    {sendingTestEmail ? 'Sending...' : 'Test Email'}
+                  </button>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.email_ai_answered}
+                      onChange={(e) => setSettings({ ...settings, email_ai_answered: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
               </div>
 
               <div className="flex items-center justify-between">

@@ -113,6 +113,7 @@ export const businessAPI = {
   searchPhoneNumbers: (params) => api.get('/business/phone-numbers/search', { params }),
   provisionPhoneNumber: (data) => api.post('/business/phone-numbers/provision', data),
   linkAssistant: () => api.post('/business/link-assistant'),
+  sendTestEmail: () => api.post('/business/test-email'),
 };
 
 // Phone Numbers API (Voximplant - legacy)

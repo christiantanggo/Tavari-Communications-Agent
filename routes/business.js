@@ -495,5 +495,55 @@ router.post("/retry-activation", authenticate, async (req, res) => {
   }
 });
 
+// Send test email
+router.post("/test-email", authenticate, async (req, res) => {
+  try {
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    // Import notification service
+    const { sendCallSummaryEmail } = await import("../services/notifications.js");
+    const { CallSession } = await import("../models/CallSession.js");
+
+    // Create a mock call session for the test email
+    const mockCallSession = {
+      id: "test-session-" + Date.now(),
+      business_id: business.id,
+      caller_name: "John Doe",
+      caller_number: "+15551234567",
+      started_at: new Date(),
+      status: "completed",
+      duration_seconds: 120,
+    };
+
+    // Mock transcript and summary
+    const mockTranscript = "Caller: Hi, I'd like to place an order.\nAI: I'd be happy to help you with that. What would you like to order?\nCaller: I'll take a large pizza with pepperoni.\nAI: Great! I've noted your order. Is there anything else?\nCaller: No, that's all. Thanks!\nAI: You're welcome! Your order will be ready in about 30 minutes.";
+    const mockSummary = "Customer called to place an order for a large pepperoni pizza. Order confirmed and will be ready in 30 minutes.";
+    const mockIntent = "order";
+
+    // Send test email
+    await sendCallSummaryEmail(
+      business,
+      mockCallSession,
+      mockTranscript,
+      mockSummary,
+      mockIntent,
+      null // No message for this test
+    );
+
+    res.json({
+      success: true,
+      message: `Test email sent to ${business.email}`,
+    });
+  } catch (error) {
+    console.error("Send test email error:", error);
+    res.status(500).json({
+      error: error.message || "Failed to send test email",
+    });
+  }
+});
+
 export default router;
 
