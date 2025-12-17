@@ -3,18 +3,37 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in environment variables');
-  if (process.env.NODE_ENV !== 'test') {
-    process.exit(1);
+// Lazy initialization - don't crash on import
+let supabase = null;
+
+function initSupabase() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in environment variables');
   }
+  
+  if (!supabase) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+  }
+  
+  return supabase;
 }
 
-// Create Supabase client with service role key (has full database access)
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// Create client immediately if env vars are available (for faster startup)
+if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  try {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+  } catch (error) {
+    console.error('❌ Failed to create Supabase client:', error.message);
+  }
+} else {
+  console.warn('⚠️ SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY not set - database operations will fail');
+}
 
 // Note: Models should use supabaseClient directly for all database operations
 // This query function is kept for backward compatibility but may not work for all cases
@@ -24,16 +43,30 @@ export const query = async (text, params = []) => {
   throw new Error('Raw SQL queries not supported. Use Supabase client methods or create RPC functions.');
 };
 
-// Direct Supabase client access for table operations (preferred method)
-export const supabaseClient = supabase;
+// Create a proxy that initializes the client lazily when accessed
+const clientProxy = new Proxy({}, {
+  get(target, prop) {
+    const client = initSupabase();
+    const value = client[prop];
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+    return value;
+  }
+});
+
+// Export the proxy as supabaseClient
+export const supabaseClient = clientProxy;
 
 // Helper for table operations
-export const from = (table) => supabase.from(table);
+export const from = (table) => {
+  const client = initSupabase();
+  return client.from(table);
+};
 
 // Helper to get a client (for compatibility with existing code)
 export const getClient = async () => {
-  return supabase;
+  return initSupabase();
 };
 
-export default supabase;
-
+export default clientProxy;
