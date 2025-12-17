@@ -5,9 +5,12 @@ export class CallSession {
     const {
       business_id,
       voximplant_call_id,
+      vapi_call_id,
       caller_number,
       caller_name,
       status = 'ringing',
+      transfer_attempted = false,
+      started_at,
     } = data;
     
     const { data: session, error } = await supabaseClient
@@ -15,9 +18,12 @@ export class CallSession {
       .insert({
         business_id,
         voximplant_call_id,
+        vapi_call_id,
         caller_number,
         caller_name,
         status,
+        transfer_attempted,
+        started_at: started_at || new Date().toISOString(),
       })
       .select()
       .single();
@@ -31,6 +37,17 @@ export class CallSession {
       .from('call_sessions')
       .select('*')
       .eq('voximplant_call_id', voximplant_call_id)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    return data;
+  }
+
+  static async findByVapiCallId(vapi_call_id) {
+    const { data, error } = await supabaseClient
+      .from('call_sessions')
+      .select('*')
+      .eq('vapi_call_id', vapi_call_id)
       .single();
     
     if (error && error.code !== 'PGRST116') throw error;
@@ -56,7 +73,7 @@ export class CallSession {
   
   static async endCall(id, duration_seconds, transcript, intent, message_taken) {
     return this.update(id, {
-      status: 'ended',
+      status: 'completed',
       ended_at: new Date().toISOString(),
       duration_seconds,
       transcript,

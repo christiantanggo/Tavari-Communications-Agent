@@ -78,4 +78,24 @@ export class Business {
   static async setTelnyxNumber(id, number) {
     return this.update(id, { telnyx_number: number });
   }
+
+  static async findByVapiAssistantId(assistantId) {
+    const { data, error } = await supabaseClient
+      .from('businesses')
+      .select('*')
+      .eq('vapi_assistant_id', assistantId)
+      .is('deleted_at', null)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    return data;
+  }
+
+  static async setVapiAssistant(id, assistantId, phoneNumber) {
+    return this.update(id, {
+      vapi_assistant_id: assistantId,
+      vapi_phone_number: phoneNumber,
+      ai_enabled: true,
+    });
+  }
 }

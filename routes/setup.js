@@ -11,7 +11,8 @@ router.get('/status', authenticate, async (req, res) => {
     const business = await Business.findById(req.businessId);
     res.json({
       onboarding_complete: business.onboarding_complete,
-      voximplant_number: business.voximplant_number,
+      vapi_phone_number: business.vapi_phone_number,
+      voximplant_number: business.voximplant_number, // Legacy
     });
   } catch (error) {
     console.error('Get setup status error:', error);
@@ -29,11 +30,13 @@ router.get('/data', authenticate, async (req, res) => {
       business: {
         name: business.name,
         phone: business.phone,
+        public_phone_number: business.public_phone_number,
         address: business.address,
         timezone: business.timezone,
         onboarding_complete: business.onboarding_complete,
-        voximplant_number: business.voximplant_number,
-        telnyx_number: business.telnyx_number,
+        vapi_phone_number: business.vapi_phone_number,
+        voximplant_number: business.voximplant_number, // Legacy
+        telnyx_number: business.telnyx_number, // Legacy
       },
       agent: agent || null,
     });
@@ -137,31 +140,14 @@ router.post('/finalize', authenticate, async (req, res) => {
     // Mark onboarding as complete
     await Business.setOnboardingComplete(req.businessId);
     
-    // Check if phone number was provided and purchase it
-    const { phoneNumber, countryCode } = req.body;
-    
-    if (phoneNumber) {
-      try {
-        const { VoximplantService } = await import('../services/voximplant.js');
-        await VoximplantService.purchaseAndAssignPhoneNumber(
-          req.businessId,
-          phoneNumber,
-          countryCode || 'US'
-        );
-      } catch (phoneError) {
-        console.error('Phone number purchase error:', phoneError);
-        // Don't fail setup if phone purchase fails - user can add it later
-        console.warn('Setup finalized but phone number purchase failed. User can add phone number later.');
-      }
-    }
-    
     const business = await Business.findById(req.businessId);
     
     res.json({
       success: true,
       onboarding_complete: true,
-      voximplant_number: business.voximplant_number,
-      telnyx_number: business.telnyx_number,
+      vapi_phone_number: business.vapi_phone_number,
+      voximplant_number: business.voximplant_number, // Legacy
+      telnyx_number: business.telnyx_number, // Legacy
     });
   } catch (error) {
     console.error('Finalize setup error:', error);
