@@ -4,6 +4,8 @@
 
 import express from "express";
 import dotenv from "dotenv";
+import cors from "cors";
+import helmet from "helmet";
 
 // Load environment variables FIRST
 dotenv.config();
@@ -11,19 +13,12 @@ dotenv.config();
 const PORT = Number(process.env.PORT || 5001);
 const app = express();
 
-// Basic middleware - these should never fail
-try {
-  const cors = (await import("cors")).default;
-  const helmet = (await import("helmet")).default;
-  
-  app.use(helmet());
-  app.use(cors({
-    origin: process.env.FRONTEND_URL || "*",
-    credentials: true,
-  }));
-} catch (error) {
-  console.error("⚠️ Middleware import error (non-fatal):", error.message);
-}
+// Basic middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "*",
+  credentials: true,
+}));
 
 // Body parsing
 app.use(express.json({ limit: "10mb" }));
@@ -84,75 +79,49 @@ try {
   console.log("[Sentry] Not available:", error.message);
 }
 
-// Rate limiting - optional, won't crash if missing
-let apiLimiter, authLimiter, adminLimiter, webhookLimiter;
-try {
-  const limiter = await import("./middleware/rateLimiter.js");
-  apiLimiter = limiter.apiLimiter;
-  authLimiter = limiter.authLimiter;
-  adminLimiter = limiter.adminLimiter;
-  webhookLimiter = limiter.webhookLimiter;
-  
-  app.use("/api", apiLimiter);
-} catch (error) {
-  console.warn("⚠️ Rate limiter not available:", error.message);
-}
+// Rate limiting - load synchronously
+import { apiLimiter, authLimiter, adminLimiter, webhookLimiter } from "./middleware/rateLimiter.js";
+app.use("/api", apiLimiter);
 
-// Load routes - each one is optional, won't crash if one fails
-const routes = [
-  { path: "/api/auth", file: "./routes/auth.js" },
-  { path: "/api/billing", file: "./routes/billing.js" },
-  { path: "/api/setup", file: "./routes/setup.js" },
-  { path: "/api/messages", file: "./routes/messages.js" },
-  { path: "/api/usage", file: "./routes/usage.js" },
-  { path: "/api/agents", file: "./routes/agents.js" },
-  { path: "/api/vapi", file: "./routes/vapi.js" },
-  { path: "/api/admin", file: "./routes/admin.js" },
-  { path: "/api/support", file: "./routes/support.js" },
-  { path: "/api/invoices", file: "./routes/invoices.js" },
-  { path: "/api/account", file: "./routes/account.js" },
-  { path: "/api/business", file: "./routes/business.js" },
-];
+// Load routes synchronously - they're all ES modules
+import authRoutes from "./routes/auth.js";
+import billingRoutes from "./routes/billing.js";
+import setupRoutes from "./routes/setup.js";
+import messagesRoutes from "./routes/messages.js";
+import usageRoutes from "./routes/usage.js";
+import agentsRoutes from "./routes/agents.js";
+import vapiRoutes from "./routes/vapi.js";
+import adminRoutes from "./routes/admin.js";
+import supportRoutes from "./routes/support.js";
+import invoicesRoutes from "./routes/invoices.js";
+import accountRoutes from "./routes/account.js";
+import businessRoutes from "./routes/business.js";
 
-for (const route of routes) {
-  try {
-    const routeModule = await import(route.file);
-    const router = routeModule.default;
-    
-    // Apply rate limiters if available
-    if (route.path === "/api/auth" && authLimiter) {
-      app.use("/api/auth/login", authLimiter);
-      app.use("/api/auth/signup", authLimiter);
-    }
-    if (route.path === "/api/admin" && adminLimiter) {
-      app.use("/api/admin", adminLimiter);
-    }
-    if (route.path === "/api/vapi" && webhookLimiter) {
-      app.use("/api/vapi/webhook", webhookLimiter);
-    }
-    
-    app.use(route.path, router);
-    console.log(`✅ Loaded route: ${route.path}`);
-  } catch (error) {
-    console.error(`❌ Failed to load route ${route.path}:`, error.message);
-    // Continue - don't crash
-  }
-}
+// Apply specific rate limiters
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/signup", authLimiter);
+app.use("/api/admin", adminLimiter);
+app.use("/api/vapi/webhook", webhookLimiter);
 
-// Error handler - must be last
-try {
-  const { errorHandler } = await import("./middleware/errorHandler.js");
-  app.use(errorHandler);
-} catch (error) {
-  console.warn("⚠️ Error handler not available:", error.message);
-  // Basic error handler
-  app.use((err, req, res, next) => {
-    console.error("Error:", err);
-    res.status(500).json({ error: "Internal server error" });
-  });
-}
+// Mount all routes
+app.use("/api/auth", authRoutes);
+app.use("/api/billing", billingRoutes);
+app.use("/api/setup", setupRoutes);
+app.use("/api/messages", messagesRoutes);
+app.use("/api/usage", usageRoutes);
+app.use("/api/agents", agentsRoutes);
+app.use("/api/vapi", vapiRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/support", supportRoutes);
+app.use("/api/invoices", invoicesRoutes);
+app.use("/api/account", accountRoutes);
+app.use("/api/business", businessRoutes);
 
-// Start server - THIS IS THE ONLY PLACE WE SHOULD CRASH
+// Error handler
+import { errorHandler } from "./middleware/errorHandler.js";
+app.use(errorHandler);
+
+// Start server
 const server = app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
   console.log('🚀 TAVARI SERVER - VAPI VERSION');
@@ -160,7 +129,7 @@ const server = app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Ready: http://localhost:${PORT}/ready`);
-  console.log(`   Webhook: http://localhost:${PORT}/api/vapi/webhook`);
+  console.log(`   VAPI Webhook: http://localhost:${PORT}/api/vapi/webhook`);
   console.log('='.repeat(60) + '\n');
 });
 
