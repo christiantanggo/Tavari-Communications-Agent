@@ -244,7 +244,7 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
     }
     
     // First, check if the selected number already exists in Telnyx (might be unassigned)
-    const { findUnassignedTelnyxNumbers, purchaseTelnyxNumber } = await import("../services/vapi.js");
+    const { findUnassignedTelnyxNumbers } = await import("../services/vapi.js");
     const unassignedNumbers = await findUnassignedTelnyxNumbers(preferredAreaCode);
     
     // Check if the selected number is in the unassigned list
