@@ -5,13 +5,13 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import helmet from "helmet";
-import { errorHandler } from "./middleware/errorHandler.js";
 
-// Initialize Sentry (if configured)
+// Load environment variables FIRST
+dotenv.config();
+
+// Initialize Sentry (if configured) - must be before other imports
 import { initSentry } from "./config/sentry.js";
 initSentry();
-
-dotenv.config();
 
 const PORT = Number(process.env.PORT || 5001);
 
@@ -46,14 +46,6 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Handle Telnyx webhooks (VAPI uses Telnyx as provider, these webhooks are handled by VAPI)
-// Just return 200 OK - VAPI handles the actual call logic
-app.post("/webhook", (req, res) => {
-  // VAPI uses Telnyx as the phone provider, so Telnyx sends webhooks here
-  // But VAPI handles all the call logic, so we just acknowledge receipt
-  res.status(200).json({ received: true });
-});
-
 app.get("/ready", async (_req, res) => {
   try {
     // Check database connection
@@ -79,13 +71,21 @@ app.get("/ready", async (_req, res) => {
   }
 });
 
+// Handle Telnyx webhooks (VAPI uses Telnyx as provider, these webhooks are handled by VAPI)
+// Just return 200 OK - VAPI handles the actual call logic
+app.post("/webhook", (req, res) => {
+  // VAPI uses Telnyx as the phone provider, so Telnyx sends webhooks here
+  // But VAPI handles all the call logic, so we just acknowledge receipt
+  res.status(200).json({ received: true });
+});
+
 // Rate limiting
 import { apiLimiter, authLimiter, adminLimiter, webhookLimiter } from "./middleware/rateLimiter.js";
 
 // Apply general rate limiting to all API routes
 app.use("/api", apiLimiter);
 
-// API Routes
+// API Routes - import all at once
 import authRoutes from "./routes/auth.js";
 import billingRoutes from "./routes/billing.js";
 import setupRoutes from "./routes/setup.js";
@@ -99,12 +99,13 @@ import invoicesRoutes from "./routes/invoices.js";
 import accountRoutes from "./routes/account.js";
 import businessRoutes from "./routes/business.js";
 
-// Apply specific rate limiters
+// Apply specific rate limiters BEFORE routes
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/signup", authLimiter);
 app.use("/api/admin", adminLimiter);
 app.use("/api/vapi/webhook", webhookLimiter);
 
+// Mount all routes
 app.use("/api/auth", authRoutes);
 app.use("/api/billing", billingRoutes);
 app.use("/api/setup", setupRoutes);
@@ -119,12 +120,13 @@ app.use("/api/account", accountRoutes);
 app.use("/api/business", businessRoutes);
 
 // Error handling middleware (must be last)
+import { errorHandler } from "./middleware/errorHandler.js";
 app.use(errorHandler);
 
 // Start server
 const server = app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
-  console.log('🚀 TAVARI SERVER - VAPI VERSION - DO NOT USE TELNYX CODE');
+  console.log('🚀 TAVARI SERVER - VAPI VERSION');
   console.log('='.repeat(60));
   console.log(`✅ Tavari server running on port ${PORT} [VAPI VERSION]`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
@@ -142,5 +144,15 @@ process.on("SIGTERM", () => {
   });
 });
 
-export default app;
+// Handle uncaught errors
+process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught Exception:", error);
+  process.exit(1);
+});
 
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+  process.exit(1);
+});
+
+export default app;
