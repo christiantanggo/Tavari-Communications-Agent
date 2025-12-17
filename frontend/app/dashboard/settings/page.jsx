@@ -144,7 +144,10 @@ function SettingsPage() {
     
     try {
       console.log('[Test SMS UI] Step 1: Calling API...');
-      const response = await businessAPI.sendTestSMS();
+      const response = await businessAPI.sendTestSMS({
+        sms_enabled: settings.sms_enabled,
+        sms_notification_number: settings.sms_notification_number,
+      });
       console.log('[Test SMS UI] Step 2: API response received:', response.data);
       
       if (response.data?.success) {

@@ -499,6 +499,7 @@ router.post("/retry-activation", authenticate, async (req, res) => {
 router.post("/test-sms", authenticate, async (req, res) => {
   console.log("[Test SMS] ========== TEST SMS REQUEST START ==========");
   console.log("[Test SMS] Business ID:", req.businessId);
+  console.log("[Test SMS] Request body:", req.body);
   
   try {
     console.log("[Test SMS] Step 1: Fetching business...");
@@ -514,15 +515,32 @@ router.post("/test-sms", authenticate, async (req, res) => {
       sms_notification_number: business.sms_notification_number,
     });
 
-    if (!business.sms_enabled) {
-      console.error("[Test SMS] ❌ SMS not enabled for business");
-      return res.status(400).json({ error: "SMS is not enabled for this business" });
+    // Allow test even if not saved - use request body or database value
+    const smsEnabled = req.body.sms_enabled !== undefined ? req.body.sms_enabled : business.sms_enabled;
+    const smsNumber = req.body.sms_notification_number || business.sms_notification_number;
+
+    console.log("[Test SMS] Using SMS settings:", {
+      sms_enabled: smsEnabled,
+      sms_notification_number: smsNumber,
+      from_request: req.body.sms_enabled !== undefined || !!req.body.sms_notification_number,
+    });
+
+    if (!smsEnabled) {
+      console.error("[Test SMS] ❌ SMS not enabled");
+      return res.status(400).json({ error: "SMS is not enabled. Please enable SMS notifications first." });
     }
 
-    if (!business.sms_notification_number) {
+    if (!smsNumber) {
       console.error("[Test SMS] ❌ SMS notification number not configured");
-      return res.status(400).json({ error: "SMS notification number is not configured" });
+      return res.status(400).json({ error: "SMS notification number is not configured. Please add a phone number first." });
     }
+
+    // Create a temporary business object with the test values
+    const testBusiness = {
+      ...business,
+      sms_enabled: smsEnabled,
+      sms_notification_number: smsNumber,
+    };
 
     console.log("[Test SMS] Step 2: Importing notification service...");
     const { sendSMSNotification } = await import("../services/notifications.js");
@@ -544,13 +562,13 @@ router.post("/test-sms", authenticate, async (req, res) => {
     console.log("[Test SMS] Step 4: Created mock summary:", mockSummary);
 
     console.log("[Test SMS] Step 5: Calling sendSMSNotification...");
-    await sendSMSNotification(business, mockCallSession, mockSummary);
+    await sendSMSNotification(testBusiness, mockCallSession, mockSummary);
     console.log("[Test SMS] ✅ sendSMSNotification completed without error");
 
     console.log("[Test SMS] ========== TEST SMS REQUEST SUCCESS ==========");
     res.json({
       success: true,
-      message: `Test SMS sent to ${business.sms_notification_number}`,
+      message: `Test SMS sent to ${smsNumber}`,
     });
   } catch (error) {
     console.error("[Test SMS] ========== TEST SMS REQUEST ERROR ==========");
