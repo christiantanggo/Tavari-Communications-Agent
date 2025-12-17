@@ -16,7 +16,20 @@ const TELNYX_SMS_NUMBER = process.env.TELNYX_SMS_NUMBER;
  * Send email using Supabase Edge Function (mail-send)
  */
 async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = null, businessId = null, attachments = null) {
+  console.log("[Notifications] ========== SEND EMAIL START ==========");
+  console.log("[Notifications] To:", to);
+  console.log("[Notifications] Subject:", subject);
+  console.log("[Notifications] From Email:", FROM_EMAIL);
+  console.log("[Notifications] From Name:", displayName || FROM_NAME);
+  console.log("[Notifications] Business ID:", businessId);
+  console.log("[Notifications] Has Attachments:", attachments ? attachments.length : 0);
+  
   try {
+    console.log("[Notifications] Step 1: Checking environment variables...");
+    console.log("[Notifications] SUPABASE_URL:", SUPABASE_URL ? "SET" : "MISSING");
+    console.log("[Notifications] SUPABASE_ANON_KEY:", SUPABASE_ANON_KEY ? "SET" : "MISSING");
+    console.log("[Notifications] FROM_EMAIL:", FROM_EMAIL);
+    
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY must be set");
     }
@@ -37,7 +50,16 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
       emailPayload.attachments = attachments;
     }
 
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/mail-send`, {
+    const edgeFunctionUrl = `${SUPABASE_URL}/functions/v1/mail-send`;
+    console.log("[Notifications] Step 2: Calling Edge Function...");
+    console.log("[Notifications] URL:", edgeFunctionUrl);
+    console.log("[Notifications] Payload:", JSON.stringify({
+      ...emailPayload,
+      html: emailPayload.html ? `${emailPayload.html.substring(0, 100)}...` : null,
+      text: emailPayload.text ? `${emailPayload.text.substring(0, 100)}...` : null,
+    }, null, 2));
+
+    const response = await fetch(edgeFunctionUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -47,16 +69,27 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
       body: JSON.stringify(emailPayload),
     });
 
+    console.log("[Notifications] Step 3: Edge Function response received");
+    console.log("[Notifications] Status:", response.status);
+    console.log("[Notifications] Status Text:", response.statusText);
+    console.log("[Notifications] Headers:", Object.fromEntries(response.headers.entries()));
+
     const result = await response.json();
+    console.log("[Notifications] Response body:", JSON.stringify(result, null, 2));
     
     if (!response.ok) {
+      console.error("[Notifications] ❌ Edge Function returned error");
       throw new Error(result.error || `Email send failed: ${response.status}`);
     }
     
-    console.log(`[Notifications] Email sent to ${to}: ${result.messageId || "success"}`);
+    console.log(`[Notifications] ✅ Email sent to ${to}: ${result.messageId || "success"}`);
+    console.log("[Notifications] ========== SEND EMAIL SUCCESS ==========");
     return result;
   } catch (error) {
-    console.error(`[Notifications] Error sending email to ${to}:`, error);
+    console.error(`[Notifications] ========== SEND EMAIL ERROR ==========");
+    console.error(`[Notifications] Error sending email to ${to}:`, error.message);
+    console.error(`[Notifications] Error stack:`, error.stack);
+    console.error(`[Notifications] Full error:`, JSON.stringify(error, null, 2));
     throw error;
   }
 }
@@ -65,11 +98,21 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
  * Send call summary email
  */
 export async function sendCallSummaryEmail(business, callSession, transcript, summary, intent, message = null) {
+  console.log("[Call Summary Email] ========== CALL SUMMARY EMAIL START ==========");
+  console.log("[Call Summary Email] Business:", {
+    id: business.id,
+    name: business.name,
+    email: business.email,
+    email_ai_answered: business.email_ai_answered,
+  });
+  
   if (!business.email_ai_answered) {
+    console.log("[Call Summary Email] ⚠️ Email disabled for AI-answered calls, skipping");
     return; // Email disabled for AI-answered calls
   }
 
   try {
+    console.log("[Call Summary Email] Step 1: Building template data...");
     const templateData = {
       business_name: business.name,
       caller_name: callSession.caller_name || message?.caller_name || "Unknown",
@@ -108,11 +151,18 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
 
     const displayName = `Tavari for ${business.name}`;
     
-    console.log(`[Notifications] Sending call summary email to ${business.email}`);
+    console.log(`[Call Summary Email] Step 2: Sending email...`);
+    console.log(`[Call Summary Email] To: ${business.email}`);
+    console.log(`[Call Summary Email] Subject: ${subject}`);
+    console.log(`[Call Summary Email] Display Name: ${displayName}`);
     await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
-    console.log(`[Notifications] ✅ Call summary email sent successfully`);
+    console.log(`[Call Summary Email] ✅ Call summary email sent successfully`);
+    console.log("[Call Summary Email] ========== CALL SUMMARY EMAIL SUCCESS ==========");
   } catch (error) {
-    console.error(`[Notifications] Error sending call summary email:`, error);
+    console.error(`[Call Summary Email] ========== CALL SUMMARY EMAIL ERROR ==========");
+    console.error(`[Call Summary Email] Error sending call summary email:`, error.message);
+    console.error(`[Call Summary Email] Error stack:`, error.stack);
+    console.error(`[Call Summary Email] Full error:`, JSON.stringify(error, null, 2));
     // Don't throw - email failures shouldn't break the call flow
   }
 }

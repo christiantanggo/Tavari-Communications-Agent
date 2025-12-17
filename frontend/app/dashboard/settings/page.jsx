@@ -122,26 +122,41 @@ function SettingsPage() {
   };
 
   const handleSendTestEmail = async () => {
+    console.log('[Test Email UI] ========== TEST EMAIL BUTTON CLICKED ==========');
+    console.log('[Test Email UI] User business:', user?.business);
+    
     if (!user?.business?.email) {
+      console.error('[Test Email UI] ❌ No business email found');
       alert('No email address found for your business. Please update your business email.');
       return;
     }
 
+    console.log('[Test Email UI] Business email:', user.business.email);
     setSendingTestEmail(true);
+    
     try {
+      console.log('[Test Email UI] Step 1: Calling API...');
       const response = await businessAPI.sendTestEmail();
+      console.log('[Test Email UI] Step 2: API response received:', response.data);
       
       if (response.data?.success) {
+        console.log('[Test Email UI] ✅ Success response from API');
         alert(`Test email sent successfully to ${user.business.email}! Check your inbox to see what your call summary emails will look like.`);
       } else {
+        console.error('[Test Email UI] ❌ API returned success=false');
         alert('Failed to send test email. Please try again.');
       }
     } catch (error) {
-      console.error('Test email error:', error);
+      console.error('[Test Email UI] ========== TEST EMAIL ERROR ==========');
+      console.error('[Test Email UI] Error:', error);
+      console.error('[Test Email UI] Error response:', error.response);
+      console.error('[Test Email UI] Error data:', error.response?.data);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test email';
+      console.error('[Test Email UI] Error message:', errorMessage);
       alert(`Failed to send test email: ${errorMessage}`);
     } finally {
       setSendingTestEmail(false);
+      console.log('[Test Email UI] ========== TEST EMAIL COMPLETE ==========');
     }
   };
 

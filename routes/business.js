@@ -497,15 +497,26 @@ router.post("/retry-activation", authenticate, async (req, res) => {
 
 // Send test email
 router.post("/test-email", authenticate, async (req, res) => {
+  console.log("[Test Email] ========== TEST EMAIL REQUEST START ==========");
+  console.log("[Test Email] Business ID:", req.businessId);
+  
   try {
+    console.log("[Test Email] Step 1: Fetching business...");
     const business = await Business.findById(req.businessId);
     if (!business) {
+      console.error("[Test Email] ❌ Business not found");
       return res.status(404).json({ error: "Business not found" });
     }
+    console.log("[Test Email] ✅ Business found:", {
+      id: business.id,
+      name: business.name,
+      email: business.email,
+      email_ai_answered: business.email_ai_answered,
+    });
 
-    // Import notification service
+    console.log("[Test Email] Step 2: Importing notification service...");
     const { sendCallSummaryEmail } = await import("../services/notifications.js");
-    const { CallSession } = await import("../models/CallSession.js");
+    console.log("[Test Email] ✅ Notification service imported");
 
     // Create a mock call session for the test email
     const mockCallSession = {
@@ -517,13 +528,19 @@ router.post("/test-email", authenticate, async (req, res) => {
       status: "completed",
       duration_seconds: 120,
     };
+    console.log("[Test Email] Step 3: Created mock call session:", mockCallSession);
 
     // Mock transcript and summary
     const mockTranscript = "Caller: Hi, I'd like to place an order.\nAI: I'd be happy to help you with that. What would you like to order?\nCaller: I'll take a large pizza with pepperoni.\nAI: Great! I've noted your order. Is there anything else?\nCaller: No, that's all. Thanks!\nAI: You're welcome! Your order will be ready in about 30 minutes.";
     const mockSummary = "Customer called to place an order for a large pepperoni pizza. Order confirmed and will be ready in 30 minutes.";
     const mockIntent = "order";
+    console.log("[Test Email] Step 4: Created mock data:", {
+      transcriptLength: mockTranscript.length,
+      summary: mockSummary,
+      intent: mockIntent,
+    });
 
-    // Send test email
+    console.log("[Test Email] Step 5: Calling sendCallSummaryEmail...");
     await sendCallSummaryEmail(
       business,
       mockCallSession,
@@ -532,15 +549,21 @@ router.post("/test-email", authenticate, async (req, res) => {
       mockIntent,
       null // No message for this test
     );
+    console.log("[Test Email] ✅ sendCallSummaryEmail completed without error");
 
+    console.log("[Test Email] ========== TEST EMAIL REQUEST SUCCESS ==========");
     res.json({
       success: true,
       message: `Test email sent to ${business.email}`,
     });
   } catch (error) {
-    console.error("Send test email error:", error);
+    console.error("[Test Email] ========== TEST EMAIL REQUEST ERROR ==========");
+    console.error("[Test Email] Error message:", error.message);
+    console.error("[Test Email] Error stack:", error.stack);
+    console.error("[Test Email] Full error:", JSON.stringify(error, null, 2));
     res.status(500).json({
       error: error.message || "Failed to send test email",
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
