@@ -301,6 +301,34 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
             );
             
             console.log(`[Business Provision] ✅ Number assigned to Voice API Application`);
+            
+            // CRITICAL: Assign phone number to Messaging Profile in Telnyx
+            // This is required for SMS to work
+            try {
+              const MESSAGING_PROFILE_ID = process.env.TELNYX_MESSAGING_PROFILE_ID;
+              
+              if (MESSAGING_PROFILE_ID) {
+                console.log(`[Business Provision] Assigning number to Messaging Profile: ${MESSAGING_PROFILE_ID}`);
+                
+                await axios.patch(
+                  `${TELNYX_API_BASE_URL}/phone_numbers/${telnyxNumberId}/messaging`,
+                  { messaging_profile_id: MESSAGING_PROFILE_ID },
+                  {
+                    headers: {
+                      Authorization: `Bearer ${TELNYX_API_KEY}`,
+                      "Content-Type": "application/json",
+                    },
+                  }
+                );
+                
+                console.log(`[Business Provision] ✅ Number assigned to Messaging Profile`);
+              } else {
+                console.warn(`[Business Provision] ⚠️  TELNYX_MESSAGING_PROFILE_ID not set. SMS will not work until Messaging Profile is assigned manually.`);
+              }
+            } catch (messagingError) {
+              console.error(`[Business Provision] ⚠️  Failed to assign number to Messaging Profile:`, messagingError.message);
+              // Don't fail provisioning - number still works for voice, just SMS won't work
+            }
           }
         } else {
           console.warn(`[Business Provision] ⚠️  No Voice API Application ID in credential`);
