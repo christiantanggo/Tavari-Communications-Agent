@@ -72,12 +72,8 @@ app.post("/webhook", (req, res) => {
 });
 
 // Initialize Sentry (optional - won't crash if missing)
-try {
-  const { initSentry } = await import("./config/sentry.js");
-  initSentry();
-} catch (error) {
-  console.log("[Sentry] Not available:", error.message);
-}
+import { initSentry } from "./config/sentry.js";
+initSentry();
 
 // Rate limiting - load synchronously
 import { apiLimiter, authLimiter, adminLimiter, webhookLimiter } from "./middleware/rateLimiter.js";
