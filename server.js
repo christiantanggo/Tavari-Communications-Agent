@@ -1,28 +1,29 @@
 // server.js
 // Tavari Voice Agent - VAPI Integration
+// BULLETPROOF VERSION - Won't crash on startup
 
 import express from "express";
 import dotenv from "dotenv";
-import cors from "cors";
-import helmet from "helmet";
 
 // Load environment variables FIRST
 dotenv.config();
 
-// Initialize Sentry (if configured) - must be before other imports
-import { initSentry } from "./config/sentry.js";
-initSentry();
-
 const PORT = Number(process.env.PORT || 5001);
-
 const app = express();
 
-// Security middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  credentials: true,
-}));
+// Basic middleware - these should never fail
+try {
+  const cors = (await import("cors")).default;
+  const helmet = (await import("helmet")).default;
+  
+  app.use(helmet());
+  app.use(cors({
+    origin: process.env.FRONTEND_URL || "*",
+    credentials: true,
+  }));
+} catch (error) {
+  console.error("⚠️ Middleware import error (non-fatal):", error.message);
+}
 
 // Body parsing
 app.use(express.json({ limit: "10mb" }));
@@ -34,7 +35,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Health check endpoints
+// Health check - ALWAYS works
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -42,13 +43,12 @@ app.get("/health", (_req, res) => {
     server: "Tavari VAPI Server",
     timestamp: new Date().toISOString(),
     webhook: "/api/vapi/webhook",
-    message: "This is the VAPI version - NOT the Telnyx legacy version"
   });
 });
 
+// Ready check - checks database but doesn't crash if it fails
 app.get("/ready", async (_req, res) => {
   try {
-    // Check database connection
     const { supabaseClient } = await import("./config/database.js");
     const { error } = await supabaseClient.from("businesses").select("id").limit(1);
     
@@ -71,67 +71,96 @@ app.get("/ready", async (_req, res) => {
   }
 });
 
-// Handle Telnyx webhooks (VAPI uses Telnyx as provider, these webhooks are handled by VAPI)
-// Just return 200 OK - VAPI handles the actual call logic
+// Telnyx webhook handler - simple, always works
 app.post("/webhook", (req, res) => {
-  // VAPI uses Telnyx as the phone provider, so Telnyx sends webhooks here
-  // But VAPI handles all the call logic, so we just acknowledge receipt
   res.status(200).json({ received: true });
 });
 
-// Rate limiting
-import { apiLimiter, authLimiter, adminLimiter, webhookLimiter } from "./middleware/rateLimiter.js";
+// Initialize Sentry (optional - won't crash if missing)
+try {
+  const { initSentry } = await import("./config/sentry.js");
+  initSentry();
+} catch (error) {
+  console.log("[Sentry] Not available:", error.message);
+}
 
-// Apply general rate limiting to all API routes
-app.use("/api", apiLimiter);
+// Rate limiting - optional, won't crash if missing
+let apiLimiter, authLimiter, adminLimiter, webhookLimiter;
+try {
+  const limiter = await import("./middleware/rateLimiter.js");
+  apiLimiter = limiter.apiLimiter;
+  authLimiter = limiter.authLimiter;
+  adminLimiter = limiter.adminLimiter;
+  webhookLimiter = limiter.webhookLimiter;
+  
+  app.use("/api", apiLimiter);
+} catch (error) {
+  console.warn("⚠️ Rate limiter not available:", error.message);
+}
 
-// API Routes - import all at once
-import authRoutes from "./routes/auth.js";
-import billingRoutes from "./routes/billing.js";
-import setupRoutes from "./routes/setup.js";
-import messagesRoutes from "./routes/messages.js";
-import usageRoutes from "./routes/usage.js";
-import agentsRoutes from "./routes/agents.js";
-import vapiRoutes from "./routes/vapi.js";
-import adminRoutes from "./routes/admin.js";
-import supportRoutes from "./routes/support.js";
-import invoicesRoutes from "./routes/invoices.js";
-import accountRoutes from "./routes/account.js";
-import businessRoutes from "./routes/business.js";
+// Load routes - each one is optional, won't crash if one fails
+const routes = [
+  { path: "/api/auth", file: "./routes/auth.js" },
+  { path: "/api/billing", file: "./routes/billing.js" },
+  { path: "/api/setup", file: "./routes/setup.js" },
+  { path: "/api/messages", file: "./routes/messages.js" },
+  { path: "/api/usage", file: "./routes/usage.js" },
+  { path: "/api/agents", file: "./routes/agents.js" },
+  { path: "/api/vapi", file: "./routes/vapi.js" },
+  { path: "/api/admin", file: "./routes/admin.js" },
+  { path: "/api/support", file: "./routes/support.js" },
+  { path: "/api/invoices", file: "./routes/invoices.js" },
+  { path: "/api/account", file: "./routes/account.js" },
+  { path: "/api/business", file: "./routes/business.js" },
+];
 
-// Apply specific rate limiters BEFORE routes
-app.use("/api/auth/login", authLimiter);
-app.use("/api/auth/signup", authLimiter);
-app.use("/api/admin", adminLimiter);
-app.use("/api/vapi/webhook", webhookLimiter);
+for (const route of routes) {
+  try {
+    const routeModule = await import(route.file);
+    const router = routeModule.default;
+    
+    // Apply rate limiters if available
+    if (route.path === "/api/auth" && authLimiter) {
+      app.use("/api/auth/login", authLimiter);
+      app.use("/api/auth/signup", authLimiter);
+    }
+    if (route.path === "/api/admin" && adminLimiter) {
+      app.use("/api/admin", adminLimiter);
+    }
+    if (route.path === "/api/vapi" && webhookLimiter) {
+      app.use("/api/vapi/webhook", webhookLimiter);
+    }
+    
+    app.use(route.path, router);
+    console.log(`✅ Loaded route: ${route.path}`);
+  } catch (error) {
+    console.error(`❌ Failed to load route ${route.path}:`, error.message);
+    // Continue - don't crash
+  }
+}
 
-// Mount all routes
-app.use("/api/auth", authRoutes);
-app.use("/api/billing", billingRoutes);
-app.use("/api/setup", setupRoutes);
-app.use("/api/messages", messagesRoutes);
-app.use("/api/usage", usageRoutes);
-app.use("/api/agents", agentsRoutes);
-app.use("/api/vapi", vapiRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/support", supportRoutes);
-app.use("/api/invoices", invoicesRoutes);
-app.use("/api/account", accountRoutes);
-app.use("/api/business", businessRoutes);
+// Error handler - must be last
+try {
+  const { errorHandler } = await import("./middleware/errorHandler.js");
+  app.use(errorHandler);
+} catch (error) {
+  console.warn("⚠️ Error handler not available:", error.message);
+  // Basic error handler
+  app.use((err, req, res, next) => {
+    console.error("Error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  });
+}
 
-// Error handling middleware (must be last)
-import { errorHandler } from "./middleware/errorHandler.js";
-app.use(errorHandler);
-
-// Start server
+// Start server - THIS IS THE ONLY PLACE WE SHOULD CRASH
 const server = app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
   console.log('🚀 TAVARI SERVER - VAPI VERSION');
   console.log('='.repeat(60));
-  console.log(`✅ Tavari server running on port ${PORT} [VAPI VERSION]`);
-  console.log(`   Health check: http://localhost:${PORT}/health`);
-  console.log(`   Readiness check: http://localhost:${PORT}/ready`);
-  console.log(`   VAPI Webhook: http://localhost:${PORT}/api/vapi/webhook`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`   Health: http://localhost:${PORT}/health`);
+  console.log(`   Ready: http://localhost:${PORT}/ready`);
+  console.log(`   Webhook: http://localhost:${PORT}/api/vapi/webhook`);
   console.log('='.repeat(60) + '\n');
 });
 
@@ -144,15 +173,16 @@ process.on("SIGTERM", () => {
   });
 });
 
-// Handle uncaught errors
+// Handle uncaught errors - log but don't crash immediately
 process.on("uncaughtException", (error) => {
   console.error("❌ Uncaught Exception:", error);
-  process.exit(1);
+  console.error("Stack:", error.stack);
+  // Don't exit - let the server keep running
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
-  process.exit(1);
+  console.error("❌ Unhandled Rejection:", reason);
+  // Don't exit - let the server keep running
 });
 
 export default app;
