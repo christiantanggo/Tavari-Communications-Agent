@@ -53,6 +53,7 @@ function DashboardContent() {
       console.error('[Dashboard] Failed to load dashboard data:', error);
     } finally {
       setLoading(false);
+      isLoadingRef.current = false;
     }
   };
 
@@ -62,7 +63,8 @@ function DashboardContent() {
 
   // Reload data whenever pathname changes to /dashboard
   useEffect(() => {
-    if (pathname === '/dashboard') {
+    if (pathname === '/dashboard' && prevPathnameRef.current !== pathname) {
+      prevPathnameRef.current = pathname;
       loadData();
       if (searchParams.get('refresh')) {
         router.replace('/dashboard', { scroll: false });
@@ -70,23 +72,29 @@ function DashboardContent() {
     }
   }, [pathname, searchParams, router]);
 
-  // Reload data when page becomes visible
+  // Reload data when page becomes visible (debounced)
   useEffect(() => {
+    let visibilityTimeout;
+    let focusTimeout;
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        loadData();
+        // Debounce visibility changes
+        clearTimeout(visibilityTimeout);
+        visibilityTimeout = setTimeout(() => {
+          loadData();
+        }, 3000); // Wait 3 seconds after becoming visible
       }
     };
 
-    const handleFocus = () => {
-      loadData();
-    };
+    // Remove focus handler - it was too aggressive and causing rate limits
+    // Users can manually refresh if needed
 
-    window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      window.removeEventListener('focus', handleFocus);
+      clearTimeout(visibilityTimeout);
+      clearTimeout(focusTimeout);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
