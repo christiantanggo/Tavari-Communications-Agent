@@ -38,13 +38,24 @@ router.post("/tickets", authenticate, async (req, res) => {
 
     if (error) throw error;
 
-    // Send notification to Tavari support
-    await sendSupportTicketNotification(ticket, business);
+    // Send notification to Tavari support (non-blocking)
+    sendSupportTicketNotification(ticket, business).catch((err) => {
+      console.error("[Support] Failed to send ticket notification (non-blocking):", err);
+    });
 
     res.status(201).json({ ticket });
   } catch (error) {
     console.error("Create ticket error:", error);
-    res.status(500).json({ error: "Failed to create support ticket" });
+    console.error("Error details:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    res.status(500).json({ 
+      error: "Failed to create support ticket",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -63,7 +74,16 @@ router.get("/tickets", authenticate, async (req, res) => {
     res.json({ tickets: data || [] });
   } catch (error) {
     console.error("Get tickets error:", error);
-    res.status(500).json({ error: "Failed to get support tickets" });
+    console.error("Error details:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    res.status(500).json({ 
+      error: "Failed to get support tickets",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
