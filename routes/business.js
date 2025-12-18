@@ -14,6 +14,14 @@ router.put("/settings", authenticate, async (req, res) => {
     console.log('[Business Settings] ========== SAVE REQUEST START ==========');
     console.log('[Business Settings] Request body:', JSON.stringify(req.body, null, 2));
     
+    console.log('[Business Settings] ========== WEBSITE FIELD DEBUG START ==========');
+    console.log('[Business Settings] req.body.website:', req.body.website);
+    console.log('[Business Settings] req.body.website type:', typeof req.body.website);
+    console.log('[Business Settings] req.body.website is undefined?', req.body.website === undefined);
+    console.log('[Business Settings] req.body.website is null?', req.body.website === null);
+    console.log('[Business Settings] req.body.website is empty string?', req.body.website === '');
+    console.log('[Business Settings] Full req.body:', JSON.stringify(req.body, null, 2));
+    
     const {
       ai_enabled,
       call_forward_rings,
@@ -35,6 +43,10 @@ router.put("/settings", authenticate, async (req, res) => {
       website,
     } = req.body;
     
+    console.log('[Business Settings] ========== EXTRACTED WEBSITE VALUE ==========');
+    console.log('[Business Settings] Extracted website variable:', website);
+    console.log('[Business Settings] Extracted website type:', typeof website);
+    console.log('[Business Settings] Extracted website is undefined?', website === undefined);
     console.log('[Business Settings] Extracted values:', {
       name,
       phone,
@@ -62,10 +74,26 @@ router.put("/settings", authenticate, async (req, res) => {
     if (address !== undefined) updateData.address = address;
     if (timezone !== undefined) updateData.timezone = timezone;
     if (public_phone_number !== undefined) updateData.public_phone_number = public_phone_number;
-    if (website !== undefined) updateData.website = website;
+    
+    console.log('[Business Settings] ========== CHECKING WEBSITE FOR updateData ==========');
+    console.log('[Business Settings] website value before check:', website);
+    console.log('[Business Settings] website !== undefined?', website !== undefined);
+    console.log('[Business Settings] website === undefined?', website === undefined);
+    console.log('[Business Settings] website === null?', website === null);
+    console.log('[Business Settings] website === ""?', website === '');
+    if (website !== undefined) {
+      console.log('[Business Settings] ✅ ADDING website to updateData:', website);
+      updateData.website = website;
+    } else {
+      console.log('[Business Settings] ❌ NOT adding website to updateData (undefined)');
+    }
+    console.log('[Business Settings] updateData after website check:', JSON.stringify(updateData, null, 2));
 
     // Update business settings in database
-    console.log('[Business Settings] Updating with data:', updateData);
+    console.log('[Business Settings] ========== FINAL updateData BEFORE DATABASE ==========');
+    console.log('[Business Settings] updateData.website:', updateData.website);
+    console.log('[Business Settings] updateData.website type:', typeof updateData.website);
+    console.log('[Business Settings] Full updateData:', JSON.stringify(updateData, null, 2));
     const updatedBusiness = await Business.update(req.businessId, updateData);
     if (!updatedBusiness) {
       return res.status(404).json({ error: "Business not found" });

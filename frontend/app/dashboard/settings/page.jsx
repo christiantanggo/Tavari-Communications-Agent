@@ -254,6 +254,14 @@ function SettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
+      console.log('[Settings Save] ========== WEBSITE FIELD DEBUG START ==========');
+      console.log('[Settings Save] businessInfo state:', JSON.stringify(businessInfo, null, 2));
+      console.log('[Settings Save] businessInfo.website value:', businessInfo.website);
+      console.log('[Settings Save] businessInfo.website type:', typeof businessInfo.website);
+      console.log('[Settings Save] businessInfo.website is undefined?', businessInfo.website === undefined);
+      console.log('[Settings Save] businessInfo.website is null?', businessInfo.website === null);
+      console.log('[Settings Save] businessInfo.website is empty string?', businessInfo.website === '');
+      
       console.log('[Settings Save] Current state before save:', {
         businessInfo,
         greetings,
@@ -273,7 +281,11 @@ function SettingsPage() {
         ...notifications,
       };
       
-      console.log('[Settings Save] Business payload:', businessPayload);
+      console.log('[Settings Save] ========== WEBSITE IN PAYLOAD ==========');
+      console.log('[Settings Save] businessPayload.website:', businessPayload.website);
+      console.log('[Settings Save] businessPayload.website type:', typeof businessPayload.website);
+      console.log('[Settings Save] Full businessPayload:', JSON.stringify(businessPayload, null, 2));
+      console.log('[Settings Save] ========== WEBSITE FIELD DEBUG END ==========');
       
       const businessResponse = await businessAPI.updateSettings(businessPayload);
       
