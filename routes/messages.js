@@ -35,18 +35,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// Mark message as read
-router.patch('/:messageId/read', authenticate, async (req, res) => {
-  try {
-    const message = await Message.markAsRead(req.params.messageId);
-    res.json({ message });
-  } catch (error) {
-    console.error('Mark message read error:', error);
-    res.status(500).json({ error: 'Failed to mark message as read' });
-  }
-});
-
-// Mark message as follow up
+// Mark message as follow up (define before /read to avoid route conflicts)
 router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
   try {
     console.log('[Messages API] Marking message as follow up:', req.params.messageId);
@@ -67,6 +56,17 @@ router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
     console.error('[Messages API] Error message:', error.message);
     console.error('[Messages API] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to mark message as follow up' });
+  }
+});
+
+// Mark message as read
+router.patch('/:messageId/read', authenticate, async (req, res) => {
+  try {
+    const message = await Message.markAsRead(req.params.messageId);
+    res.json({ message });
+  } catch (error) {
+    console.error('Mark message read error:', error);
+    res.status(500).json({ error: 'Failed to mark message as read' });
   }
 });
 
