@@ -412,6 +412,184 @@ router.get("/test-vapi", authenticateAdmin, async (req, res) => {
 });
 
 import { AIAgent } from "../models/AIAgent.js";
+import { PricingPackage } from "../models/PricingPackage.js";
+
+// ============================================
+// PACKAGE MANAGEMENT ROUTES
+// ============================================
+
+// Get all packages
+router.get("/packages", authenticateAdmin, async (req, res) => {
+  try {
+    const { includeInactive } = req.query;
+    const packages = await PricingPackage.findAll({
+      includeInactive: includeInactive === 'true',
+      includePrivate: true, // Admins can see all packages
+    });
+
+    // Get business count for each package
+    const packagesWithCounts = await Promise.all(
+      packages.map(async (pkg) => {
+        const businessCount = await PricingPackage.getBusinessCount(pkg.id);
+        return {
+          ...pkg,
+          business_count: businessCount,
+        };
+      })
+    );
+
+    res.json({ packages: packagesWithCounts });
+  } catch (error) {
+    console.error("Get packages error:", error);
+    res.status(500).json({ error: "Failed to get packages" });
+  }
+});
+
+// Get single package with businesses
+router.get("/packages/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const packageId = req.params.id;
+    const pkg = await PricingPackage.findById(packageId);
+    
+    if (!pkg) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    const businesses = await PricingPackage.getBusinesses(packageId);
+    const businessCount = businesses.length;
+
+    res.json({
+      package: {
+        ...pkg,
+        business_count: businessCount,
+        businesses,
+      },
+    });
+  } catch (error) {
+    console.error("Get package error:", error);
+    res.status(500).json({ error: "Failed to get package" });
+  }
+});
+
+// Create new package
+router.post("/packages", authenticateAdmin, async (req, res) => {
+  try {
+    const packageData = req.body;
+    
+    const pkg = await PricingPackage.create(packageData);
+
+    // Log activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      action: "create_package",
+      details: { package_id: pkg.id, package_name: pkg.name },
+    });
+
+    res.status(201).json({ package: pkg });
+  } catch (error) {
+    console.error("Create package error:", error);
+    res.status(500).json({ error: "Failed to create package" });
+  }
+});
+
+// Update package
+router.put("/packages/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const packageId = req.params.id;
+    const packageData = req.body;
+
+    const existingPackage = await PricingPackage.findById(packageId);
+    if (!existingPackage) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    const pkg = await PricingPackage.update(packageId, packageData);
+
+    // Log activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      action: "update_package",
+      details: { package_id: packageId, changes: packageData },
+    });
+
+    res.json({ package: pkg });
+  } catch (error) {
+    console.error("Update package error:", error);
+    res.status(500).json({ error: "Failed to update package" });
+  }
+});
+
+// Delete package (soft delete)
+router.delete("/packages/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const packageId = req.params.id;
+
+    const existingPackage = await PricingPackage.findById(packageId);
+    if (!existingPackage) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    // Check if package has businesses assigned
+    const businessCount = await PricingPackage.getBusinessCount(packageId);
+    if (businessCount > 0) {
+      return res.status(400).json({
+        error: `Cannot delete package. ${businessCount} business(es) are currently assigned to this package. Please reassign them first.`,
+        business_count: businessCount,
+      });
+    }
+
+    await PricingPackage.delete(packageId);
+
+    // Log activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      action: "delete_package",
+      details: { package_id: packageId, package_name: existingPackage.name },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Delete package error:", error);
+    res.status(500).json({ error: "Failed to delete package" });
+  }
+});
+
+// Assign package to business
+router.post("/packages/:packageId/assign/:businessId", authenticateAdmin, async (req, res) => {
+  try {
+    const { packageId, businessId } = req.params;
+
+    const pkg = await PricingPackage.findById(packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    const business = await Business.findById(businessId);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    // Update business with new package
+    await Business.update(businessId, {
+      package_id: packageId,
+      plan_tier: pkg.name.toLowerCase(), // Keep plan_tier for backwards compatibility
+      usage_limit_minutes: pkg.minutes_included,
+    });
+
+    // Log activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: businessId,
+      action: "assign_package",
+      details: { package_id: packageId, package_name: pkg.name },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Assign package error:", error);
+    res.status(500).json({ error: "Failed to assign package" });
+  }
+});
 
 export default router;
 

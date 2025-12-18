@@ -62,6 +62,9 @@ function AdminDashboardPage() {
               <Link href="/admin/accounts" className="text-gray-700 hover:text-blue-600">
                 Accounts
               </Link>
+              <Link href="/admin/packages" className="text-gray-700 hover:text-blue-600">
+                Packages
+              </Link>
               <Link href="/admin/activity" className="text-gray-700 hover:text-blue-600">
                 Activity
               </Link>
@@ -119,6 +122,12 @@ function AdminDashboardPage() {
               className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
             >
               Manage Accounts
+            </Link>
+            <Link
+              href="/admin/packages"
+              className="px-6 py-3 bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium"
+            >
+              Manage Packages
             </Link>
             <Link
               href="/admin/activity"
