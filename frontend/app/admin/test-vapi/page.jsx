@@ -4,6 +4,8 @@ import { useState } from 'react';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 function TestVAPIPage() {
   const [testing, setTesting] = useState(false);
   const [results, setResults] = useState(null);
@@ -16,7 +18,7 @@ function TestVAPIPage() {
 
     try {
       const token = getAdminToken();
-      const response = await fetch('/api/admin/test-vapi', {
+      const response = await fetch(`${API_URL}/api/admin/test-vapi`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 function AdminAccountsPage() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +25,7 @@ function AdminAccountsPage() {
       if (filterPlan) params.append('plan_tier', filterPlan);
       if (filterStatus) params.append('status', filterStatus);
 
-      const response = await fetch(`/api/admin/accounts?${params}`, {
+      const response = await fetch(`${API_URL}/api/admin/accounts?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

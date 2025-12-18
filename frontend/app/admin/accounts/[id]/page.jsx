@@ -6,6 +6,8 @@ import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 function AdminAccountDetailPage() {
   const params = useParams();
   const { success, error: showError } = useToast();
@@ -29,13 +31,13 @@ function AdminAccountDetailPage() {
     try {
       const token = getAdminToken();
       const [accountRes, usageRes, activityRes] = await Promise.all([
-        fetch(`/api/admin/accounts/${accountId}`, {
+        fetch(`${API_URL}/api/admin/accounts/${accountId}`, {
           headers: { 'Authorization': `Bearer ${token}` },
         }),
-        fetch(`/api/admin/accounts/${accountId}/usage`, {
+        fetch(`${API_URL}/api/admin/accounts/${accountId}/usage`, {
           headers: { 'Authorization': `Bearer ${token}` },
         }).catch(() => null),
-        fetch(`/api/admin/accounts/${accountId}/activity`, {
+        fetch(`${API_URL}/api/admin/accounts/${accountId}/activity`, {
           headers: { 'Authorization': `Bearer ${token}` },
         }).catch(() => null),
       ]);
@@ -65,7 +67,7 @@ function AdminAccountDetailPage() {
   const handleAddMinutes = async () => {
     try {
       const token = getAdminToken();
-      const response = await fetch(`/api/admin/accounts/${accountId}/minutes`, {
+      const response = await fetch(`${API_URL}/api/admin/accounts/${accountId}/minutes`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -88,7 +90,7 @@ function AdminAccountDetailPage() {
   const handleSetPricing = async () => {
     try {
       const token = getAdminToken();
-      const response = await fetch(`/api/admin/accounts/${accountId}/pricing`, {
+      const response = await fetch(`${API_URL}/api/admin/accounts/${accountId}/pricing`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -118,7 +120,7 @@ function AdminAccountDetailPage() {
 
     try {
       const token = getAdminToken();
-      const response = await fetch(`/api/admin/accounts/${accountId}/retry-activation`, {
+      const response = await fetch(`${API_URL}/api/admin/accounts/${accountId}/retry-activation`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -139,7 +141,7 @@ function AdminAccountDetailPage() {
   const handleSyncVAPI = async () => {
     try {
       const token = getAdminToken();
-      const response = await fetch(`/api/admin/accounts/${accountId}/sync-vapi`, {
+      const response = await fetch(`${API_URL}/api/admin/accounts/${accountId}/sync-vapi`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

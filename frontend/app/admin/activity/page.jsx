@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 function AdminActivityPage() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,7 +17,7 @@ function AdminActivityPage() {
   const loadActivity = async () => {
     try {
       const token = getAdminToken();
-      const response = await fetch('/api/admin/activity', {
+      const response = await fetch(`${API_URL}/api/admin/activity`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
