@@ -8,9 +8,11 @@ import { agentsAPI, authAPI, telnyxPhoneNumbersAPI } from '@/lib/api';
 import api from '@/lib/api';
 import TelnyxPhoneNumberSelector from '@/components/TelnyxPhoneNumberSelector';
 import TimeInput12Hour from '@/components/TimeInput12Hour';
+import { useToast } from '@/components/ToastProvider';
 
 function SetupPage() {
   const router = useRouter();
+  const { success, error: showError, warning } = useToast();
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -129,7 +131,7 @@ function SetupPage() {
               console.error('Phone number purchase error:', phoneError);
               console.error('Error response:', phoneError.response?.data);
               const errorMsg = phoneError.response?.data?.error || phoneError.message || 'Unknown error';
-              alert('Warning: Settings saved but phone number purchase failed: ' + errorMsg + '. You can try again later.');
+              warning('Settings saved but phone number purchase failed: ' + errorMsg + '. You can try again later.');
               // Don't block the rest of the save if phone purchase fails
             }
           }
@@ -141,9 +143,9 @@ function SetupPage() {
           countryCode: phoneNumberCountry,
         });
         setOnboardingComplete(true);
-        alert('Setup saved and completed!');
+        success('Setup saved and completed!');
       } else {
-        alert('Settings saved successfully!');
+        success('Settings saved successfully!');
       }
       
       // Reload data to get updated phone number
@@ -154,7 +156,7 @@ function SetupPage() {
         setSelectedPhoneNumber(null);
       }
     } catch (error) {
-      alert(error.response?.data?.error || 'Failed to save');
+      showError(error.response?.data?.error || 'Failed to save');
     } finally {
       setSaving(false);
     }
@@ -166,7 +168,7 @@ function SetupPage() {
       await api.post(`/setup/step${step}`, formData[`step${step}`]);
       return true;
     } catch (error) {
-      alert(error.response?.data?.error || 'Failed to save');
+      showError(error.response?.data?.error || 'Failed to save');
       return false;
     } finally {
       setSaving(false);
@@ -210,7 +212,7 @@ function SetupPage() {
             } catch (phoneError) {
               console.error('Phone number purchase error:', phoneError);
               // Continue with setup even if phone purchase fails
-              alert('Warning: Setup completed but phone number purchase failed. You can add a phone number later in settings.');
+              warning('Setup completed but phone number purchase failed. You can add a phone number later in settings.');
             }
           }
           
@@ -219,11 +221,11 @@ function SetupPage() {
             countryCode: phoneNumberCountry,
           });
           
-          alert('Setup complete! Your AI number is: ' + (res.data.telnyx_number || res.data.voximplant_number || 'Please add a phone number in settings'));
+          success('Setup complete! Your AI number is: ' + (res.data.telnyx_number || res.data.voximplant_number || 'Please add a phone number in settings'));
       setOnboardingComplete(true);
       await loadData();
     } catch (error) {
-      alert(error.response?.data?.error || 'Failed to finalize setup');
+      showError(error.response?.data?.error || 'Failed to finalize setup');
     } finally {
       setSaving(false);
     }

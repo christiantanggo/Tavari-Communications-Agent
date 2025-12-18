@@ -7,10 +7,12 @@ import DashboardHeader from '@/components/DashboardHeader';
 import { authAPI, billingAPI, businessAPI, agentsAPI } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import TimeInput12Hour from '@/components/TimeInput12Hour';
+import { useToast } from '@/components/ToastProvider';
 
 function SettingsPage() {
   const router = useRouter();
   const pathname = usePathname();
+  const { success, error: showError, info } = useToast();
   const [user, setUser] = useState(null);
   const [billing, setBilling] = useState(null);
   const [agent, setAgent] = useState(null);
@@ -381,7 +383,7 @@ function SettingsPage() {
         throw new Error('Failed to save agent settings');
       }
       
-      alert('Settings saved successfully!');
+      success('Settings saved successfully!');
       
       // Reload data to ensure UI reflects saved changes
       await loadData();
@@ -390,7 +392,7 @@ function SettingsPage() {
       console.error('[Settings Save] Error response:', error.response?.data);
       console.error('[Settings Save] Error stack:', error.stack);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to save settings';
-      alert(`Failed to save settings: ${errorMessage}`);
+      showError(`Failed to save settings: ${errorMessage}`);
     } finally {
       setSaving(false);
     }
@@ -400,7 +402,7 @@ function SettingsPage() {
     const phoneNumber = user?.business?.vapi_phone_number;
     if (phoneNumber) {
       navigator.clipboard.writeText(phoneNumber);
-      alert('Phone number copied to clipboard!');
+      info('Phone number copied to clipboard!');
     }
   };
 
@@ -414,16 +416,16 @@ function SettingsPage() {
       const response = await businessAPI.retryActivation();
       
       if (response.data?.success) {
-        alert(`Phone number provisioned successfully! Your Tavari number is: ${response.data.phone_number}`);
+        success(`Phone number provisioned successfully! Your Tavari number is: ${response.data.phone_number}`);
         await loadData();
         router.push('/dashboard?refresh=' + Date.now());
       } else {
-        alert('Failed to provision phone number. Please try again or contact support.');
+        showError('Failed to provision phone number. Please try again or contact support.');
       }
     } catch (error) {
       console.error('Activation error:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to provision phone number';
-      alert(`Failed to provision phone number: ${errorMessage}`);
+      showError(`Failed to provision phone number: ${errorMessage}`);
     } finally {
       setActivating(false);
     }
@@ -431,12 +433,12 @@ function SettingsPage() {
 
   const handleSendTestSMS = async () => {
     if (!notifications.sms_enabled) {
-      alert('SMS is not enabled. Please enable SMS notifications first.');
+      showError('SMS is not enabled. Please enable SMS notifications first.');
       return;
     }
 
     if (!notifications.sms_notification_number) {
-      alert('SMS notification number is not configured. Please add a phone number first.');
+      showError('SMS notification number is not configured. Please add a phone number first.');
       return;
     }
 
@@ -449,13 +451,13 @@ function SettingsPage() {
       });
       
       if (response.data?.success) {
-        alert(`Test SMS sent successfully to ${notifications.sms_notification_number}! Check your phone.`);
+        success(`Test SMS sent successfully to ${notifications.sms_notification_number}! Check your phone.`);
       } else {
-        alert('Failed to send test SMS. Please try again.');
+        showError('Failed to send test SMS. Please try again.');
       }
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test SMS';
-      alert(`Failed to send test SMS: ${errorMessage}`);
+      showError(`Failed to send test SMS: ${errorMessage}`);
     } finally {
       setSendingTestSMS(false);
     }
@@ -463,7 +465,7 @@ function SettingsPage() {
 
   const handleSendTestMissedCall = async () => {
     if (!user?.business?.email) {
-      alert('No email address found for your business. Please update your business email.');
+      showError('No email address found for your business. Please update your business email.');
       return;
     }
 
@@ -473,13 +475,13 @@ function SettingsPage() {
       const response = await businessAPI.sendTestMissedCall();
       
       if (response.data?.success) {
-        alert(`Test missed call email sent successfully to ${user.business.email}!`);
+        success(`Test missed call email sent successfully to ${user.business.email}!`);
       } else {
-        alert('Failed to send test missed call email. Please try again.');
+        showError('Failed to send test missed call email. Please try again.');
       }
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test missed call email';
-      alert(`Failed to send test missed call email: ${errorMessage}`);
+      showError(`Failed to send test missed call email: ${errorMessage}`);
     } finally {
       setSendingTestMissedCall(false);
     }
@@ -487,7 +489,7 @@ function SettingsPage() {
 
   const handleSendTestEmail = async () => {
     if (!user?.business?.email) {
-      alert('No email address found for your business. Please update your business email.');
+      showError('No email address found for your business. Please update your business email.');
       return;
     }
 
@@ -497,13 +499,13 @@ function SettingsPage() {
       const response = await businessAPI.sendTestEmail();
       
       if (response.data?.success) {
-        alert(`Test email sent successfully to ${user.business.email}!`);
+        success(`Test email sent successfully to ${user.business.email}!`);
       } else {
-        alert('Failed to send test email. Please try again.');
+        showError('Failed to send test email. Please try again.');
       }
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test email';
-      alert(`Failed to send test email: ${errorMessage}`);
+      showError(`Failed to send test email: ${errorMessage}`);
     } finally {
       setSendingTestEmail(false);
     }
@@ -511,7 +513,7 @@ function SettingsPage() {
 
   const addFAQ = () => {
     if (faqs.length >= 5) {
-      alert('Maximum of 5 FAQs allowed');
+      showError('Maximum of 5 FAQs allowed');
       return;
     }
     setFaqs([...faqs, { question: '', answer: '' }]);

@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { logout } from '@/lib/auth';
 import { agentsAPI } from '@/lib/api';
+import { useToast } from '@/components/ToastProvider';
 
 export default function DashboardHeader() {
   const router = useRouter();
   const [rebuilding, setRebuilding] = useState(false);
+  const { success, error: showError } = useToast();
 
   const handleRebuildAgent = async () => {
     if (!confirm('This will rebuild your AI agent with the latest settings. Continue?')) {
@@ -19,14 +21,14 @@ export default function DashboardHeader() {
     try {
       const response = await agentsAPI.rebuild();
       if (response.data?.success) {
-        alert('AI agent rebuilt successfully! The agent now has the latest information.');
+        success('AI agent rebuilt successfully! The agent now has the latest information.');
       } else {
-        alert('Failed to rebuild agent. Please try again.');
+        showError('Failed to rebuild agent. Please try again.');
       }
     } catch (error) {
       console.error('Rebuild agent error:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to rebuild agent';
-      alert(`Failed to rebuild agent: ${errorMessage}`);
+      showError(`Failed to rebuild agent: ${errorMessage}`);
     } finally {
       setRebuilding(false);
     }

@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
 import api from '@/lib/api';
+import { useToast } from '@/components/ToastProvider';
 
 function SupportPage() {
+  const { success, error: showError } = useToast();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -37,13 +39,13 @@ function SupportPage() {
     setSubmitting(true);
     try {
       await api.post('/support/tickets', formData);
-      alert('Support ticket submitted successfully! Our team will review it shortly.');
+      success('Support ticket submitted successfully! Our team will review it shortly.');
       setFormData({ issue_type: 'technical', description: '', urgency: 'normal' });
       setShowForm(false);
       await loadTickets();
     } catch (error) {
       console.error('Failed to submit ticket:', error);
-      alert(error.response?.data?.error || 'Failed to submit ticket. Please try again.');
+      showError(error.response?.data?.error || 'Failed to submit ticket. Please try again.');
     } finally {
       setSubmitting(false);
     }

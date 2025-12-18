@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import { invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
+import { useToast } from '@/components/ToastProvider';
 
 function InvoicesPage() {
+  const { error: showError } = useToast();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -37,7 +39,7 @@ function InvoicesPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      alert('Failed to download invoice');
+      showError('Failed to download invoice');
     }
   };
 

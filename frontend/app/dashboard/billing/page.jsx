@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import { authAPI, billingAPI, usageAPI, invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
+import { useToast } from '@/components/ToastProvider';
 
 function BillingPage() {
+  const { success, error: showError } = useToast();
   const [user, setUser] = useState(null);
   const [usage, setUsage] = useState(null);
   const [billing, setBilling] = useState(null);
@@ -56,11 +58,11 @@ function BillingPage() {
       // Update billing settings
       const { businessAPI } = await import('@/lib/api');
       await businessAPI.updateSettings(settings);
-      alert('Settings saved successfully!');
+      success('Settings saved successfully!');
       await loadData();
     } catch (error) {
       console.error('Save error:', error);
-      alert('Failed to save settings');
+      showError('Failed to save settings');
     } finally {
       setSaving(false);
     }
@@ -78,7 +80,7 @@ function BillingPage() {
       const res = await billingAPI.createCheckout(priceIds[planTier]);
       window.location.href = res.data.url;
     } catch (error) {
-      alert('Failed to start upgrade process');
+      showError('Failed to start upgrade process');
     }
   };
 
@@ -89,7 +91,7 @@ function BillingPage() {
       window.location.href = res.data.url;
     } catch (error) {
       console.error('Failed to open billing portal:', error);
-      alert('Failed to open billing portal. Please try again.');
+      showError('Failed to open billing portal. Please try again.');
     } finally {
       setLoadingPortal(false);
     }

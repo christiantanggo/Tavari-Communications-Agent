@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
+import { useToast } from '@/components/ToastProvider';
 
 function PackageDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const { error: showError } = useToast();
   const packageId = params.id;
   const [pkg, setPkg] = useState(null);
   const [businesses, setBusinesses] = useState([]);
@@ -43,7 +45,7 @@ function PackageDetailPage() {
       setBusinesses(data.package.businesses || []);
     } catch (error) {
       console.error('Failed to load package:', error);
-      alert('Failed to load package');
+      showError('Failed to load package');
     } finally {
       setLoading(false);
     }

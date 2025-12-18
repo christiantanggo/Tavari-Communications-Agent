@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
+import { useToast } from '@/components/ToastProvider';
 
 function PackagesPage() {
   const router = useRouter();
+  const { success, error: showError } = useToast();
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -55,7 +57,7 @@ function PackagesPage() {
       setPackages(data.packages || []);
     } catch (error) {
       console.error('Failed to load packages:', error);
-      alert('Failed to load packages');
+      showError('Failed to load packages');
     } finally {
       setLoading(false);
     }
@@ -95,14 +97,14 @@ function PackagesPage() {
         throw new Error(error.error || 'Failed to save package');
       }
 
-      alert(editingPackage ? 'Package updated successfully!' : 'Package created successfully!');
+      success(editingPackage ? 'Package updated successfully!' : 'Package created successfully!');
       setShowForm(false);
       setEditingPackage(null);
       resetForm();
       await loadPackages();
     } catch (error) {
       console.error('Failed to save package:', error);
-      alert(error.message || 'Failed to save package');
+      showError(error.message || 'Failed to save package');
     }
   };
 
@@ -148,11 +150,11 @@ function PackagesPage() {
         throw new Error(error.error || 'Failed to delete package');
       }
 
-      alert('Package deleted successfully!');
+      success('Package deleted successfully!');
       await loadPackages();
     } catch (error) {
       console.error('Failed to delete package:', error);
-      alert(error.message || 'Failed to delete package');
+      showError(error.message || 'Failed to delete package');
     }
   };
 

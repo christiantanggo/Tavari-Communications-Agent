@@ -7,9 +7,11 @@ import { authAPI, businessAPI } from '@/lib/api';
 import Link from 'next/link';
 import TelnyxPhoneNumberSelector from '@/components/TelnyxPhoneNumberSelector';
 import { extractAreaCode } from '@/lib/phoneFormatter';
+import { useToast } from '@/components/ToastProvider';
 
 function PhoneNumberPage() {
   const router = useRouter();
+  const { success } = useToast();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
@@ -49,7 +51,7 @@ function PhoneNumberPage() {
       const response = await businessAPI.provisionPhoneNumber({ phoneNumber: selectedNumber });
       
       if (response.data?.success) {
-        alert(`Phone number ${response.data.phone_number} provisioned successfully!`);
+        success(`Phone number ${response.data.phone_number} provisioned successfully!`);
         router.push('/dashboard?refresh=' + Date.now());
       } else {
         setError('Failed to provision phone number. Please try again.');

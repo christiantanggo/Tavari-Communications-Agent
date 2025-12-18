@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
+import { useToast } from '@/components/ToastProvider';
 
 function AdminAccountDetailPage() {
   const params = useParams();
+  const { success, error: showError } = useToast();
   const accountId = params.id;
   const [account, setAccount] = useState(null);
   const [usage, setUsage] = useState(null);
@@ -73,13 +75,13 @@ function AdminAccountDetailPage() {
       });
 
       if (response.ok) {
-        alert('Bonus minutes added successfully');
+        success('Bonus minutes added successfully');
         await loadAccount();
       } else {
-        alert('Failed to add minutes');
+        showError('Failed to add minutes');
       }
     } catch (error) {
-      alert('Failed to add minutes');
+      showError('Failed to add minutes');
     }
   };
 
@@ -99,13 +101,13 @@ function AdminAccountDetailPage() {
       });
 
       if (response.ok) {
-        alert('Custom pricing set successfully');
+        success('Custom pricing set successfully');
         await loadAccount();
       } else {
-        alert('Failed to set pricing');
+        showError('Failed to set pricing');
       }
     } catch (error) {
-      alert('Failed to set pricing');
+      showError('Failed to set pricing');
     }
   };
 
@@ -124,13 +126,13 @@ function AdminAccountDetailPage() {
       });
 
       if (response.ok) {
-        alert('Activation retried successfully');
+        success('Activation retried successfully');
         await loadAccount();
       } else {
-        alert('Failed to retry activation');
+        showError('Failed to retry activation');
       }
     } catch (error) {
-      alert('Failed to retry activation');
+      showError('Failed to retry activation');
     }
   };
 
@@ -145,12 +147,12 @@ function AdminAccountDetailPage() {
       });
 
       if (response.ok) {
-        alert('VAPI assistant synced successfully');
+        success('VAPI assistant synced successfully');
       } else {
-        alert('Failed to sync VAPI');
+        showError('Failed to sync VAPI');
       }
     } catch (error) {
-      alert('Failed to sync VAPI');
+      showError('Failed to sync VAPI');
     }
   };
 

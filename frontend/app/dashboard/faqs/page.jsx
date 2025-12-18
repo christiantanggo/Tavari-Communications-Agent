@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import { authAPI, agentsAPI } from '@/lib/api';
 import Link from 'next/link';
+import { useToast } from '@/components/ToastProvider';
 
 function FAQsPage() {
   const router = useRouter();
+  const { success, error: showError, warning } = useToast();
   const [user, setUser] = useState(null);
   const [agent, setAgent] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -69,7 +71,7 @@ function FAQsPage() {
 
   const addFaq = () => {
     if (faqs.length >= faqLimit) {
-      alert(`You've reached your FAQ limit of ${faqLimit}. Please upgrade your plan to add more FAQs.`);
+      warning(`You've reached your FAQ limit of ${faqLimit}. Please upgrade your plan to add more FAQs.`);
       return;
     }
     setFaqs([...faqs, { question: '', answer: '' }]);
@@ -91,7 +93,7 @@ function FAQsPage() {
     }
 
     if (validFaqs.length > faqLimit) {
-      alert(`You can only have ${faqLimit} FAQs on your current plan. Please remove ${validFaqs.length - faqLimit} FAQ(s) or upgrade your plan.`);
+      warning(`You can only have ${faqLimit} FAQs on your current plan. Please remove ${validFaqs.length - faqLimit} FAQ(s) or upgrade your plan.`);
       return;
     }
 
@@ -102,17 +104,17 @@ function FAQsPage() {
       if (response.data?.agent) {
         setAgent(response.data.agent);
         setFaqs(validFaqs);
-        alert('FAQs saved successfully!');
+        success('FAQs saved successfully!');
         // Use router.push with a timestamp to force refresh
         router.push('/dashboard?refresh=' + Date.now());
       } else {
-        alert('Failed to save FAQs');
+        showError('Failed to save FAQs');
       }
     } catch (error) {
       console.error('Save error:', error);
       console.error('Error response:', error.response?.data);
       const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save FAQs';
-      alert(`Failed to save FAQs: ${errorMessage}`);
+      showError(`Failed to save FAQs: ${errorMessage}`);
     } finally {
       setSaving(false);
     }
