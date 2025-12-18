@@ -4,9 +4,6 @@
 import express from "express";
 import { authenticate } from "../middleware/auth.js";
 import { Business } from "../models/Business.js";
-import { updateAssistant } from "../services/vapi.js";
-import { generateAssistantPrompt } from "../templates/vapi-assistant-template.js";
-import { AIAgent } from "../models/AIAgent.js";
 
 const router = express.Router();
 
@@ -14,6 +11,9 @@ const router = express.Router();
 router.put("/settings", authenticate, async (req, res) => {
   let updateData = {};
   try {
+    console.log('[Business Settings] ========== SAVE REQUEST START ==========');
+    console.log('[Business Settings] Request body:', JSON.stringify(req.body, null, 2));
+    
     const {
       ai_enabled,
       call_forward_rings,
@@ -26,7 +26,21 @@ router.put("/settings", authenticate, async (req, res) => {
       minutes_exhausted_behavior,
       overage_billing_enabled,
       overage_cap_minutes,
+      // Business info fields
+      name,
+      phone,
+      address,
+      timezone,
+      public_phone_number,
     } = req.body;
+    
+    console.log('[Business Settings] Extracted values:', {
+      name,
+      phone,
+      address,
+      timezone,
+      public_phone_number,
+    });
 
     updateData = {};
     if (ai_enabled !== undefined) updateData.ai_enabled = ai_enabled;
@@ -40,57 +54,48 @@ router.put("/settings", authenticate, async (req, res) => {
     if (minutes_exhausted_behavior !== undefined) updateData.minutes_exhausted_behavior = minutes_exhausted_behavior;
     if (overage_billing_enabled !== undefined) updateData.overage_billing_enabled = overage_billing_enabled;
     if (overage_cap_minutes !== undefined) updateData.overage_cap_minutes = overage_cap_minutes;
+    // Business info fields
+    if (name !== undefined) updateData.name = name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (address !== undefined) updateData.address = address;
+    if (timezone !== undefined) updateData.timezone = timezone;
+    if (public_phone_number !== undefined) updateData.public_phone_number = public_phone_number;
 
     // Update business settings in database
+    console.log('[Business Settings] Updating with data:', updateData);
     const updatedBusiness = await Business.update(req.businessId, updateData);
     if (!updatedBusiness) {
       return res.status(404).json({ error: "Business not found" });
     }
+    console.log('[Business Settings] Updated business:', {
+      id: updatedBusiness.id,
+      name: updatedBusiness.name,
+      phone: updatedBusiness.phone,
+      address: updatedBusiness.address,
+      public_phone_number: updatedBusiness.public_phone_number,
+      timezone: updatedBusiness.timezone,
+    });
 
-    // If AI settings changed, update VAPI assistant (non-blocking)
-    if (ai_enabled !== undefined || allow_call_transfer !== undefined || after_hours_behavior !== undefined) {
-      // Run VAPI update asynchronously - don't block the response
-      (async () => {
-        try {
-          const business = await Business.findById(req.businessId);
-          if (!business || !business.vapi_assistant_id) {
-            console.log("[Business Settings] No VAPI assistant ID, skipping update");
-            return;
-          }
-
-          const agent = await AIAgent.findByBusinessId(req.businessId);
-          const updatedPrompt = generateAssistantPrompt({
-            name: business.name,
-            public_phone_number: business.public_phone_number || "",
-            timezone: business.timezone,
-            business_hours: agent?.business_hours || {},
-            faqs: agent?.faqs || [],
-            contact_email: business.email,
-            address: business.address || "",
-            allow_call_transfer: business.allow_call_transfer ?? true,
-            after_hours_behavior: business.after_hours_behavior || "take_message",
-          });
-
-          await updateAssistant(business.vapi_assistant_id, {
-            model: {
-              messages: [
-                {
-                  role: "system",
-                  content: updatedPrompt,
-                },
-              ],
-            },
-          });
-          console.log("[Business Settings] VAPI assistant updated successfully");
-        } catch (vapiError) {
-          console.error("[Business Settings] Error updating VAPI assistant (non-blocking):", {
-            message: vapiError.message,
-            stack: vapiError.stack,
-          });
-          // Don't fail the request if VAPI update fails
-        }
-      })();
-    }
+    // ALWAYS rebuild VAPI assistant when business settings change
+    // This ensures the assistant has the latest business info (name, address, timezone, etc.)
+    console.log("[Business Settings] 🔄 Triggering VAPI assistant rebuild...");
+    (async () => {
+      try {
+        console.log("[Business Settings] Starting async rebuild process...");
+        const { rebuildAssistant } = await import('../services/vapi.js');
+        console.log("[Business Settings] Rebuild function imported, calling rebuildAssistant...");
+        await rebuildAssistant(req.businessId);
+        console.log("[Business Settings] ✅ VAPI assistant rebuilt successfully");
+      } catch (vapiError) {
+        console.error("[Business Settings] ❌❌❌ ERROR rebuilding VAPI assistant (non-blocking):", {
+          message: vapiError.message,
+          stack: vapiError.stack,
+          code: vapiError.code,
+          response: vapiError.response?.data,
+        });
+        // Don't fail the request if VAPI update fails
+      }
+    })();
 
     res.json({ success: true });
   } catch (error) {

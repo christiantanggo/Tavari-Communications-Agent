@@ -24,15 +24,27 @@ router.get('/', authenticate, async (req, res) => {
 // Update AI agent config
 router.put('/', authenticate, async (req, res) => {
   try {
+    console.log('[Agent Settings] ========== SAVE REQUEST START ==========');
+    console.log('[Agent Settings] Request body:', JSON.stringify(req.body, null, 2));
+    
     const {
       name,
       greeting_text,
+      opening_greeting,
+      ending_greeting,
       business_hours,
       faqs,
+      holiday_hours,
       message_settings,
       voice_settings,
       system_instructions,
     } = req.body;
+    
+    console.log('[Agent Settings] Extracted values:', {
+      opening_greeting,
+      ending_greeting,
+      faqs_count: faqs?.length || 0,
+    });
     
     // Validate FAQ limits
     if (faqs !== undefined) {
@@ -61,42 +73,44 @@ router.put('/', authenticate, async (req, res) => {
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (greeting_text !== undefined) updateData.greeting_text = greeting_text;
+    if (opening_greeting !== undefined) updateData.opening_greeting = opening_greeting;
+    if (ending_greeting !== undefined) updateData.ending_greeting = ending_greeting;
     if (business_hours !== undefined) updateData.business_hours = business_hours;
     if (faqs !== undefined) updateData.faqs = faqs;
+    if (holiday_hours !== undefined) updateData.holiday_hours = holiday_hours;
     if (message_settings !== undefined) updateData.message_settings = message_settings;
     if (voice_settings !== undefined) updateData.voice_settings = voice_settings;
     if (system_instructions !== undefined) updateData.system_instructions = system_instructions;
     
+    console.log('[Agent Settings] Updating with data:', updateData);
     const agent = await AIAgent.update(req.businessId, updateData);
+    console.log('[Agent Settings] Updated agent:', {
+      id: agent.id,
+      opening_greeting: agent.opening_greeting,
+      ending_greeting: agent.ending_greeting,
+      faqs_count: agent.faqs?.length || 0,
+    });
     
-    // Update VAPI assistant if FAQs or business hours changed
-    if (faqs !== undefined || business_hours !== undefined) {
+    // ALWAYS rebuild VAPI assistant when agent settings change
+    // This ensures the assistant has the latest data (FAQs, hours, greetings, etc.)
+    console.log('[Agent Settings] 🔄 Triggering VAPI assistant rebuild...');
+    (async () => {
       try {
-        const business = await Business.findById(req.businessId);
-        if (business.vapi_assistant_id) {
-          const { updateAssistant } = await import('../services/vapi.js');
-          const { generateAssistantPrompt } = await import('../templates/vapi-assistant-template.js');
-          
-          const updatedPrompt = generateAssistantPrompt({
-            name: business.name,
-            public_phone_number: business.public_phone_number || '',
-            timezone: business.timezone,
-            business_hours: agent.business_hours,
-            faqs: agent.faqs,
-            contact_email: business.email,
-            address: business.address || '',
-            allow_call_transfer: business.allow_call_transfer ?? true,
-          });
-          
-          await updateAssistant(business.vapi_assistant_id, {
-            systemPrompt: updatedPrompt,
-          });
-        }
+        console.log('[Agent Settings] Starting async rebuild process...');
+        const { rebuildAssistant } = await import('../services/vapi.js');
+        console.log('[Agent Settings] Rebuild function imported, calling rebuildAssistant...');
+        await rebuildAssistant(req.businessId);
+        console.log('[Agent Settings] ✅ VAPI assistant rebuilt successfully');
       } catch (vapiError) {
-        console.error('Error updating VAPI assistant:', vapiError);
+        console.error('[Agent Settings] ❌❌❌ ERROR rebuilding VAPI assistant (non-blocking):', {
+          message: vapiError.message,
+          stack: vapiError.stack,
+          code: vapiError.code,
+          response: vapiError.response?.data,
+        });
         // Don't fail the request if VAPI update fails
       }
-    }
+    })();
     
     res.json({ agent });
   } catch (error) {

@@ -44,7 +44,7 @@ export async function createAssistant(businessData) {
   try {
     const { generateAssistantPrompt } = await import("../templates/vapi-assistant-template.js");
     
-    const systemPrompt = generateAssistantPrompt(businessData);
+    const systemPrompt = await generateAssistantPrompt(businessData);
     
     // Get custom greetings, personality, and voice from agent data
     const openingGreeting = businessData.opening_greeting || `Hello! Thanks for calling ${businessData.name}. How can I help you today?`;
@@ -729,6 +729,122 @@ export async function updateAssistant(assistantId, updates) {
 }
 
 /**
+ * Rebuild VAPI assistant with all current business and agent data
+ * This ensures the assistant always has the latest information
+ * @param {string} businessId - Business ID
+ * @returns {Promise<void>}
+ */
+export async function rebuildAssistant(businessId) {
+  try {
+    console.log(`[VAPI Rebuild] ========== REBUILDING ASSISTANT FOR BUSINESS ${businessId} ==========`);
+    
+    // Import models
+    const { Business } = await import("../models/Business.js");
+    const { AIAgent } = await import("../models/AIAgent.js");
+    const { generateAssistantPrompt } = await import("../templates/vapi-assistant-template.js");
+    
+    // Fetch latest business data
+    const business = await Business.findById(businessId);
+    if (!business) {
+      console.error(`[VAPI Rebuild] Business not found: ${businessId}`);
+      return;
+    }
+    
+    if (!business.vapi_assistant_id) {
+      console.log(`[VAPI Rebuild] No VAPI assistant ID for business ${businessId}, skipping rebuild`);
+      return;
+    }
+    
+    // Fetch latest agent data
+    const agent = await AIAgent.findByBusinessId(businessId);
+    if (!agent) {
+      console.warn(`[VAPI Rebuild] Agent not found for business ${businessId}, using defaults`);
+    }
+    
+    console.log(`[VAPI Rebuild] Business data:`, {
+      name: business.name,
+      timezone: business.timezone,
+      address: business.address,
+      public_phone_number: business.public_phone_number,
+    });
+    
+    console.log(`[VAPI Rebuild] Agent data:`, {
+      faqs_count: agent?.faqs?.length || 0,
+      has_business_hours: !!agent?.business_hours,
+      holiday_hours_count: agent?.holiday_hours?.length || 0,
+      opening_greeting: agent?.opening_greeting ? 'set' : 'not set',
+      ending_greeting: agent?.ending_greeting ? 'set' : 'not set',
+    });
+    
+    // Generate fresh prompt with all current data
+    const updatedPrompt = await generateAssistantPrompt({
+      name: business.name,
+      public_phone_number: business.public_phone_number || "",
+      timezone: business.timezone,
+      business_hours: agent?.business_hours || {},
+      holiday_hours: agent?.holiday_hours || [],
+      faqs: agent?.faqs || [],
+      contact_email: business.email,
+      address: business.address || "",
+      allow_call_transfer: business.allow_call_transfer ?? true,
+      after_hours_behavior: business.after_hours_behavior || "take_message",
+      opening_greeting: agent?.opening_greeting,
+      ending_greeting: agent?.ending_greeting,
+      personality: agent?.personality || 'professional',
+    });
+    
+    console.log(`[VAPI Rebuild] Generated prompt length: ${updatedPrompt.length} characters`);
+    console.log(`[VAPI Rebuild] Prompt includes FAQs: ${updatedPrompt.includes('FREQUENTLY ASKED QUESTIONS')}`);
+    console.log(`[VAPI Rebuild] Prompt includes business hours: ${updatedPrompt.includes('Regular Business Hours')}`);
+    console.log(`[VAPI Rebuild] Prompt includes holiday hours: ${updatedPrompt.includes('Holiday Hours')}`);
+    
+    // Build update payload
+    const updatePayload = {
+      model: {
+        messages: [
+          {
+            role: "system",
+            content: updatedPrompt,
+          },
+        ],
+      },
+    };
+    
+    // Update first message if opening greeting exists
+    if (agent?.opening_greeting) {
+      updatePayload.firstMessage = agent.opening_greeting;
+    }
+    
+    // Update ending greeting if it exists
+    if (agent?.ending_greeting) {
+      updatePayload.endCallFunctionEnabled = true;
+    }
+    
+    // Update the assistant
+    console.log(`[VAPI Rebuild] Updating assistant ${business.vapi_assistant_id} with payload:`, {
+      hasModel: !!updatePayload.model,
+      hasFirstMessage: !!updatePayload.firstMessage,
+      hasEndCallFunction: !!updatePayload.endCallFunctionEnabled,
+    });
+    
+    const updatedAssistant = await updateAssistant(business.vapi_assistant_id, updatePayload);
+    
+    console.log(`[VAPI Rebuild] ✅ Assistant rebuilt successfully for business ${businessId}`);
+    console.log(`[VAPI Rebuild] Updated assistant ID: ${updatedAssistant?.id || business.vapi_assistant_id}`);
+  } catch (error) {
+    console.error(`[VAPI Rebuild] ❌❌❌ ERROR rebuilding assistant:`, {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      response: error.response?.data,
+      businessId,
+      assistantId: business?.vapi_assistant_id,
+    });
+    throw error;
+  }
+}
+
+/**
  * Get call summary from VAPI
  * @param {string} callId - VAPI call ID
  * @returns {Promise<Object>} Call summary with transcript and metadata
@@ -742,6 +858,7 @@ export async function getCallSummary(callId) {
       duration: response.data.duration,
       endedReason: response.data.endedReason,
       metadata: response.data.metadata,
+      messages: response.data.messages || [], // Include messages array from VAPI
     };
   } catch (error) {
     console.error("Error getting call summary:", error.response?.data || error.message);
