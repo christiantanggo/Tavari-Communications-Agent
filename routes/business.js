@@ -81,11 +81,17 @@ router.put("/settings", authenticate, async (req, res) => {
     console.log('[Business Settings] website === undefined?', website === undefined);
     console.log('[Business Settings] website === null?', website === null);
     console.log('[Business Settings] website === ""?', website === '');
+    // Handle website - include it even if it's an empty string (user might want to clear it)
     if (website !== undefined) {
       console.log('[Business Settings] ✅ ADDING website to updateData:', website);
       updateData.website = website;
+    } else if (website === null) {
+      console.log('[Business Settings] ✅ ADDING website as null to updateData');
+      updateData.website = null;
     } else {
       console.log('[Business Settings] ❌ NOT adding website to updateData (undefined)');
+      console.log('[Business Settings] website value:', website);
+      console.log('[Business Settings] website === undefined:', website === undefined);
     }
     console.log('[Business Settings] updateData after website check:', JSON.stringify(updateData, null, 2));
 

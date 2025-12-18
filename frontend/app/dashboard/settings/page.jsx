@@ -270,15 +270,17 @@ function SettingsPage() {
       });
       
       // Save business info
+      // IMPORTANT: Put website AFTER spreads to ensure it's not overwritten
       const businessPayload = {
         name: businessInfo.name,
         phone: businessInfo.phone,
         address: businessInfo.address,
-        website: businessInfo.website,
         timezone: businessInfo.timezone,
         public_phone_number: businessInfo.public_phone_number,
         ...aiSettings,
         ...notifications,
+        // Put website last to ensure it's never overwritten
+        website: businessInfo.website,
       };
       
       console.log('[Settings Save] ========== WEBSITE IN PAYLOAD ==========');
@@ -287,7 +289,15 @@ function SettingsPage() {
       console.log('[Settings Save] Full businessPayload:', JSON.stringify(businessPayload, null, 2));
       console.log('[Settings Save] ========== WEBSITE FIELD DEBUG END ==========');
       
+      console.log('[Settings Save] ========== MAKING API CALL ==========');
+      console.log('[Settings Save] API endpoint: PUT /api/business/settings');
+      console.log('[Settings Save] Payload being sent:', JSON.stringify(businessPayload, null, 2));
+      
       const businessResponse = await businessAPI.updateSettings(businessPayload);
+      
+      console.log('[Settings Save] ========== API RESPONSE RECEIVED ==========');
+      console.log('[Settings Save] Response status:', businessResponse.status);
+      console.log('[Settings Save] Response data:', JSON.stringify(businessResponse.data, null, 2));
       
       if (!businessResponse.data?.success) {
         throw new Error('Failed to save business settings');
