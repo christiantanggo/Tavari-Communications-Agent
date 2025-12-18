@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
 import { authAPI, usageAPI, callsAPI, messagesAPI } from '@/lib/api';
