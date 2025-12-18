@@ -522,7 +522,14 @@ router.post("/webhook", async (req, res) => {
   setImmediate(async () => {
     const webhookId = `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     try {
-      console.log(`[VAPI Webhook ${webhookId}] 📥 Processing ${eventType || 'unknown'} event`);
+      const event = req.body;
+      // VAPI sends event type in multiple possible locations:
+      // 1. event.type (direct)
+      // 2. event.event (alternative)
+      // 3. event.message.type (nested in message object - most common for status-update and end-of-call-report)
+      const eventTypeFromEvent = event.type || event.event || event.message?.type;
+      
+      console.log(`[VAPI Webhook ${webhookId}] 📥 Processing ${eventTypeFromEvent || 'unknown'} event`);
 
       // Verify webhook signature if secret is provided
       if (process.env.VAPI_WEBHOOK_SECRET) {
@@ -531,14 +538,7 @@ router.post("/webhook", async (req, res) => {
         // verifySignature(req.body, signature);
       }
 
-      const event = req.body;
-      // VAPI sends event type in multiple possible locations:
-      // 1. event.type (direct)
-      // 2. event.event (alternative)
-      // 3. event.message.type (nested in message object - most common for status-update and end-of-call-report)
-      const eventType = event.type || event.event || event.message?.type;
-
-      if (!eventType) {
+      if (!eventTypeFromEvent) {
         console.warn(`[VAPI Webhook ${webhookId}] ⚠️  No event type found in request body`);
         console.warn(`[VAPI Webhook ${webhookId}] Event keys:`, Object.keys(event).join(', '));
         return;
@@ -559,14 +559,14 @@ router.post("/webhook", async (req, res) => {
       });
 
       // Handle different event types (async - don't block)
-      switch (eventType) {
+      switch (eventTypeFromEvent) {
         case "call-start":
         case "status-update":
           // status-update with status "ringing" or "started" is equivalent to call-start
-          if (eventType === "status-update" && (event.message?.status === "ringing" || event.message?.status === "started")) {
+          if (eventTypeFromEvent === "status-update" && (event.message?.status === "ringing" || event.message?.status === "started")) {
             console.log(`[VAPI Webhook ${webhookId}] 🟢 Processing status-update (call-start) event`);
             await handleCallStart(event.message || event);
-          } else if (eventType === "status-update" && event.message?.status === "ended") {
+          } else if (eventTypeFromEvent === "status-update" && event.message?.status === "ended") {
             // status-update with status "ended" is equivalent to call-end
             console.log(`[VAPI Webhook ${webhookId}] 🔴 Processing status-update (call-end) event`);
             await handleCallEnd(event.message || event);
@@ -603,7 +603,7 @@ router.post("/webhook", async (req, res) => {
           await handleCallEnd(event.message || event);
           break;
         default:
-          console.log(`[VAPI Webhook ${webhookId}] ⚠️ Unhandled event type: ${eventType}`);
+          console.log(`[VAPI Webhook ${webhookId}] ⚠️ Unhandled event type: ${eventTypeFromEvent}`);
       }
       
       console.log(`[VAPI Webhook ${webhookId}] ========== WEBHOOK PROCESSING SUCCESS ==========`);

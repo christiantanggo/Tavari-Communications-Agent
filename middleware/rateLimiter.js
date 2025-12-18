@@ -32,11 +32,13 @@ export const adminLimiter = rateLimit({
 });
 
 // Webhook rate limiter (more lenient)
+// Note: validate: false disables trust proxy validation warning since we're behind Railway's proxy
 export const webhookLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 100, // Limit each IP to 100 webhook requests per minute
   message: "Too many webhook requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false, // Disable validation warnings for trust proxy (we're behind Railway's proxy)
 });
 
