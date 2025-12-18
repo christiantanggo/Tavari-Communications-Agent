@@ -40,6 +40,12 @@ export default function DashboardHeader() {
           <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
             Dashboard
           </Link>
+          <Link href="/dashboard/settings" className="text-gray-700 hover:text-blue-600">
+            Settings
+          </Link>
+          <button onClick={logout} className="text-gray-700 hover:text-blue-600">
+            Logout
+          </button>
           <button
             onClick={handleRebuildAgent}
             disabled={rebuilding}
@@ -47,12 +53,6 @@ export default function DashboardHeader() {
             title="Rebuild AI agent with latest settings"
           >
             {rebuilding ? 'Rebuilding...' : '🔄 Rebuild Agent'}
-          </button>
-          <Link href="/dashboard/settings" className="text-gray-700 hover:text-blue-600">
-            Settings
-          </Link>
-          <button onClick={logout} className="text-gray-700 hover:text-blue-600">
-            Logout
           </button>
         </div>
       </div>
