@@ -84,6 +84,24 @@ router.get('/status', authenticate, async (req, res) => {
     const business = await Business.findById(req.businessId);
     
     let subscription = null;
+    let paymentMethod = null;
+    let customer = null;
+    
+    if (business.stripe_customer_id) {
+      try {
+        customer = await stripe.customers.retrieve(business.stripe_customer_id);
+        
+        // Get default payment method
+        if (customer.invoice_settings?.default_payment_method) {
+          paymentMethod = await stripe.paymentMethods.retrieve(
+            customer.invoice_settings.default_payment_method
+          );
+        }
+      } catch (error) {
+        console.error('Error retrieving customer:', error);
+      }
+    }
+    
     if (business.stripe_subscription_id) {
       try {
         subscription = await stripe.subscriptions.retrieve(business.stripe_subscription_id);
@@ -96,10 +114,29 @@ router.get('/status', authenticate, async (req, res) => {
       plan_tier: business.plan_tier,
       usage_limit_minutes: business.usage_limit_minutes,
       subscription: subscription ? {
+        id: subscription.id,
         status: subscription.status,
+        current_period_start: subscription.current_period_start,
         current_period_end: subscription.current_period_end,
         cancel_at_period_end: subscription.cancel_at_period_end,
+        canceled_at: subscription.canceled_at,
+        items: subscription.items.data.map(item => ({
+          price_id: item.price.id,
+          amount: item.price.unit_amount / 100,
+          currency: item.price.currency,
+          interval: item.price.recurring?.interval,
+        })),
       } : null,
+      payment_method: paymentMethod ? {
+        type: paymentMethod.type,
+        card: paymentMethod.card ? {
+          brand: paymentMethod.card.brand,
+          last4: paymentMethod.card.last4,
+          exp_month: paymentMethod.card.exp_month,
+          exp_year: paymentMethod.card.exp_year,
+        } : null,
+      } : null,
+      customer_id: business.stripe_customer_id,
     });
   } catch (error) {
     console.error('Get billing status error:', error);

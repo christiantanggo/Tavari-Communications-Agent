@@ -44,7 +44,54 @@ router.put('/', authenticate, async (req, res) => {
       opening_greeting,
       ending_greeting,
       faqs_count: faqs?.length || 0,
+      holiday_hours_count: holiday_hours?.length || 0,
     });
+    
+    // CRITICAL: Normalize holiday hours dates to ensure they're in YYYY-MM-DD format
+    // This prevents timezone issues when dates are stored/retrieved
+    let normalizedHolidayHours = holiday_hours;
+    if (holiday_hours && Array.isArray(holiday_hours)) {
+      normalizedHolidayHours = holiday_hours.map(h => {
+        if (!h || !h.date) return h;
+        
+        // Ensure date is in YYYY-MM-DD format (timezone-agnostic)
+        let dateStr = h.date;
+        
+        // If it's a Date object, extract the date parts in local timezone
+        if (dateStr instanceof Date) {
+          const year = dateStr.getFullYear();
+          const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+          const day = String(dateStr.getDate()).padStart(2, '0');
+          dateStr = `${year}-${month}-${day}`;
+        } 
+        // If it's an ISO string with time, extract just the date part
+        else if (typeof dateStr === 'string' && dateStr.includes('T')) {
+          dateStr = dateStr.split('T')[0];
+        }
+        // If it's already in YYYY-MM-DD format, use it as-is
+        else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          // Already in correct format, use as-is
+          dateStr = dateStr;
+        }
+        // If it's in a different format, try to parse it
+        else if (typeof dateStr === 'string') {
+          // Try to extract YYYY-MM-DD from various formats
+          const dateMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (dateMatch) {
+            dateStr = dateMatch[0]; // Use the matched YYYY-MM-DD
+          } else {
+            console.warn(`[Agent Settings] Could not parse holiday date: ${dateStr}, using as-is`);
+          }
+        }
+        
+        return { ...h, date: dateStr };
+      });
+      
+      console.log('[Agent Settings] ========== HOLIDAY HOURS NORMALIZATION ==========');
+      console.log('[Agent Settings] Original holiday hours from frontend:', JSON.stringify(holiday_hours.map(h => ({ name: h?.name, date: h?.date, dateType: typeof h?.date })), null, 2));
+      console.log('[Agent Settings] Normalized holiday hours before saving:', JSON.stringify(normalizedHolidayHours.map(h => ({ name: h?.name, date: h?.date, dateType: typeof h?.date })), null, 2));
+      console.log('[Agent Settings] ===================================================');
+    }
     
     // Validate FAQ limits
     if (faqs !== undefined) {
@@ -77,7 +124,8 @@ router.put('/', authenticate, async (req, res) => {
     if (ending_greeting !== undefined) updateData.ending_greeting = ending_greeting;
     if (business_hours !== undefined) updateData.business_hours = business_hours;
     if (faqs !== undefined) updateData.faqs = faqs;
-    if (holiday_hours !== undefined) updateData.holiday_hours = holiday_hours;
+    // Use normalized holiday hours to ensure dates are in YYYY-MM-DD format
+    if (holiday_hours !== undefined) updateData.holiday_hours = normalizedHolidayHours;
     if (message_settings !== undefined) updateData.message_settings = message_settings;
     if (voice_settings !== undefined) updateData.voice_settings = voice_settings;
     if (system_instructions !== undefined) updateData.system_instructions = system_instructions;
@@ -122,16 +170,21 @@ router.put('/', authenticate, async (req, res) => {
 // Rebuild VAPI assistant (manual trigger)
 router.post('/rebuild', authenticate, async (req, res) => {
   try {
-    console.log('[Agent Rebuild] ========== MANUAL REBUILD REQUEST ==========');
-    console.log('[Agent Rebuild] Business ID:', req.businessId);
+    console.log('[Agent Rebuild] Rebuild request for business:', req.businessId);
+    
+    if (!process.env.VAPI_API_KEY) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'VAPI API key not configured' 
+      });
+    }
     
     const { rebuildAssistant } = await import('../services/vapi.js');
     await rebuildAssistant(req.businessId);
     
-    console.log('[Agent Rebuild] ✅ Manual rebuild completed successfully');
     res.json({ success: true, message: 'AI agent rebuilt successfully' });
   } catch (error) {
-    console.error('[Agent Rebuild] ❌ Error during manual rebuild:', error);
+    console.error('[Agent Rebuild] Error:', error.message);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Failed to rebuild agent' 

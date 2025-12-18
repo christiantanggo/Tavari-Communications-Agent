@@ -85,64 +85,44 @@ export class UsageMinutes {
   }
 
   static async getCurrentCycleUsage(business_id, cycleStart, cycleEnd) {
-    // Try to use billing cycle columns, fallback to date-based if they don't exist
-    let query = supabaseClient
+    console.log(`[UsageMinutes] ========== GET CURRENT CYCLE USAGE START ==========`);
+    console.log(`[UsageMinutes] business_id: ${business_id}`);
+    console.log(`[UsageMinutes] cycleStart: ${cycleStart}`);
+    console.log(`[UsageMinutes] cycleEnd: ${cycleEnd}`);
+    
+    const cycleStartStr = cycleStart instanceof Date ? cycleStart.toISOString().split('T')[0] : cycleStart;
+    const cycleEndStr = cycleEnd instanceof Date ? cycleEnd.toISOString().split('T')[0] : cycleEnd;
+    
+    console.log(`[UsageMinutes] Querying for date range: ${cycleStartStr} to ${cycleEndStr}`);
+    
+    // Always use date-based query - it's the most reliable
+    // The date column represents when the usage occurred, which should fall within the billing cycle
+    const { data, error } = await supabaseClient
       .from('usage_minutes')
-      .select('minutes_used, date')
-      .eq('business_id', business_id);
+      .select('minutes_used, date, created_at')
+      .eq('business_id', business_id)
+      .gte('date', cycleStartStr)
+      .lte('date', cycleEndStr);
     
-    // Try billing cycle columns first
-    try {
-      const cycleStartStr = cycleStart instanceof Date ? cycleStart.toISOString().split('T')[0] : cycleStart;
-      const cycleEndStr = cycleEnd instanceof Date ? cycleEnd.toISOString().split('T')[0] : cycleEnd;
-      
-      query = query
-        .gte('billing_cycle_start', cycleStartStr)
-        .lte('billing_cycle_end', cycleEndStr);
-    } catch (err) {
-      // Columns don't exist, use date range instead
-      const cycleStartStr = cycleStart instanceof Date ? cycleStart.toISOString().split('T')[0] : cycleStart;
-      const cycleEndStr = cycleEnd instanceof Date ? cycleEnd.toISOString().split('T')[0] : cycleEnd;
-      query = query
-        .gte('date', cycleStartStr)
-        .lte('date', cycleEndStr);
+    if (error) {
+      console.error(`[UsageMinutes] ❌❌❌ Database query error:`, error);
+      console.error(`[UsageMinutes] Error message:`, error.message);
+      console.error(`[UsageMinutes] Error code:`, error.code);
+      throw error;
     }
     
-    const { data, error } = await query;
-    
-    // If error is about missing columns, fallback to date-based query
-    if (error && (error.message.includes('column') || error.message.includes('does not exist'))) {
-      console.warn('⚠️ Billing cycle columns missing, using date-based query. Run RUN_THIS_MIGRATION.sql');
-      const cycleStartStr = cycleStart instanceof Date ? cycleStart.toISOString().split('T')[0] : cycleStart;
-      const cycleEndStr = cycleEnd instanceof Date ? cycleEnd.toISOString().split('T')[0] : cycleEnd;
-      const { data: data2, error: error2 } = await supabaseClient
-        .from('usage_minutes')
-        .select('minutes_used')
-        .eq('business_id', business_id)
-        .gte('date', cycleStartStr)
-        .lte('date', cycleEndStr);
-      if (error2) throw error2;
-      const totalMinutes = data2?.reduce((sum, row) => sum + parseFloat(row.minutes_used || 0), 0) || 0;
-      const { Business } = await import('./Business.js');
-      const business = await Business.findById(business_id);
-      const planLimit = business?.usage_limit_minutes || 0;
-      const bonusMinutes = business?.bonus_minutes || 0;
-      const totalAvailable = planLimit + bonusMinutes;
-      const overageMinutes = Math.max(0, totalMinutes - totalAvailable);
-      return {
-        totalMinutes,
-        overageMinutes,
-        minutesUsed: totalMinutes - overageMinutes,
-        minutesRemaining: Math.max(0, totalAvailable - totalMinutes),
-        billing_cycle_start: cycleStart,
-        billing_cycle_end: cycleEnd,
-        minutes_total: totalAvailable,
-      };
+    console.log(`[UsageMinutes] Found ${data?.length || 0} usage records`);
+    if (data && data.length > 0) {
+      console.log(`[UsageMinutes] Sample records:`, JSON.stringify(data.slice(0, 3), null, 2));
     }
     
-    if (error) throw error;
+    const totalMinutes = data?.reduce((sum, row) => {
+      const minutes = parseFloat(row.minutes_used || 0);
+      console.log(`[UsageMinutes] Adding ${minutes} minutes from record (date: ${row.date})`);
+      return sum + minutes;
+    }, 0) || 0;
     
-    const totalMinutes = data?.reduce((sum, row) => sum + parseFloat(row.minutes_used || 0), 0) || 0;
+    console.log(`[UsageMinutes] Total minutes calculated: ${totalMinutes}`);
     
     // Get business to calculate overage
     const { Business } = await import('./Business.js');
@@ -152,7 +132,7 @@ export class UsageMinutes {
     const totalAvailable = planLimit + bonusMinutes;
     const overageMinutes = Math.max(0, totalMinutes - totalAvailable);
     
-    return {
+    const result = {
       totalMinutes,
       overageMinutes,
       minutesUsed: totalMinutes - overageMinutes,
@@ -161,5 +141,32 @@ export class UsageMinutes {
       billing_cycle_end: cycleEnd,
       minutes_total: totalAvailable,
     };
+    
+    console.log(`[UsageMinutes] Result:`, JSON.stringify(result, null, 2));
+    console.log(`[UsageMinutes] ========== GET CURRENT CYCLE USAGE SUCCESS ==========`);
+    
+    return result;
+  }
+
+  static async getUsageTrends(business_id, months = 6) {
+    const now = new Date();
+    const trends = [];
+    
+    for (let i = months - 1; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1;
+      
+      const usage = await this.getMonthlyUsage(business_id, year, month);
+      
+      trends.push({
+        year,
+        month,
+        monthName: date.toLocaleString('default', { month: 'long' }),
+        minutes: usage,
+      });
+    }
+    
+    return trends;
   }
 }

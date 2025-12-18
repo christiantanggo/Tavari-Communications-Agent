@@ -289,7 +289,7 @@ router.post("/accounts/:id/sync-vapi", authenticateAdmin, async (req, res) => {
     const { generateAssistantPrompt } = await import("../templates/vapi-assistant-template.js");
     const agent = await AIAgent.findByBusinessId(business.id);
     
-    const updatedPrompt = generateAssistantPrompt({
+    const updatedPrompt = await generateAssistantPrompt({
       name: business.name,
       public_phone_number: business.public_phone_number || "",
       timezone: business.timezone,

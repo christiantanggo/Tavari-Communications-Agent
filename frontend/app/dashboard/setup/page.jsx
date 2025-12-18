@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
+import DashboardHeader from '@/components/DashboardHeader';
 import { agentsAPI, authAPI, telnyxPhoneNumbersAPI } from '@/lib/api';
 import api from '@/lib/api';
 import TelnyxPhoneNumberSelector from '@/components/TelnyxPhoneNumberSelector';
@@ -19,8 +20,8 @@ function SetupPage() {
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState(null);
   const [phoneNumberCountry, setPhoneNumberCountry] = useState('US');
   const [formData, setFormData] = useState({
-    step1: { name: '', phone: '', address: '', timezone: 'America/New_York' },
-    step2: { greeting_text: '' },
+    step1: { name: '', phone: '', address: '', website: '', timezone: 'America/New_York' },
+    step2: { greeting_text: '', opening_greeting: '', ending_greeting: '' },
     step3: {
       business_hours: {
         monday: { open: '09:00', close: '17:00', closed: false },
@@ -67,6 +68,7 @@ function SetupPage() {
             name: setupRes.data.business.name || '',
             phone: setupRes.data.business.phone || '',
             address: setupRes.data.business.address || '',
+            website: setupRes.data.business.website || '',
             timezone: setupRes.data.business.timezone || 'America/New_York',
           },
         }));
@@ -75,7 +77,11 @@ function SetupPage() {
       if (setupRes.data.agent) {
         setFormData(prev => ({
           ...prev,
-          step2: { greeting_text: setupRes.data.agent.greeting_text || '' },
+          step2: { 
+            greeting_text: setupRes.data.agent.greeting_text || '',
+            opening_greeting: setupRes.data.agent.opening_greeting || '',
+            ending_greeting: setupRes.data.agent.ending_greeting || '',
+          },
           step3: { 
             business_hours: setupRes.data.agent.business_hours || prev.step3.business_hours 
           },
@@ -177,6 +183,18 @@ function SetupPage() {
   const handleBack = () => {
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const handleSkip = () => {
+    const skipWarning = '⚠️ Warning: Skipping this step may prevent your AI phone agent from functioning properly or providing correct information to your callers. The AI needs this information to answer questions accurately and handle calls effectively.\n\nAre you sure you want to skip this step?';
+    
+    if (confirm(skipWarning)) {
+      if (currentStep < 5) {
+        setCurrentStep(currentStep + 1);
+      } else {
+        handleFinalize();
+      }
     }
   };
 
@@ -544,11 +562,7 @@ function SetupPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen bg-gray-50">
-        <nav className="bg-white shadow-sm">
-          <div className="container mx-auto px-4 py-4">
-            <h1 className="text-xl font-bold text-blue-600">Setup Wizard</h1>
-          </div>
-        </nav>
+        <DashboardHeader />
 
         <main className="container mx-auto px-4 py-8 max-w-2xl">
           <div className="bg-white rounded-lg shadow p-6">
@@ -601,21 +615,69 @@ function SetupPage() {
                     placeholder="Enter your business address"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Website</label>
+                  <input
+                    type="url"
+                    value={formData.step1?.website || ''}
+                    onChange={(e) => updateFormData('step1', 'website', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    placeholder="https://example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Timezone</label>
+                  <select
+                    value={formData.step1?.timezone || 'America/New_York'}
+                    onChange={(e) => updateFormData('step1', 'timezone', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                  >
+                    <option value="America/New_York">Eastern Time (ET)</option>
+                    <option value="America/Chicago">Central Time (CT)</option>
+                    <option value="America/Denver">Mountain Time (MT)</option>
+                    <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                    <option value="America/Phoenix">Arizona Time</option>
+                    <option value="America/Anchorage">Alaska Time</option>
+                    <option value="Pacific/Honolulu">Hawaii Time</option>
+                  </select>
+                </div>
               </div>
             )}
 
             {currentStep === 2 && (
               <div className="space-y-4">
-                <h2 className="text-2xl font-bold mb-4 text-gray-900">Greeting</h2>
-                <p className="text-sm text-gray-600 mb-4">Customize how your AI greets callers</p>
+                <h2 className="text-2xl font-bold mb-4 text-gray-900">Greetings</h2>
+                <p className="text-sm text-gray-600 mb-4">Customize how your AI greets and ends calls</p>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Greeting Text</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Opening Greeting</label>
+                  <textarea
+                    value={formData.step2?.opening_greeting || ''}
+                    onChange={(e) => updateFormData('step2', 'opening_greeting', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    rows={3}
+                    placeholder="Hello! Thank you for calling [Business Name]. How can I help you today?"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">This is what the AI says when answering the call</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Ending Greeting</label>
+                  <textarea
+                    value={formData.step2?.ending_greeting || ''}
+                    onChange={(e) => updateFormData('step2', 'ending_greeting', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    rows={3}
+                    placeholder="Thank you for calling [Business Name]. Have a great day!"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">This is what the AI says when ending the call</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Legacy Greeting Text (Optional)</label>
                   <textarea
                     value={formData.step2?.greeting_text || ''}
                     onChange={(e) => updateFormData('step2', 'greeting_text', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                    rows={4}
-                    placeholder="Hello! Thank you for calling [Business Name]. How can I help you today?"
+                    rows={2}
+                    placeholder="Legacy field - use Opening/Ending greetings above instead"
                   />
                 </div>
               </div>
@@ -802,23 +864,31 @@ function SetupPage() {
               >
                 Back
               </button>
-              {currentStep < 5 ? (
+              <div className="flex gap-2">
                 <button
-                  onClick={handleNext}
-                  disabled={saving}
-                  className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+                  onClick={handleSkip}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
                 >
-                  Next
+                  Skip
                 </button>
-              ) : (
-                <button
-                  onClick={handleFinalize}
-                  disabled={saving}
-                  className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
-                >
-                  {saving ? 'Finalizing...' : 'Complete Setup'}
-                </button>
-              )}
+                {currentStep < 5 ? (
+                  <button
+                    onClick={handleNext}
+                    disabled={saving}
+                    className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleFinalize}
+                    disabled={saving}
+                    className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
+                  >
+                    {saving ? 'Finalizing...' : 'Complete Setup'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </main>

@@ -185,13 +185,31 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
     console.log(`[Usage] Creating usage record with data:`, JSON.stringify(usageData, null, 2));
     
     const created = await UsageMinutes.create(usageData);
-    console.log(`[Usage] ✅ Usage record created successfully:`, JSON.stringify(created, null, 2));
+    
+    if (!created || !created.id) {
+      console.error(`[Usage] ❌❌❌ Usage record creation returned null/undefined!`);
+      console.error(`[Usage] Created record:`, created);
+      throw new Error("Usage record creation failed - no record returned");
+    }
+    
+    console.log(`[Usage] ✅✅✅ Usage record created successfully:`, {
+      id: created.id,
+      business_id: created.business_id,
+      call_session_id: created.call_session_id,
+      minutes_used: created.minutes_used,
+      date: created.date,
+      created_at: created.created_at,
+    });
     console.log(`[Usage] ========== RECORD CALL USAGE SUCCESS ==========`);
+    return created;
   } catch (error) {
     console.error(`[Usage] ========== RECORD CALL USAGE ERROR ==========`);
+    console.error(`[Usage] Error name:`, error.name);
     console.error(`[Usage] Error creating usage record:`, error);
     console.error(`[Usage] Error message:`, error.message);
+    console.error(`[Usage] Error code:`, error.code);
     console.error(`[Usage] Error stack:`, error.stack);
+    console.error(`[Usage] Full error:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     throw error;
   }
 

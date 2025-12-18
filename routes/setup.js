@@ -49,12 +49,13 @@ router.get('/data', authenticate, async (req, res) => {
 // Update step 1: Business info
 router.post('/step1', authenticate, async (req, res) => {
   try {
-    const { name, phone, address, timezone } = req.body;
+    const { name, phone, address, website, timezone } = req.body;
     
     await Business.update(req.businessId, {
       name,
       phone,
       address,
+      website,
       timezone,
     });
     
@@ -68,10 +69,12 @@ router.post('/step1', authenticate, async (req, res) => {
 // Update step 2: Greeting
 router.post('/step2', authenticate, async (req, res) => {
   try {
-    const { greeting_text } = req.body;
+    const { greeting_text, opening_greeting, ending_greeting } = req.body;
     
     await AIAgent.update(req.businessId, {
       greeting_text,
+      opening_greeting,
+      ending_greeting,
     });
     
     res.json({ success: true });

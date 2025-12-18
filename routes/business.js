@@ -32,6 +32,7 @@ router.put("/settings", authenticate, async (req, res) => {
       address,
       timezone,
       public_phone_number,
+      website,
     } = req.body;
     
     console.log('[Business Settings] Extracted values:', {
@@ -40,6 +41,7 @@ router.put("/settings", authenticate, async (req, res) => {
       address,
       timezone,
       public_phone_number,
+      website,
     });
 
     updateData = {};
@@ -60,6 +62,7 @@ router.put("/settings", authenticate, async (req, res) => {
     if (address !== undefined) updateData.address = address;
     if (timezone !== undefined) updateData.timezone = timezone;
     if (public_phone_number !== undefined) updateData.public_phone_number = public_phone_number;
+    if (website !== undefined) updateData.website = website;
 
     // Update business settings in database
     console.log('[Business Settings] Updating with data:', updateData);

@@ -53,6 +53,10 @@ export default function DashboardHeader() {
             Billing
           </Link>
           <span className="text-gray-300">|</span>
+          <Link href="/dashboard/support" className="text-gray-700 hover:text-blue-600">
+            Support
+          </Link>
+          <span className="text-gray-300">|</span>
           <button onClick={logout} className="text-gray-700 hover:text-blue-600">
             Logout
           </button>

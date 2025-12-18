@@ -29,6 +29,7 @@ function SettingsPage() {
     address: '',
     timezone: 'America/New_York',
     public_phone_number: '',
+    website: '',
   });
   
   // Business hours state
@@ -60,6 +61,12 @@ function SettingsPage() {
     call_forward_rings: 4,
     after_hours_behavior: 'take_message',
     allow_call_transfer: true,
+  });
+  
+  // Voice settings state
+  const [voiceSettings, setVoiceSettings] = useState({
+    provider: 'openai',
+    voice_id: 'alloy',
   });
   
   // Notifications state
@@ -117,6 +124,7 @@ function SettingsPage() {
           address: business.address || '',
           timezone: business.timezone || 'America/New_York',
           public_phone_number: business.public_phone_number || '',
+          website: business.website || '',
         };
         console.log('[Settings Load] Setting businessInfo:', loadedBusinessInfo);
         setBusinessInfo(loadedBusinessInfo);
@@ -174,29 +182,65 @@ function SettingsPage() {
         setGreetings(loadedGreetings);
         
         // Handle holiday hours - filter out past holidays and sort by date
+        // CRITICAL: Use date strings (YYYY-MM-DD) directly, don't convert to Date objects
+        // This prevents timezone issues where dates shift when converted
+        // Get today's date as YYYY-MM-DD in LOCAL timezone (not UTC)
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Reset to start of day for comparison
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         
         const loadedHolidayHours = (agentData.holiday_hours && Array.isArray(agentData.holiday_hours))
           ? agentData.holiday_hours
-              .map(h => ({ ...h }))
+              .map(h => {
+                // Ensure date is in YYYY-MM-DD format (timezone-agnostic)
+                let dateStr = h.date;
+                if (dateStr) {
+                  // If it's a Date object or ISO string, extract just the date part
+                  if (dateStr instanceof Date) {
+                    // Get date in local timezone (not UTC)
+                    const year = dateStr.getFullYear();
+                    const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+                    const day = String(dateStr.getDate()).padStart(2, '0');
+                    dateStr = `${year}-${month}-${day}`;
+                  } else if (dateStr.includes('T')) {
+                    // If it's an ISO string, extract just the date part (before the T)
+                    dateStr = dateStr.split('T')[0];
+                  }
+                  // Ensure it's in YYYY-MM-DD format
+                  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                    console.warn('[Settings Load] Invalid date format:', dateStr);
+                    dateStr = null;
+                  }
+                }
+                return { ...h, date: dateStr };
+              })
               .filter(h => {
                 if (!h.date) return false; // Remove holidays without dates
-                const holidayDate = new Date(h.date);
-                holidayDate.setHours(0, 0, 0, 0);
-                return holidayDate >= today; // Keep only future/current holidays
+                // Compare date strings directly (YYYY-MM-DD format is sortable)
+                return h.date >= todayStr; // Keep only future/current holidays
               })
               .sort((a, b) => {
-                // Sort by date: closest to today first
+                // Sort by date string: closest to today first
                 if (!a.date) return 1; // Holidays without dates go to end
                 if (!b.date) return -1;
-                const dateA = new Date(a.date);
-                const dateB = new Date(b.date);
-                return dateA - dateB; // Ascending order (closest first)
+                // Date strings in YYYY-MM-DD format are directly sortable
+                return a.date.localeCompare(b.date); // Ascending order (closest first)
               })
           : [];
         console.log('[Settings Load] Setting holiday hours (filtered and sorted):', loadedHolidayHours);
         setHolidayHours(loadedHolidayHours);
+        
+        // Handle voice settings
+        const loadedVoiceSettings = (agentData.voice_settings && typeof agentData.voice_settings === 'object')
+          ? {
+              provider: agentData.voice_settings.provider || 'openai',
+              voice_id: agentData.voice_settings.voice_id || 'alloy',
+            }
+          : {
+              provider: 'openai',
+              voice_id: 'alloy',
+            };
+        console.log('[Settings Load] Setting voiceSettings:', loadedVoiceSettings);
+        setVoiceSettings(loadedVoiceSettings);
       }
     } catch (error) {
       console.error('Failed to load settings data:', error);
@@ -235,34 +279,100 @@ function SettingsPage() {
       }
       
       // Filter out past holidays and sort by date before saving (clean up old holidays)
+      // CRITICAL: Use date strings (YYYY-MM-DD) directly, don't convert to Date objects
+      // This prevents timezone issues where dates shift when converted
+      // Get today's date as YYYY-MM-DD in LOCAL timezone (not UTC)
       const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      
       const activeHolidayHours = holidayHours
+        .map(h => {
+          // Ensure date is in YYYY-MM-DD format (timezone-agnostic)
+          let dateStr = h.date;
+          if (dateStr) {
+            // If it's a Date object or ISO string, extract just the date part
+            if (dateStr instanceof Date) {
+              // Get date in local timezone (not UTC)
+              const year = dateStr.getFullYear();
+              const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+              const day = String(dateStr.getDate()).padStart(2, '0');
+              dateStr = `${year}-${month}-${day}`;
+            } else if (dateStr.includes('T')) {
+              // If it's an ISO string, extract just the date part (before the T)
+              dateStr = dateStr.split('T')[0];
+            }
+            // Ensure it's in YYYY-MM-DD format
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+              console.warn('[Settings Save] Invalid date format:', dateStr);
+              dateStr = null;
+            }
+          }
+          return { ...h, date: dateStr };
+        })
         .filter(h => {
           if (!h.date) return true; // Keep holidays without dates (new ones being added)
-          const holidayDate = new Date(h.date);
-          holidayDate.setHours(0, 0, 0, 0);
-          return holidayDate >= today; // Keep only future/current holidays
+          // Compare date strings directly (YYYY-MM-DD format is sortable)
+          return h.date >= todayStr; // Keep only future/current holidays
         })
         .sort((a, b) => {
-          // Sort by date: closest to today first
+          // Sort by date string: closest to today first
           if (!a.date) return 1; // Holidays without dates go to end
           if (!b.date) return -1;
-          const dateA = new Date(a.date);
-          const dateB = new Date(b.date);
-          return dateA - dateB; // Ascending order (closest first)
+          // Date strings in YYYY-MM-DD format are directly sortable
+          return a.date.localeCompare(b.date); // Ascending order (closest first)
         });
       
-      // Save agent settings (business hours, FAQs, greetings, holiday hours)
+      // CRITICAL: Ensure all holiday dates are in YYYY-MM-DD format before saving
+      // Double-check to prevent any timezone conversion issues
+      const finalHolidayHours = activeHolidayHours.map(h => {
+        if (!h || !h.date) return h;
+        
+        // Ensure date is a string in YYYY-MM-DD format
+        let dateStr = h.date;
+        
+        // If it's already a string in YYYY-MM-DD format, use it as-is
+        if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          return { ...h, date: dateStr };
+        }
+        
+        // If it's a Date object, extract date parts in LOCAL timezone (not UTC!)
+        if (dateStr instanceof Date) {
+          const year = dateStr.getFullYear();
+          const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+          const day = String(dateStr.getDate()).padStart(2, '0');
+          dateStr = `${year}-${month}-${day}`;
+          console.log(`[Settings Save] Converted Date object to string: ${dateStr}`);
+        }
+        // If it's an ISO string, extract just the date part
+        else if (typeof dateStr === 'string' && dateStr.includes('T')) {
+          dateStr = dateStr.split('T')[0];
+          console.log(`[Settings Save] Extracted date from ISO string: ${dateStr}`);
+        }
+        // Try to extract YYYY-MM-DD from the string
+        else if (typeof dateStr === 'string') {
+          const dateMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
+          if (dateMatch) {
+            dateStr = dateMatch[1];
+            console.log(`[Settings Save] Extracted date from string: ${dateStr}`);
+          }
+        }
+        
+        return { ...h, date: dateStr };
+      });
+      
+      console.log('[Settings Save] Final holiday hours to save:', JSON.stringify(finalHolidayHours.map(h => ({ name: h?.name, date: h?.date })), null, 2));
+      
+      // Save agent settings (business hours, FAQs, greetings, holiday hours, voice settings)
       const agentPayload = {
         business_hours: businessHours,
         faqs: faqs,
         opening_greeting: greetings.opening_greeting || '',
         ending_greeting: greetings.ending_greeting || '',
-        holiday_hours: activeHolidayHours, // Save only active (future) holidays
+        holiday_hours: finalHolidayHours, // Use normalized holiday hours
+        voice_settings: voiceSettings, // Save voice settings
       };
       
-      console.log('[Settings Save] Agent payload:', agentPayload);
+      console.log('[Settings Save] Agent payload:', JSON.stringify(agentPayload, null, 2));
       console.log('[Settings Save] Greetings state:', greetings);
       
       const agentResponse = await agentsAPI.update(agentPayload);
@@ -542,6 +652,16 @@ function SettingsPage() {
                     />
                   </div>
                   <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Website</label>
+                    <input
+                      type="url"
+                      value={businessInfo.website}
+                      onChange={(e) => setBusinessInfo({ ...businessInfo, website: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      placeholder="https://example.com"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Timezone</label>
                     <select
                       value={businessInfo.timezone}
@@ -615,12 +735,11 @@ function SettingsPage() {
                             // Add new holiday and sort by date
                             const newHoliday = { name: '', date: '', closed: false, open: '09:00', close: '17:00' };
                             const updated = [...holidayHours, newHoliday].sort((a, b) => {
-                              // Sort by date: closest to today first
+                              // Sort by date string: closest to today first
                               if (!a.date) return 1; // Holidays without dates go to end
                               if (!b.date) return -1;
-                              const dateA = new Date(a.date);
-                              const dateB = new Date(b.date);
-                              return dateA - dateB; // Ascending order (closest first)
+                              // Date strings in YYYY-MM-DD format are directly sortable
+                              return a.date.localeCompare(b.date); // Ascending order (closest first)
                             });
                             setHolidayHours(updated);
                           }}
@@ -664,17 +783,21 @@ function SettingsPage() {
                                 <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
                                 <input
                                   type="date"
-                                  value={holiday.date}
+                                  value={holiday.date || ''}
                                   onChange={(e) => {
                                     const updated = [...holidayHours];
-                                    updated[index].date = e.target.value;
-                                    // Sort by date after updating
+                                    // CRITICAL: Store the date value directly as YYYY-MM-DD string (timezone-agnostic)
+                                    // e.target.value from HTML5 date input is ALWAYS in YYYY-MM-DD format
+                                    // Never convert this to a Date object - it will cause timezone shifts!
+                                    const dateValue = e.target.value;
+                                    console.log(`[Settings UI] Date input changed: ${dateValue} (type: ${typeof dateValue})`);
+                                    updated[index].date = dateValue;
+                                    // Sort by date string after updating
                                     const sorted = updated.sort((a, b) => {
                                       if (!a.date) return 1; // Holidays without dates go to end
                                       if (!b.date) return -1;
-                                      const dateA = new Date(a.date);
-                                      const dateB = new Date(b.date);
-                                      return dateA - dateB; // Ascending order (closest first)
+                                      // Date strings in YYYY-MM-DD format are directly sortable
+                                      return a.date.localeCompare(b.date); // Ascending order (closest first)
                                     });
                                     setHolidayHours(sorted);
                                   }}
@@ -890,6 +1013,32 @@ function SettingsPage() {
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
+                      </div>
+
+                      <div className="border-t pt-4 mt-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1">
+                            AI Voice
+                          </label>
+                          <p className="text-xs text-gray-500 mb-2">
+                            Choose the voice for your AI assistant. All OpenAI voices are included at no extra cost.
+                          </p>
+                          <select
+                            value={voiceSettings.voice_id}
+                            onChange={(e) => setVoiceSettings({ ...voiceSettings, voice_id: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                          >
+                            <option value="alloy">Alloy - Professional and balanced (Recommended)</option>
+                            <option value="echo">Echo - Clear and confident</option>
+                            <option value="fable">Fable - Expressive and engaging</option>
+                            <option value="onyx">Onyx - Deep and authoritative</option>
+                            <option value="nova">Nova - Warm and friendly</option>
+                            <option value="shimmer">Shimmer - Smooth and calm</option>
+                          </select>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Note: After changing the voice, click "Rebuild Agent" in the dashboard header to apply the change.
+                          </p>
+                        </div>
                       </div>
                     </>
                   )}

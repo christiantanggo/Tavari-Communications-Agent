@@ -15,15 +15,28 @@ function AdminDashboardPage() {
   const loadStats = async () => {
     try {
       const token = getAdminToken();
-      const response = await fetch('/api/admin/stats', {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+      const response = await fetch(`${API_URL}/api/admin/stats`, {
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
       setStats(data.stats);
     } catch (error) {
       console.error('Failed to load stats:', error);
+      setStats({
+        total_accounts: 0,
+        active_accounts: 0,
+        inactive_accounts: 0,
+        by_tier: { starter: 0, core: 0, pro: 0 },
+      });
     } finally {
       setLoading(false);
     }
