@@ -37,6 +37,9 @@ export default function DashboardHeader() {
       <div className="container mx-auto px-4 py-4 flex justify-between items-center">
         <h1 className="text-xl font-bold text-blue-600">Tavari Dashboard</h1>
         <div className="flex items-center space-x-4">
+          <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
+            Dashboard
+          </Link>
           <button
             onClick={handleRebuildAgent}
             disabled={rebuilding}
