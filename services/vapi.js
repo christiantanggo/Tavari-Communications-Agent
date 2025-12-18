@@ -827,9 +827,11 @@ export async function rebuildAssistant(businessId) {
     console.log(`[VAPI Rebuild] Prompt includes business hours: ${updatedPrompt.includes('Regular Business Hours')}`);
     console.log(`[VAPI Rebuild] Prompt includes holiday hours: ${updatedPrompt.includes('Holiday Hours')}`);
     
-    // Build update payload
+    // Build update payload - MUST include model provider and model name
     const updatePayload = {
       model: {
+        provider: "openai", // Required by VAPI
+        model: "gpt-4o", // Required by VAPI
         messages: [
           {
             role: "system",
@@ -852,6 +854,8 @@ export async function rebuildAssistant(businessId) {
     // Update the assistant
     console.log(`[VAPI Rebuild] Updating assistant ${business.vapi_assistant_id} with payload:`, {
       hasModel: !!updatePayload.model,
+      modelProvider: updatePayload.model.provider,
+      modelModel: updatePayload.model.model,
       hasFirstMessage: !!updatePayload.firstMessage,
       hasEndCallFunction: !!updatePayload.endCallFunctionEnabled,
     });
