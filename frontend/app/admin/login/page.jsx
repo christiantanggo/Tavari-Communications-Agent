@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -17,7 +19,7 @@ function AdminLoginPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/admin/login', {
+      const response = await fetch(`${API_URL}/api/admin/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
