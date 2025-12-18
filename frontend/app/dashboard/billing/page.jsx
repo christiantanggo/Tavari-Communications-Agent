@@ -2,15 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
-import { authAPI, billingAPI, usageAPI } from '@/lib/api';
+import { authAPI, billingAPI, usageAPI, invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
 
 function BillingPage() {
   const [user, setUser] = useState(null);
   const [usage, setUsage] = useState(null);
   const [billing, setBilling] = useState(null);
+  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadingPortal, setLoadingPortal] = useState(false);
   const [settings, setSettings] = useState({
     minutes_exhausted_behavior: 'disable_ai',
     overage_billing_enabled: false,
@@ -23,14 +25,16 @@ function BillingPage() {
 
   const loadData = async () => {
     try {
-      const [userRes, usageRes, billingRes] = await Promise.all([
+      const [userRes, usageRes, billingRes, invoicesRes] = await Promise.all([
         authAPI.getMe(),
         usageAPI.getStatus().catch(() => ({ data: null })),
         billingAPI.getStatus().catch(() => ({ data: null })),
+        invoicesAPI.list().catch(() => ({ data: { invoices: [] } })),
       ]);
       setUser(userRes.data);
       setUsage(usageRes.data);
       setBilling(billingRes.data);
+      setInvoices(invoicesRes.data.invoices || []);
       
       if (userRes.data?.business) {
         setSettings({
@@ -78,6 +82,36 @@ function BillingPage() {
     }
   };
 
+  const handleManageBilling = async () => {
+    setLoadingPortal(true);
+    try {
+      const res = await billingAPI.getPortal();
+      window.location.href = res.data.url;
+    } catch (error) {
+      console.error('Failed to open billing portal:', error);
+      alert('Failed to open billing portal. Please try again.');
+    } finally {
+      setLoadingPortal(false);
+    }
+  };
+
+  const formatCardNumber = (last4) => {
+    return `•••• •••• •••• ${last4}`;
+  };
+
+  const formatExpiry = (month, year) => {
+    return `${String(month).padStart(2, '0')}/${String(year).slice(-2)}`;
+  };
+
+  const getPlanDetails = (tier) => {
+    const plans = {
+      starter: { price: 79, minutes: 250, faqs: 5, name: 'Starter' },
+      core: { price: 129, minutes: 500, faqs: 10, name: 'Core' },
+      pro: { price: 179, minutes: 750, faqs: 20, name: 'Pro' },
+    };
+    return plans[tier] || plans.starter;
+  };
+
   if (loading) {
     return (
       <AuthGuard>
@@ -94,31 +128,135 @@ function BillingPage() {
         <nav className="bg-white shadow-sm">
           <div className="container mx-auto px-4 py-4 flex justify-between items-center">
             <h1 className="text-xl font-bold text-blue-600">Billing & Usage</h1>
-            <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
-              Dashboard
-            </Link>
+            <div className="flex gap-4 items-center">
+              <Link href="/dashboard/invoices" className="text-gray-700 hover:text-blue-600">
+                Invoices
+              </Link>
+              <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
+                Dashboard
+              </Link>
+            </div>
           </div>
         </nav>
 
-        <main className="container mx-auto px-4 py-8 max-w-4xl">
-          {/* Current Plan */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">Current Plan</h2>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Plan</span>
-                <span className="font-semibold capitalize">{billing?.plan_tier || 'Starter'}</span>
+        <main className="container mx-auto px-4 py-8 max-w-6xl">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            {/* Current Plan */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <div className="flex justify-between items-start mb-4">
+                  <h2 className="text-xl font-bold text-gray-900">Current Plan</h2>
+                  <button
+                    onClick={handleManageBilling}
+                    disabled={loadingPortal || !billing?.customer_id}
+                    className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingPortal ? 'Loading...' : 'Manage Billing'}
+                  </button>
+                </div>
+                
+                {billing?.subscription ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg">
+                      <div>
+                        <p className="text-lg font-semibold text-gray-900 capitalize">
+                          {getPlanDetails(billing.plan_tier).name} Plan
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          ${getPlanDetails(billing.plan_tier).price}/month
+                        </p>
+                      </div>
+                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                        billing.subscription.status === 'active' 
+                          ? 'bg-green-100 text-green-800'
+                          : billing.subscription.status === 'canceled'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {billing.subscription.status}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-gray-600">Included Minutes</p>
+                        <p className="text-lg font-semibold text-gray-900">{billing.usage_limit_minutes || 250}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">FAQs</p>
+                        <p className="text-lg font-semibold text-gray-900">{getPlanDetails(billing.plan_tier).faqs}</p>
+                      </div>
+                    </div>
+                    
+                    {billing.subscription.current_period_end && (
+                      <div className="pt-4 border-t">
+                        <p className="text-sm text-gray-600">
+                          {(() => {
+                            const timestamp = billing.subscription.current_period_end * 1000;
+                            const date = new Date(timestamp);
+                            const formatted = date.toLocaleDateString('en-US');
+                            return billing.subscription.cancel_at_period_end 
+                              ? `Subscription will cancel on ${formatted}`
+                              : `Next billing date: ${formatted}`;
+                          })()}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 mb-4">No active subscription</p>
+                    <p className="text-sm text-gray-500">Select a plan below to get started</p>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Monthly Price</span>
-                <span className="font-semibold">
-                  ${billing?.plan_tier === 'starter' ? '79' : billing?.plan_tier === 'core' ? '129' : '179'}/month
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Included Minutes</span>
-                <span className="font-semibold">{billing?.usage_limit_minutes || 250} minutes</span>
-              </div>
+            </div>
+
+            {/* Payment Method */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold mb-4 text-gray-900">Payment Method</h2>
+              {billing?.payment_method ? (
+                <div className="space-y-4">
+                  {billing.payment_method.card ? (
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-700">Card</span>
+                        <span className="text-xs text-gray-500 uppercase">
+                          {billing.payment_method.card.brand}
+                        </span>
+                      </div>
+                      <p className="text-lg font-semibold text-gray-900">
+                        {formatCardNumber(billing.payment_method.card.last4)}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        Expires {formatExpiry(billing.payment_method.card.exp_month, billing.payment_method.card.exp_year)}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <p className="text-sm text-gray-600">Payment method on file</p>
+                    </div>
+                  )}
+                  <button
+                    onClick={handleManageBilling}
+                    disabled={loadingPortal || !billing?.customer_id}
+                    className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingPortal ? 'Loading...' : 'Update Payment Method'}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-600 mb-4">No payment method on file</p>
+                  <button
+                    onClick={handleManageBilling}
+                    disabled={loadingPortal || !billing?.customer_id}
+                    className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingPortal ? 'Loading...' : 'Add Payment Method'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -151,7 +289,17 @@ function BillingPage() {
                 </div>
                 {usage.billing_cycle_end && (
                   <p className="text-sm text-gray-500">
-                    Minutes reset on {new Date(usage.billing_cycle_end).toLocaleDateString()}
+                    Minutes reset on {(() => {
+                      const dateStr = usage.billing_cycle_end;
+                      if (!dateStr) return 'N/A';
+                      let date;
+                      if (dateStr.includes('Z') || dateStr.includes('+') || dateStr.includes('-', 10)) {
+                        date = new Date(dateStr);
+                      } else {
+                        date = new Date(dateStr + 'Z');
+                      }
+                      return date.toLocaleDateString('en-US');
+                    })()}
                   </p>
                 )}
               </div>
@@ -217,46 +365,120 @@ function BillingPage() {
             </div>
           </div>
 
-          {/* Upgrade Options */}
+          {/* Recent Invoices */}
+          {invoices.length > 0 && (
+            <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Recent Invoices</h2>
+                <Link href="/dashboard/invoices" className="text-sm text-blue-600 hover:text-blue-800">
+                  View All →
+                </Link>
+              </div>
+              <div className="space-y-3">
+                {invoices.slice(0, 3).map((invoice) => (
+                  <div key={invoice.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-gray-900">{invoice.invoice_number}</p>
+                      <p className="text-sm text-gray-600">
+                        {(() => {
+                          const dateStr = invoice.created_at;
+                          if (!dateStr) return 'N/A';
+                          let date;
+                          if (dateStr.includes('Z') || dateStr.includes('+') || dateStr.includes('-', 10)) {
+                            date = new Date(dateStr);
+                          } else {
+                            date = new Date(dateStr + 'Z');
+                          }
+                          return date.toLocaleDateString('en-US');
+                        })()} • {invoice.invoice_type.replace('_', ' ')}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-gray-900">${invoice.amount?.toFixed(2) || '0.00'}</p>
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        invoice.status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {invoice.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Available Plans */}
           <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">Upgrade Plan</h2>
+            <h2 className="text-xl font-bold mb-4 text-gray-900">Available Plans</h2>
             <div className="grid md:grid-cols-3 gap-4">
-              <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-900 mb-2">Starter</h3>
-                <p className="text-2xl font-bold text-gray-900 mb-1">$79<span className="text-sm font-normal text-gray-600">/month</span></p>
-                <p className="text-sm text-gray-600 mb-4">250 minutes, 5 FAQs</p>
-                <button
-                  onClick={() => handleUpgrade('starter')}
-                  className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-                  disabled={billing?.plan_tier === 'starter'}
-                >
-                  {billing?.plan_tier === 'starter' ? 'Current Plan' : 'Select'}
-                </button>
-              </div>
-              <div className="border-2 border-blue-500 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-900 mb-2">Core</h3>
-                <p className="text-2xl font-bold text-gray-900 mb-1">$129<span className="text-sm font-normal text-gray-600">/month</span></p>
-                <p className="text-sm text-gray-600 mb-4">500 minutes, 10 FAQs</p>
-                <button
-                  onClick={() => handleUpgrade('core')}
-                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                  disabled={billing?.plan_tier === 'core'}
-                >
-                  {billing?.plan_tier === 'core' ? 'Current Plan' : 'Upgrade'}
-                </button>
-              </div>
-              <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-900 mb-2">Pro</h3>
-                <p className="text-2xl font-bold text-gray-900 mb-1">$179<span className="text-sm font-normal text-gray-600">/month</span></p>
-                <p className="text-sm text-gray-600 mb-4">750 minutes, 20 FAQs</p>
-                <button
-                  onClick={() => handleUpgrade('pro')}
-                  className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-                  disabled={billing?.plan_tier === 'pro'}
-                >
-                  {billing?.plan_tier === 'pro' ? 'Current Plan' : 'Upgrade'}
-                </button>
-              </div>
+              {['starter', 'core', 'pro'].map((tier) => {
+                const plan = getPlanDetails(tier);
+                const isCurrent = billing?.plan_tier === tier;
+                const isUpgrade = ['starter', 'core'].includes(billing?.plan_tier || '') && 
+                                 ['core', 'pro'].includes(tier) &&
+                                 (billing?.plan_tier === 'starter' && tier === 'core' || 
+                                  billing?.plan_tier === 'starter' && tier === 'pro' ||
+                                  billing?.plan_tier === 'core' && tier === 'pro');
+                
+                return (
+                  <div 
+                    key={tier}
+                    className={`border rounded-lg p-6 ${
+                      isCurrent 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : isUpgrade
+                        ? 'border-green-500'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="text-lg font-semibold text-gray-900">{plan.name}</h3>
+                      {isCurrent && (
+                        <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full font-medium">
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900 mb-1">
+                      ${plan.price}
+                      <span className="text-sm font-normal text-gray-600">/month</span>
+                    </p>
+                    <div className="space-y-2 mb-4 text-sm text-gray-600">
+                      <div className="flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        {plan.minutes} minutes/month
+                      </div>
+                      <div className="flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        {plan.faqs} FAQs
+                      </div>
+                      <div className="flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        Email & SMS notifications
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleUpgrade(tier)}
+                      disabled={isCurrent}
+                      className={`w-full px-4 py-2 rounded-md font-medium ${
+                        isCurrent
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : isUpgrade
+                          ? 'bg-green-600 text-white hover:bg-green-700'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {isCurrent ? 'Current Plan' : isUpgrade ? 'Upgrade' : 'Select'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

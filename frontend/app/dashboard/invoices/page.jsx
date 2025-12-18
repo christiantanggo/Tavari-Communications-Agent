@@ -57,9 +57,14 @@ function InvoicesPage() {
         <nav className="bg-white shadow-sm">
           <div className="container mx-auto px-4 py-4 flex justify-between items-center">
             <h1 className="text-xl font-bold text-blue-600">Invoices</h1>
-            <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
-              Dashboard
-            </Link>
+            <div className="flex gap-4 items-center">
+              <Link href="/dashboard/billing" className="text-gray-700 hover:text-blue-600">
+                Billing
+              </Link>
+              <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
+                Dashboard
+              </Link>
+            </div>
           </div>
         </nav>
 
@@ -89,7 +94,17 @@ function InvoicesPage() {
                           {invoice.invoice_number}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {new Date(invoice.created_at).toLocaleDateString()}
+                          {(() => {
+                            const dateStr = invoice.created_at;
+                            if (!dateStr) return 'N/A';
+                            let date;
+                            if (dateStr.includes('Z') || dateStr.includes('+') || dateStr.includes('-', 10)) {
+                              date = new Date(dateStr);
+                            } else {
+                              date = new Date(dateStr + 'Z');
+                            }
+                            return date.toLocaleDateString('en-US');
+                          })()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
                           {invoice.invoice_type.replace('_', ' ')}

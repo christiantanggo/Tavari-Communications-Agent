@@ -39,19 +39,53 @@ function DashboardContent() {
     lastLoadTimeRef.current = now;
 
     try {
-      console.log('[Dashboard] Loading data...');
-      const [userRes, usageRes, callsRes, messagesRes] = await Promise.all([
-        authAPI.getMe(),
-        usageAPI.getStatus().catch(() => ({ data: null })),
-        callsAPI.list({ limit: 10 }).catch(() => ({ data: { calls: [] } })),
-        messagesAPI.list({ limit: 10 }).catch(() => ({ data: { messages: [] } })),
-      ]);
+      console.log('[Dashboard] ========== LOADING DATA START ==========');
       
-      console.log('[Dashboard] User data:', userRes.data);
-      setUser(userRes.data);
-      setUsage(usageRes.data);
-      setCalls(callsRes.data?.calls || []);
-      setMessages(messagesRes.data?.messages || []);
+      // Load user data first (required)
+      let userRes;
+      try {
+        userRes = await authAPI.getMe();
+        console.log('[Dashboard] ✅ User data loaded:', userRes.data);
+        setUser(userRes.data);
+      } catch (error) {
+        console.error('[Dashboard] ❌ Failed to load user data:', error);
+        // User data is critical, so we should still show loading or error
+        throw error;
+      }
+
+      // Load other data in parallel (non-critical)
+      const [usageRes, callsRes, messagesRes] = await Promise.allSettled([
+        usageAPI.getStatus(),
+        callsAPI.list({ limit: 10 }),
+        messagesAPI.list({ limit: 10 }),
+      ]);
+
+      // Handle usage
+      if (usageRes.status === 'fulfilled') {
+        console.log('[Dashboard] ✅ Usage data loaded:', usageRes.value.data);
+        setUsage(usageRes.value.data);
+      } else {
+        console.error('[Dashboard] ❌ Failed to load usage:', usageRes.reason);
+        setUsage({ minutes_used: 0, minutes_total: 0, minutes_remaining: 0, usage_percent: 0 });
+      }
+
+      // Handle calls
+      if (callsRes.status === 'fulfilled') {
+        console.log('[Dashboard] ✅ Calls data loaded:', callsRes.value.data?.calls?.length || 0, 'calls');
+        setCalls(callsRes.value.data?.calls || []);
+      } else {
+        console.error('[Dashboard] ❌ Failed to load calls:', callsRes.reason);
+        setCalls([]);
+      }
+
+      // Handle messages
+      if (messagesRes.status === 'fulfilled') {
+        console.log('[Dashboard] ✅ Messages data loaded:', messagesRes.value.data?.messages?.length || 0, 'messages');
+        setMessages(messagesRes.value.data?.messages || []);
+      } else {
+        console.error('[Dashboard] ❌ Failed to load messages:', messagesRes.reason);
+        setMessages([]);
+      }
 
       // Check if SMS banner should be shown (checklist complete but SMS not enabled)
       const business = userRes.data?.business;
@@ -67,8 +101,15 @@ function DashboardContent() {
           setShowSmsBanner(!dismissed);
         }
       }
+
+      console.log('[Dashboard] ========== LOADING DATA COMPLETE ==========');
     } catch (error) {
-      console.error('[Dashboard] Failed to load dashboard data:', error);
+      console.error('[Dashboard] ========== LOADING DATA ERROR ==========');
+      console.error('[Dashboard] Critical error loading dashboard data:', error);
+      // Set defaults to prevent UI from breaking
+      setUsage({ minutes_used: 0, minutes_total: 0, minutes_remaining: 0, usage_percent: 0 });
+      setCalls([]);
+      setMessages([]);
     } finally {
       setLoading(false);
       isLoadingRef.current = false;
@@ -136,10 +177,29 @@ function DashboardContent() {
     call => call.status === 'completed' && !call.message_taken
   ).length;
 
+  // Import date formatter
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Ensure the date string is treated as UTC if it doesn't have timezone info
+    let date;
+    if (dateString.includes('Z') || dateString.includes('+') || dateString.includes('-', 10)) {
+      // Already has timezone info
+      date = new Date(dateString);
+    } else {
+      // Assume UTC if no timezone specified (database timestamps are typically UTC)
+      date = new Date(dateString + 'Z');
+    }
+    
+    // Convert to local timezone for display
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
   };
 
   const formatDuration = (seconds) => {
@@ -301,29 +361,39 @@ function DashboardContent() {
           )}
 
           {/* Minutes Used */}
-          {usage && (
-            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
-              <h3 className="text-sm font-semibold text-gray-600 mb-2">Minutes Used</h3>
-              <p className="text-3xl font-bold text-gray-900 mb-2">
-                {Math.round(usage.minutes_used || 0)} / {usage.minutes_total || 0}
-              </p>
-              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
-                <div
-                  className={`h-2.5 rounded-full transition-all ${
-                    usage.usage_percent >= 100
-                      ? 'bg-red-500'
-                      : usage.usage_percent >= 80
-                      ? 'bg-yellow-500'
-                      : 'bg-blue-500'
-                  }`}
-                  style={{ width: `${Math.min(usage.usage_percent || 0, 100)}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500">
-                {usage.minutes_remaining || 0} minutes remaining
-              </p>
-            </div>
-          )}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
+            <h3 className="text-sm font-semibold text-gray-600 mb-2">Minutes Used</h3>
+            {usage ? (
+              <>
+                <p className="text-3xl font-bold text-gray-900 mb-2">
+                  {Math.round(usage.minutes_used || 0)} / {usage.minutes_total || 0}
+                </p>
+                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                  <div
+                    className={`h-2.5 rounded-full transition-all ${
+                      (usage.usage_percent || 0) >= 100
+                        ? 'bg-red-500'
+                        : (usage.usage_percent || 0) >= 80
+                        ? 'bg-yellow-500'
+                        : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${Math.min(usage.usage_percent || 0, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  {usage.minutes_remaining || 0} minutes remaining
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-3xl font-bold text-gray-900 mb-2">0 / 0</p>
+                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                  <div className="h-2.5 rounded-full bg-gray-300" style={{ width: '0%' }} />
+                </div>
+                <p className="text-xs text-gray-500">Loading usage data...</p>
+              </>
+            )}
+          </div>
 
           {/* AI Handled Calls */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500">
@@ -403,27 +473,59 @@ function DashboardContent() {
               </div>
             ) : (
               <div className="space-y-3">
-                {messages.slice(0, 5).map((message) => (
-                  <div
-                    key={message.id}
-                    className={`p-3 rounded-lg hover:bg-gray-50 transition ${
-                      !message.is_read ? 'bg-blue-50 border-l-4 border-blue-500' : 'bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium text-gray-900">
-                        {message.caller_name || 'Unknown Caller'}
-                      </span>
-                      {!message.is_read && (
-                        <span className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-                          New
+                {(() => {
+                  // Sort messages: newest unread first, then follow up, then most recent read
+                  const sortedMessages = [...messages].sort((a, b) => {
+                    const aIsNew = !a.is_read && a.status !== 'follow_up';
+                    const bIsNew = !b.is_read && b.status !== 'follow_up';
+                    const aIsFollowUp = a.status === 'follow_up';
+                    const bIsFollowUp = b.status === 'follow_up';
+                    
+                    // New messages first
+                    if (aIsNew && !bIsNew) return -1;
+                    if (!aIsNew && bIsNew) return 1;
+                    
+                    // Follow up messages second
+                    if (aIsFollowUp && !bIsFollowUp && !bIsNew) return -1;
+                    if (!aIsFollowUp && bIsFollowUp && !aIsNew) return 1;
+                    
+                    // Within same category, sort by date (newest first)
+                    const dateA = new Date(a.created_at);
+                    const dateB = new Date(b.created_at);
+                    return dateB - dateA;
+                  });
+                  
+                  return sortedMessages.slice(0, 5).map((message) => (
+                    <div
+                      key={message.id}
+                      className={`p-3 rounded-lg hover:bg-gray-50 transition ${
+                        !message.is_read && message.status !== 'follow_up'
+                          ? 'bg-blue-50 border-l-4 border-blue-500'
+                          : message.status === 'follow_up'
+                          ? 'bg-yellow-50 border-l-4 border-yellow-500'
+                          : 'bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium text-gray-900">
+                          {message.caller_name || 'Unknown Caller'}
                         </span>
-                      )}
+                        {!message.is_read && message.status !== 'follow_up' && (
+                          <span className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full">
+                            New
+                          </span>
+                        )}
+                        {message.status === 'follow_up' && (
+                          <span className="px-2 py-0.5 text-xs bg-yellow-600 text-white rounded-full">
+                            Follow Up
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mb-2">{formatDate(message.created_at)}</p>
+                      <p className="text-sm text-gray-700 line-clamp-2">{message.message_text}</p>
                     </div>
-                    <p className="text-xs text-gray-500 mb-2">{formatDate(message.created_at)}</p>
-                    <p className="text-sm text-gray-700 line-clamp-2">{message.message_text}</p>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             )}
           </div>
