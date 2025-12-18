@@ -565,21 +565,21 @@ router.post("/webhook", async (req, res) => {
           // status-update with status "ringing" or "started" is equivalent to call-start
           if (eventTypeFromEvent === "status-update" && (event.message?.status === "ringing" || event.message?.status === "started")) {
             console.log(`[VAPI Webhook ${webhookId}] 🟢 Processing status-update (call-start) event`);
-            await handleCallStart(event.message || event);
+            await handleCallStart(event); // Pass full event, not just message
           } else if (eventTypeFromEvent === "status-update" && event.message?.status === "ended") {
             // status-update with status "ended" is equivalent to call-end
             console.log(`[VAPI Webhook ${webhookId}] 🔴 Processing status-update (call-end) event`);
-            await handleCallEnd(event.message || event);
+            await handleCallEnd(event); // Pass full event, not just message
           } else {
             console.log(`[VAPI Webhook ${webhookId}] 🟢 Processing call-start/status-update event`);
-            await handleCallStart(event.message || event);
+            await handleCallStart(event); // Pass full event, not just message
           }
           break;
         case "call-end":
         case "end-of-call-report":
           console.log(`[VAPI Webhook ${webhookId}] 🔴 Processing call-end/end-of-call-report event`);
-          // end-of-call-report contains full call details - use message object if available
-          await handleCallEnd(event.message || event);
+          // end-of-call-report contains full call details
+          await handleCallEnd(event); // Pass full event, not just message
           break;
         case "transfer-started":
           console.log(`[VAPI Webhook ${webhookId}] 🔄 Processing transfer-started event`);
@@ -641,7 +641,14 @@ async function handleCallStart(event) {
     }
     
     const callId = call.id || event.message?.call?.id || event.message?.artifact?.call?.id;
-    const assistantId = call.assistant?.id || event.message?.assistant?.id || event.message?.artifact?.assistant?.id;
+    // Extract assistant ID - match the outer scope extraction logic
+    // Check both call.assistant.id (when call is extracted) and event.message.assistant.id (when assistant is at message level)
+    const assistantId = event.call?.assistant?.id 
+      || event.message?.assistant?.id
+      || call.assistant?.id
+      || event.message?.call?.assistant?.id
+      || event.message?.artifact?.assistant?.id
+      || event.message?.artifact?.call?.assistant?.id;
     const callerNumber = call.customer?.number || event.message?.customer?.number || event.message?.artifact?.customer?.number;
 
     console.log(`[VAPI Webhook] Call details:`, {
