@@ -49,10 +49,23 @@ router.patch('/:messageId/read', authenticate, async (req, res) => {
 // Mark message as follow up
 router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
   try {
+    console.log('[Messages API] Marking message as follow up:', req.params.messageId);
+    console.log('[Messages API] Business ID:', req.businessId);
+    
     const message = await Message.markAsFollowUp(req.params.messageId);
+    
+    // Verify message belongs to business
+    if (message.business_id !== req.businessId) {
+      console.error('[Messages API] Message does not belong to business');
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    console.log('[Messages API] ✅ Message marked as follow up successfully');
     res.json({ message });
   } catch (error) {
-    console.error('Mark message follow up error:', error);
+    console.error('[Messages API] ❌ Mark message follow up error:', error);
+    console.error('[Messages API] Error message:', error.message);
+    console.error('[Messages API] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to mark message as follow up' });
   }
 });
