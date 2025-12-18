@@ -40,3 +40,7 @@ temp/
 
 .vercel
 .env*.local
+
+# Binary files that shouldn't be in repo
+node
+npm
