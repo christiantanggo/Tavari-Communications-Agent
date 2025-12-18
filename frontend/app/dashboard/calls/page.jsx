@@ -29,8 +29,26 @@ function CallsPage() {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString();
+    // Ensure the date string is treated as UTC if it doesn't have timezone info
+    let date;
+    if (dateString.includes('Z') || dateString.includes('+') || dateString.includes('-', 10)) {
+      // Already has timezone info
+      date = new Date(dateString);
+    } else {
+      // Assume UTC if no timezone specified (database timestamps are typically UTC)
+      date = new Date(dateString + 'Z');
+    }
+    
+    // Convert to local timezone for display
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
   };
 
   const formatDuration = (seconds) => {
@@ -87,7 +105,7 @@ function CallsPage() {
                     {calls.map((call) => (
                       <tr key={call.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatDate(call.created_at)}
+                          {formatDate(call.started_at || call.created_at)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {call.caller_number || 'Unknown'}
