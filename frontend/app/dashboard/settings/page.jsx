@@ -266,6 +266,7 @@ function SettingsPage() {
         name: businessInfo.name,
         phone: businessInfo.phone,
         address: businessInfo.address,
+        website: businessInfo.website,
         timezone: businessInfo.timezone,
         public_phone_number: businessInfo.public_phone_number,
         ...aiSettings,

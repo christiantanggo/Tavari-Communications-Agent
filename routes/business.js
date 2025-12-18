@@ -75,6 +75,7 @@ router.put("/settings", authenticate, async (req, res) => {
       name: updatedBusiness.name,
       phone: updatedBusiness.phone,
       address: updatedBusiness.address,
+      website: updatedBusiness.website,
       public_phone_number: updatedBusiness.public_phone_number,
       timezone: updatedBusiness.timezone,
     });
