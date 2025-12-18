@@ -7,6 +7,7 @@ import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || "noreply@tavari.com";
 const FROM_NAME = "Tavari";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
@@ -27,10 +28,17 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
     console.log("[Notifications] Step 1: Checking environment variables...");
     console.log("[Notifications] SUPABASE_URL:", SUPABASE_URL ? "SET" : "MISSING");
     console.log("[Notifications] SUPABASE_ANON_KEY:", SUPABASE_ANON_KEY ? "SET" : "MISSING");
+    console.log("[Notifications] SUPABASE_SERVICE_ROLE_KEY:", SUPABASE_SERVICE_ROLE_KEY ? "SET" : "MISSING");
     console.log("[Notifications] FROM_EMAIL:", FROM_EMAIL);
     
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY must be set");
+    if (!SUPABASE_URL) {
+      throw new Error("SUPABASE_URL must be set");
+    }
+    
+    // Use service role key as fallback if anon key is not available
+    const apiKey = SUPABASE_ANON_KEY || SUPABASE_SERVICE_ROLE_KEY;
+    if (!apiKey) {
+      throw new Error("Either SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY must be set");
     }
 
     const emailPayload = {
@@ -62,8 +70,8 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "apikey": apiKey,
+        "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify(emailPayload),
     });
@@ -96,18 +104,24 @@ async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = n
 /**
  * Send call summary email
  */
-export async function sendCallSummaryEmail(business, callSession, transcript, summary, intent, message = null) {
+export async function sendCallSummaryEmail(business, callSession, transcript, summary, intent, message = null, forceEmail = false) {
   console.log("[Call Summary Email] ========== CALL SUMMARY EMAIL START ==========");
   console.log("[Call Summary Email] Business:", {
     id: business.id,
     name: business.name,
     email: business.email,
     email_ai_answered: business.email_ai_answered,
+    forceEmail: forceEmail,
   });
   
-  if (!business.email_ai_answered) {
-    console.log("[Call Summary Email] ⚠️ Email disabled for AI-answered calls, skipping");
-    return; // Email disabled for AI-answered calls
+  // CRITICAL: If forceEmail is true (for callbacks/messages), ALWAYS send email regardless of email_ai_answered setting
+  if (!forceEmail && !business.email_ai_answered) {
+    console.log("[Call Summary Email] ⚠️ Email disabled for AI-answered calls, skipping (not a callback/message)");
+    return; // Email disabled for AI-answered calls (but not for callbacks/messages)
+  }
+  
+  if (forceEmail) {
+    console.log("[Call Summary Email] 🔥 FORCING EMAIL - This is a callback/message, email will be sent regardless of email_ai_answered setting");
   }
 
   try {
@@ -169,7 +183,7 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
 /**
  * Send SMS notification (premium, 3x Telnyx cost)
  */
-export async function sendSMSNotification(business, callSession, summary) {
+export async function sendSMSNotification(business, callSession, summary, message = null) {
   console.log("[SMS Notification] ========== SMS NOTIFICATION START ==========");
   console.log("[SMS Notification] Business:", {
     id: business.id,
@@ -201,9 +215,15 @@ export async function sendSMSNotification(business, callSession, summary) {
   }
 
   try {
-    const message = `New callback request from ${callSession.caller_name || "Unknown"} (${formatPhoneNumber(callSession.caller_number)}). ${summary?.substring(0, 100) || "See dashboard for details."}`;
+    // Build message text - include message details if available
+    let messageText;
+    if (message && message.message_text) {
+      messageText = `New callback request from ${message.caller_name || callSession.caller_name || "Unknown"} (${formatPhoneNumber(message.caller_phone || callSession.caller_number)}). ${message.message_text.substring(0, 150)}`;
+    } else {
+      messageText = `New callback request from ${callSession.caller_name || "Unknown"} (${formatPhoneNumber(callSession.caller_number)}). ${summary?.substring(0, 100) || "See dashboard for details."}`;
+    }
     console.log("[SMS Notification] Step 2: Building SMS message");
-    console.log("[SMS Notification] Message:", message);
+    console.log("[SMS Notification] Message:", messageText);
     
     // Format phone number for Telnyx (remove any formatting, ensure it starts with +)
     let fromNumber = business.vapi_phone_number.replace(/[^0-9+]/g, "");
@@ -225,7 +245,7 @@ export async function sendSMSNotification(business, callSession, summary) {
       {
         from: fromNumber,
         to: toNumber,
-        text: message,
+        text: messageText,
       },
       {
         headers: {

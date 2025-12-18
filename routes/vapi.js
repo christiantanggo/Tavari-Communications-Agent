@@ -916,15 +916,24 @@ async function handleCallEnd(event) {
     // Get full call data for better message extraction
     const { getVapiClient } = await import("../services/vapi.js");
     const vapiClient = getVapiClient();
-    const callResponse = await vapiClient.get(`/call/${callId}`);
-    vapiCallData = callResponse.data;
-    
-    // Include messages from callSummary if available
-    if (callSummary.messages) {
-      vapiCallData.messages = callSummary.messages;
+    if (!vapiClient) {
+      console.warn(`[VAPI Webhook] ⚠️ VAPI client not available, skipping full call data fetch`);
+    } else {
+      try {
+        const callResponse = await vapiClient.get(`/call/${callId}`);
+        vapiCallData = callResponse.data;
+        
+        // Include messages from callSummary if available
+        if (callSummary.messages) {
+          vapiCallData.messages = callSummary.messages;
+        }
+        
+        console.log(`[VAPI Webhook] Full call data:`, JSON.stringify(vapiCallData, null, 2).substring(0, 1000));
+      } catch (error) {
+        console.error(`[VAPI Webhook] Error fetching full call data:`, error.message);
+        // Continue with callSummary data only
+      }
     }
-    
-    console.log(`[VAPI Webhook] Full call data:`, JSON.stringify(vapiCallData, null, 2).substring(0, 1000));
     
     // Determine intent from summary
     intent = determineIntent(summary, transcript);

@@ -7,7 +7,7 @@ import { supabaseClient } from "../config/database.js";
 // Lazy client creation to ensure env vars are loaded
 let vapiClient = null;
 
-function getVapiClient() {
+export function getVapiClient() {
   if (!vapiClient) {
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
     const VAPI_BASE_URL = process.env.VAPI_BASE_URL || "https://api.vapi.ai";
@@ -50,8 +50,10 @@ export async function createAssistant(businessData) {
     const openingGreeting = businessData.opening_greeting || `Hello! Thanks for calling ${businessData.name}. How can I help you today?`;
     const endingGreeting = businessData.ending_greeting || null; // Optional ending greeting
     const personality = businessData.personality || 'professional';
-    const voiceProvider = businessData.voice_provider || '11labs';
-    const voiceId = businessData.voice_id || '21m00Tcm4TlvDq8ikWAM'; // Default professional voice
+    // Use voice settings from businessData, default to OpenAI/alloy
+    const voiceSettings = businessData.voice_settings || {};
+    const voiceProvider = voiceSettings.provider || businessData.voice_provider || 'openai';
+    const voiceId = voiceSettings.voice_id || businessData.voice_id || 'alloy'; // Default professional voice (OpenAI)
     
     // Adjust temperature based on personality
     let temperature = 0.7;
@@ -67,7 +69,7 @@ export async function createAssistant(businessData) {
       name: `${businessData.name} - Tavari Assistant`,
       model: {
         provider: "openai",
-        model: "gpt-4o",
+        model: "gpt-4o-mini", // Using mini for lower cost (~80% cheaper than gpt-4o)
         temperature: temperature,
         maxTokens: 150,
         messages: [
@@ -82,14 +84,36 @@ export async function createAssistant(businessData) {
         voiceId: voiceId,
       },
       firstMessage: openingGreeting,
-      serverUrl: `${process.env.BACKEND_URL || process.env.RAILWAY_PUBLIC_DOMAIN || process.env.VERCEL_URL || "https://api.tavarios.com"}/api/vapi/webhook`,
+      serverUrl: (() => {
+        const backendUrl = process.env.BACKEND_URL || 
+                          process.env.RAILWAY_PUBLIC_DOMAIN || 
+                          process.env.VERCEL_URL || 
+                          process.env.SERVER_URL ||
+                          "https://api.tavarios.com";
+        const webhookUrl = `${backendUrl}/api/vapi/webhook`;
+        console.log(`[VAPI] Setting webhook URL: ${webhookUrl}`);
+        return webhookUrl;
+      })(),
       serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET,
-      // Transcriber settings for better responsiveness
+      // CRITICAL: serverMessages tells VAPI which events to send to the webhook
+      // Without this, VAPI won't send any webhooks even if serverUrl is set
+      serverMessages: [
+        "status-update",      // Call status changes (call-start, call-end, etc.)
+        "end-of-call-report", // Final call summary with transcript, duration, etc.
+        "function-call",      // Function calls during the call
+        "hang",               // Call hangup events
+      ],
+      // Transcriber settings - reduce sensitivity to background noise
       transcriber: {
         provider: "deepgram",
         model: "nova-2",
         language: "en-US",
       },
+      // Enable background denoising to filter out ambient noise
+      backgroundDenoisingEnabled: true,
+      // Prevent interruptions during AI speech - stops background voices from cutting off AI
+      interruptionsEnabled: false, // Disable interruptions - AI will finish speaking before listening
+      firstMessageInterruptionsEnabled: false, // Also disable for first message
       // Start speaking plan - wait a bit before speaking to avoid interrupting caller
       startSpeakingPlan: {
         waitSeconds: 0.8,
@@ -759,121 +783,298 @@ export async function updateAssistant(assistantId, updates) {
 
 /**
  * Rebuild VAPI assistant with all current business and agent data
- * This ensures the assistant always has the latest information
  * @param {string} businessId - Business ID
- * @returns {Promise<void>}
+ * @returns {Promise<Object>} Updated assistant object
  */
 export async function rebuildAssistant(businessId) {
   try {
-    console.log(`[VAPI Rebuild] ========== REBUILDING ASSISTANT FOR BUSINESS ${businessId} ==========`);
+    console.log(`[VAPI Rebuild] Starting rebuild for business: ${businessId}`);
     
-    // Import models
-    const { Business } = await import("../models/Business.js");
-    const { AIAgent } = await import("../models/AIAgent.js");
-    const { generateAssistantPrompt } = await import("../templates/vapi-assistant-template.js");
+    // Import everything we need first
+    const BusinessModule = await import("../models/Business.js");
+    const AIAgentModule = await import("../models/AIAgent.js");
+    const TemplateModule = await import("../templates/vapi-assistant-template.js");
     
-    // Fetch latest business data
-    const business = await Business.findById(businessId);
-    if (!business) {
-      console.error(`[VAPI Rebuild] Business not found: ${businessId}`);
-      return;
+    const Business = BusinessModule.Business;
+    const AIAgent = AIAgentModule.AIAgent;
+    const generateAssistantPrompt = TemplateModule.generateAssistantPrompt;
+    
+    // Fetch business data
+    const businessRecord = await Business.findById(businessId);
+    if (!businessRecord) {
+      throw new Error(`Business not found: ${businessId}`);
     }
     
-    if (!business.vapi_assistant_id) {
-      console.log(`[VAPI Rebuild] No VAPI assistant ID for business ${businessId}, skipping rebuild`);
-      return;
+    if (!businessRecord.vapi_assistant_id) {
+      throw new Error(`No VAPI assistant ID. Please provision a phone number first.`);
     }
     
-    // Fetch latest agent data
-    const agent = await AIAgent.findByBusinessId(businessId);
-    if (!agent) {
-      console.warn(`[VAPI Rebuild] Agent not found for business ${businessId}, using defaults`);
+    const assistantId = businessRecord.vapi_assistant_id;
+    
+    // CRITICAL: Fetch current assistant config from VAPI first
+    // VAPI requires all fields to be present in PATCH, otherwise it may clear missing fields
+    console.log(`[VAPI Rebuild] Fetching current assistant config from VAPI...`);
+    let currentAssistant;
+    try {
+      const currentResponse = await getVapiClient().get(`/assistant/${assistantId}`);
+      currentAssistant = currentResponse.data;
+      console.log(`[VAPI Rebuild] Current assistant config:`, {
+        model: currentAssistant.model?.model,
+        voiceProvider: currentAssistant.voice?.provider,
+        voiceId: currentAssistant.voice?.voiceId,
+      });
+    } catch (fetchError) {
+      console.warn(`[VAPI Rebuild] Could not fetch current assistant, proceeding with new config:`, fetchError.message);
+      currentAssistant = null;
     }
     
-    console.log(`[VAPI Rebuild] Business data:`, {
-      name: business.name,
-      timezone: business.timezone,
-      address: business.address,
-      public_phone_number: business.public_phone_number,
+    // Fetch agent data
+    const agentRecord = await AIAgent.findByBusinessId(businessId);
+    
+    console.log(`[VAPI Rebuild] ========== RAW DATA FROM DATABASE ==========`);
+    console.log(`[VAPI Rebuild] Raw agent record holiday_hours:`, JSON.stringify(agentRecord?.holiday_hours, null, 2));
+    console.log(`[VAPI Rebuild] Holiday hours type:`, typeof agentRecord?.holiday_hours);
+    console.log(`[VAPI Rebuild] Holiday hours is array:`, Array.isArray(agentRecord?.holiday_hours));
+    if (Array.isArray(agentRecord?.holiday_hours)) {
+      console.log(`[VAPI Rebuild] Each holiday date from DB:`, JSON.stringify(agentRecord.holiday_hours.map(h => ({ 
+        name: h?.name, 
+        date: h?.date, 
+        dateType: typeof h?.date,
+        dateValue: String(h?.date),
+        dateLength: String(h?.date).length
+      })), null, 2));
+    }
+    console.log(`[VAPI Rebuild] ===========================================`);
+    
+    // Extract all values we need into simple variables - NO references to businessRecord after this
+    const businessName = businessRecord.name || "Business";
+    const businessEmail = businessRecord.email || "";
+    const businessAddress = businessRecord.address || "";
+    const businessPhone = businessRecord.public_phone_number || "";
+    const businessTimezone = businessRecord.timezone || "America/New_York";
+    const allowTransfer = businessRecord.allow_call_transfer ?? true;
+    const afterHoursBehavior = businessRecord.after_hours_behavior || "take_message";
+    
+    const businessHours = agentRecord?.business_hours || {};
+    
+    // CRITICAL: Normalize holiday hours dates to ensure they're in YYYY-MM-DD format
+    // This prevents timezone issues when dates are stored/retrieved from the database
+    let holidayHours = agentRecord?.holiday_hours || [];
+    
+    console.log(`[VAPI Rebuild] ========== HOLIDAY HOURS FROM DATABASE ==========`);
+    console.log(`[VAPI Rebuild] Raw holiday hours before normalization:`, JSON.stringify(holidayHours.map(h => ({ 
+      name: h?.name, 
+      date: h?.date, 
+      dateType: typeof h?.date,
+      dateValue: String(h?.date),
+      dateLength: String(h?.date).length
+    })), null, 2));
+    if (Array.isArray(holidayHours)) {
+      holidayHours = holidayHours.map(h => {
+        if (!h || !h.date) return h;
+        
+        // Ensure date is in YYYY-MM-DD format (timezone-agnostic)
+        let dateStr = h.date;
+        
+        // If it's a Date object, extract the date parts in local timezone
+        if (dateStr instanceof Date) {
+          const year = dateStr.getFullYear();
+          const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+          const day = String(dateStr.getDate()).padStart(2, '0');
+          dateStr = `${year}-${month}-${day}`;
+        } 
+        // If it's an ISO string with time, extract just the date part
+        else if (typeof dateStr === 'string' && dateStr.includes('T')) {
+          dateStr = dateStr.split('T')[0];
+        }
+        // If it's already in YYYY-MM-DD format, use it as-is (most common case)
+        else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          // Already in correct format - this is what we want! No conversion needed.
+          console.log(`[VAPI Rebuild] ✅ Date "${dateStr}" for ${h.name} is already in YYYY-MM-DD format, using as-is`);
+          return { ...h, date: dateStr }; // Return early to avoid unnecessary processing
+        }
+        // If it's in a different format, try to parse it
+        else if (typeof dateStr === 'string') {
+          // Try to extract YYYY-MM-DD from various formats
+          const dateMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (dateMatch) {
+            dateStr = dateMatch[0]; // Use the matched YYYY-MM-DD
+          } else {
+            console.warn(`[VAPI Rebuild] Could not parse holiday date: ${dateStr}, using as-is`);
+          }
+        }
+        
+        return { ...h, date: dateStr };
+      });
+      
+      console.log(`[VAPI Rebuild] Normalized holiday hours after processing:`, JSON.stringify(holidayHours.map(h => ({ 
+        name: h?.name, 
+        date: h?.date, 
+        dateType: typeof h?.date 
+      })), null, 2));
+      console.log(`[VAPI Rebuild] ================================================`);
+    } else {
+      console.log(`[VAPI Rebuild] Holiday hours is not an array:`, typeof holidayHours, holidayHours);
+    }
+    
+    const faqs = agentRecord?.faqs || [];
+    const openingGreeting = agentRecord?.opening_greeting || `Hello! Thanks for calling ${businessName}. How can I help you today?`;
+    const endingGreeting = agentRecord?.ending_greeting || null;
+    const personality = agentRecord?.personality || 'professional';
+    // Use voice settings from agent record, default to OpenAI/alloy
+    const voiceSettings = agentRecord?.voice_settings || {};
+    const voiceProvider = voiceSettings.provider || 'openai'; // Default to OpenAI to save costs
+    const voiceId = voiceSettings.voice_id || 'alloy'; // Default professional voice (OpenAI)
+    
+    // Calculate temperature
+    let temperature = 0.7;
+    if (personality === 'friendly') temperature = 0.8;
+    else if (personality === 'professional') temperature = 0.6;
+    else if (personality === 'casual') temperature = 0.9;
+    
+    console.log(`[VAPI Rebuild] Preparing to generate prompt with holiday hours:`, JSON.stringify(holidayHours.map(h => ({ name: h?.name, date: h?.date })), null, 2));
+    
+    // Generate system prompt
+    const systemPrompt = await generateAssistantPrompt({
+      name: businessName,
+      public_phone_number: businessPhone,
+      timezone: businessTimezone,
+      business_hours: businessHours,
+      holiday_hours: holidayHours,
+      faqs: faqs,
+      contact_email: businessEmail,
+      address: businessAddress,
+      allow_call_transfer: allowTransfer,
+      after_hours_behavior: afterHoursBehavior,
+      opening_greeting: openingGreeting,
+      ending_greeting: endingGreeting,
+      personality: personality,
     });
     
-    console.log(`[VAPI Rebuild] Agent data:`, {
-      faqs_count: agent?.faqs?.length || 0,
-      has_business_hours: !!agent?.business_hours,
-      holiday_hours_count: agent?.holiday_hours?.length || 0,
-      opening_greeting: agent?.opening_greeting ? 'set' : 'not set',
-      ending_greeting: agent?.ending_greeting ? 'set' : 'not set',
-    });
-    
-    // Generate fresh prompt with all current data
-    const updatedPrompt = await generateAssistantPrompt({
-      name: business.name,
-      public_phone_number: business.public_phone_number || "",
-      timezone: business.timezone,
-      business_hours: agent?.business_hours || {},
-      holiday_hours: agent?.holiday_hours || [],
-      faqs: agent?.faqs || [],
-      contact_email: business.email,
-      address: business.address || "",
-      allow_call_transfer: business.allow_call_transfer ?? true,
-      after_hours_behavior: business.after_hours_behavior || "take_message",
-      opening_greeting: agent?.opening_greeting,
-      ending_greeting: agent?.ending_greeting,
-      personality: agent?.personality || 'professional',
-    });
-    
-    console.log(`[VAPI Rebuild] Generated prompt length: ${updatedPrompt.length} characters`);
-    console.log(`[VAPI Rebuild] Prompt includes FAQs: ${updatedPrompt.includes('FREQUENTLY ASKED QUESTIONS')}`);
-    console.log(`[VAPI Rebuild] Prompt includes business hours: ${updatedPrompt.includes('Regular Business Hours')}`);
-    console.log(`[VAPI Rebuild] Prompt includes holiday hours: ${updatedPrompt.includes('Holiday Hours')}`);
-    
-    // Build update payload - MUST include model provider and model name
+    // Build a clean payload with ONLY the fields VAPI accepts for updates
+    // VAPI rejects updates with read-only fields (orgId, id, createdAt, isServerUrlSecretSet, etc.)
+    // We build a fresh payload instead of spreading currentAssistant to avoid read-only fields
     const updatePayload = {
+      name: `${businessName} - Tavari Assistant`,
+      // FORCE model to gpt-4o-mini (cheaper) - this is critical for cost reduction
       model: {
-        provider: "openai", // Required by VAPI
-        model: "gpt-4o", // Required by VAPI
-        messages: [
-          {
-            role: "system",
-            content: updatedPrompt,
-          },
-        ],
+        provider: "openai",
+        model: "gpt-4o-mini", // Using mini for lower cost (~80% cheaper than gpt-4o)
+        temperature: temperature,
+        maxTokens: 150,
+        messages: [{ role: "system", content: systemPrompt }],
+      },
+      // Use voice settings from agent record (defaults to OpenAI/alloy if not set)
+      voice: {
+        provider: voiceProvider, // Use selected provider (defaults to openai)
+        voiceId: voiceId, // Use selected voice (defaults to alloy)
+      },
+      firstMessage: openingGreeting,
+      serverUrl: (() => {
+        const backendUrl = process.env.BACKEND_URL || 
+                          process.env.RAILWAY_PUBLIC_DOMAIN || 
+                          process.env.VERCEL_URL || 
+                          process.env.SERVER_URL ||
+                          "https://api.tavarios.com";
+        const webhookUrl = `${backendUrl}/api/vapi/webhook`;
+        console.log(`[VAPI Rebuild] Setting webhook URL: ${webhookUrl}`);
+        return webhookUrl;
+      })(),
+      serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET,
+      // CRITICAL: serverMessages tells VAPI which events to send to the webhook
+      // Without this, VAPI won't send any webhooks even if serverUrl is set
+      serverMessages: [
+        "status-update",      // Call status changes (call-start, call-end, etc.)
+        "end-of-call-report", // Final call summary with transcript, duration, etc.
+        "function-call",      // Function calls during the call
+        "hang",               // Call hangup events
+      ],
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: "en-US",
+      },
+      // Enable background denoising to filter out ambient noise
+      backgroundDenoisingEnabled: true,
+      // Prevent interruptions during AI speech - stops background voices from cutting off AI
+      interruptionsEnabled: false, // Disable interruptions - AI will finish speaking before listening
+      firstMessageInterruptionsEnabled: false, // Also disable for first message
+      startSpeakingPlan: {
+        waitSeconds: 0.8,
+        smartEndpointingEnabled: false, // Keep disabled to prevent premature cutoffs
       },
     };
     
-    // Update first message if opening greeting exists
-    if (agent?.opening_greeting) {
-      updatePayload.firstMessage = agent.opening_greeting;
-    }
-    
-    // Update ending greeting if it exists
-    if (agent?.ending_greeting) {
+    if (endingGreeting) {
       updatePayload.endCallFunctionEnabled = true;
+    } else {
+      updatePayload.endCallFunctionEnabled = false;
     }
     
-    // Update the assistant
-    console.log(`[VAPI Rebuild] Updating assistant ${business.vapi_assistant_id} with payload:`, {
-      hasModel: !!updatePayload.model,
-      modelProvider: updatePayload.model.provider,
-      modelModel: updatePayload.model.model,
-      hasFirstMessage: !!updatePayload.firstMessage,
-      hasEndCallFunction: !!updatePayload.endCallFunctionEnabled,
-    });
+    // Make API call - Use PATCH (VAPI standard for updates)
+    console.log(`[VAPI Rebuild] ========== UPDATING ASSISTANT ==========`);
+    console.log(`[VAPI Rebuild] Assistant ID: ${assistantId}`);
+    console.log(`[VAPI Rebuild] Model being set: ${updatePayload.model.model}`);
+    console.log(`[VAPI Rebuild] Voice provider being set: ${updatePayload.voice.provider}`);
+    console.log(`[VAPI Rebuild] Voice ID being set: ${updatePayload.voice.voiceId}`);
+    console.log(`[VAPI Rebuild] Clean update payload (no read-only fields):`, JSON.stringify(updatePayload, null, 2));
     
-    const updatedAssistant = await updateAssistant(business.vapi_assistant_id, updatePayload);
+    const response = await getVapiClient().patch(`/assistant/${assistantId}`, updatePayload);
+    console.log(`[VAPI Rebuild] ✅ PATCH successful! Status: ${response.status}`);
+    console.log(`[VAPI Rebuild] PATCH response data:`, JSON.stringify(response.data, null, 2));
     
-    console.log(`[VAPI Rebuild] ✅ Assistant rebuilt successfully for business ${businessId}`);
-    console.log(`[VAPI Rebuild] Updated assistant ID: ${updatedAssistant?.id || business.vapi_assistant_id}`);
-  } catch (error) {
-    console.error(`[VAPI Rebuild] ❌❌❌ ERROR rebuilding assistant:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      response: error.response?.data,
-      businessId,
-      assistantId: business?.vapi_assistant_id,
-    });
-    throw error;
+    // Verify the update by fetching the assistant
+    console.log(`[VAPI Rebuild] ========== VERIFYING UPDATE ==========`);
+    const verifyResponse = await getVapiClient().get(`/assistant/${assistantId}`);
+    const updatedAssistant = verifyResponse.data;
+    
+    console.log(`[VAPI Rebuild] ✅ Assistant updated successfully!`);
+    console.log(`[VAPI Rebuild] ========== VERIFIED CONFIGURATION ==========`);
+    console.log(`[VAPI Rebuild] Model: ${updatedAssistant.model?.model || 'unknown'}`);
+    console.log(`[VAPI Rebuild] Voice Provider: ${updatedAssistant.voice?.provider || 'unknown'}`);
+    console.log(`[VAPI Rebuild] Voice ID: ${updatedAssistant.voice?.voiceId || 'unknown'}`);
+    console.log(`[VAPI Rebuild] Webhook URL (serverUrl): ${updatedAssistant.serverUrl || 'NOT SET!'}`);
+    console.log(`[VAPI Rebuild] Expected webhook URL: ${updatePayload.serverUrl}`);
+    if (updatedAssistant.serverUrl !== updatePayload.serverUrl) {
+      console.error(`[VAPI Rebuild] ❌❌❌ CRITICAL: Webhook URL mismatch!`);
+      console.error(`[VAPI Rebuild] Expected: ${updatePayload.serverUrl}`);
+      console.error(`[VAPI Rebuild] Actual: ${updatedAssistant.serverUrl || 'NOT SET'}`);
+    } else {
+      console.log(`[VAPI Rebuild] ✅ Webhook URL matches expected value`);
+    }
+    console.log(`[VAPI Rebuild] Server Messages (serverMessages): ${JSON.stringify(updatedAssistant.serverMessages || 'NOT SET')}`);
+    console.log(`[VAPI Rebuild] Expected serverMessages: ${JSON.stringify(updatePayload.serverMessages)}`);
+    if (!updatedAssistant.serverMessages || updatedAssistant.serverMessages.length === 0) {
+      console.error(`[VAPI Rebuild] ❌❌❌ CRITICAL: serverMessages is NOT SET! This will prevent webhooks from being sent!`);
+    } else {
+      console.log(`[VAPI Rebuild] ✅ serverMessages is configured: ${JSON.stringify(updatedAssistant.serverMessages)}`);
+    }
+    console.log(`[VAPI Rebuild] Full assistant config:`, JSON.stringify({
+      model: updatedAssistant.model,
+      voice: updatedAssistant.voice,
+      serverUrl: updatedAssistant.serverUrl,
+    }, null, 2));
+    
+    // Check if update actually worked
+    if (updatedAssistant.model?.model !== 'gpt-4o-mini') {
+      console.warn(`[VAPI Rebuild] ⚠️ WARNING: Model is still ${updatedAssistant.model?.model}, expected gpt-4o-mini`);
+    }
+    if (updatedAssistant.voice?.provider !== 'openai') {
+      console.warn(`[VAPI Rebuild] ⚠️ WARNING: Voice provider is still ${updatedAssistant.voice?.provider}, expected openai`);
+    }
+    if (!updatedAssistant.serverUrl || updatedAssistant.serverUrl !== updatePayload.serverUrl) {
+      console.error(`[VAPI Rebuild] ❌❌❌ CRITICAL WARNING: Webhook URL not set correctly!`);
+      console.error(`[VAPI Rebuild] This will prevent call tracking, usage recording, and message creation!`);
+    }
+    
+    return response.data;
+  } catch (err) {
+    // Wrap error to ensure we never reference undefined variables
+    const errorMessage = err?.message || 'Unknown error';
+    const errorStack = err?.stack || 'No stack trace';
+    console.error(`[VAPI Rebuild] ERROR: ${errorMessage}`);
+    console.error(`[VAPI Rebuild] Stack: ${errorStack}`);
+    throw new Error(`Failed to rebuild assistant: ${errorMessage}`);
   }
 }
 
