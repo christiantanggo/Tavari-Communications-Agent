@@ -24,6 +24,7 @@
     "fix:transcriber": "node scripts/fix-assistant-transcriber.js",
     "test:webhook": "node scripts/test-vapi-webhook.js",
     "diagnose:webhook": "node scripts/diagnose-webhook.js",
+    "create-admin": "node scripts/create-admin-user.js",
     "auto-commit": "node -e \"require('child_process').execSync('git add -A && git commit -m \\\"Auto-commit: Update files\\\" && git push origin main', {stdio: 'inherit'})\"",
     "deploy": "npm run auto-commit"
   },
