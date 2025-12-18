@@ -36,20 +36,35 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Mark message as follow up (define before /read to avoid route conflicts)
-router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
+// Using 'followup' instead of 'follow-up' to avoid potential route matching issues
+router.patch('/:messageId/followup', authenticate, async (req, res) => {
   try {
-    console.log('[Messages API] Marking message as follow up:', req.params.messageId);
+    console.log('[Messages API] ========== MARK AS FOLLOW UP START ==========');
+    console.log('[Messages API] Message ID:', req.params.messageId);
     console.log('[Messages API] Business ID:', req.businessId);
     
+    if (!req.businessId) {
+      console.error('[Messages API] No businessId in request');
+      return res.status(400).json({ error: 'Business ID required' });
+    }
+    
     const message = await Message.markAsFollowUp(req.params.messageId);
+    
+    if (!message) {
+      console.error('[Messages API] Message not found');
+      return res.status(404).json({ error: 'Message not found' });
+    }
     
     // Verify message belongs to business
     if (message.business_id !== req.businessId) {
       console.error('[Messages API] Message does not belong to business');
+      console.error('[Messages API] Message business_id:', message.business_id);
+      console.error('[Messages API] Request business_id:', req.businessId);
       return res.status(403).json({ error: 'Unauthorized' });
     }
     
     console.log('[Messages API] ✅ Message marked as follow up successfully');
+    console.log('[Messages API] ========== MARK AS FOLLOW UP SUCCESS ==========');
     res.json({ message });
   } catch (error) {
     console.error('[Messages API] ❌ Mark message follow up error:', error);
@@ -57,6 +72,13 @@ router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
     console.error('[Messages API] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to mark message as follow up' });
   }
+});
+
+// Also support the hyphenated version for backwards compatibility
+router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
+  // Redirect to the non-hyphenated version
+  req.url = req.url.replace('/follow-up', '/followup');
+  return router.handle(req, res);
 });
 
 // Mark message as read

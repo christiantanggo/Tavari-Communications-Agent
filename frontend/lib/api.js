@@ -60,7 +60,7 @@ export const callsAPI = {
 export const messagesAPI = {
   list: (params) => api.get('/messages', { params }),
   markRead: (messageId) => api.patch(`/messages/${messageId}/read`),
-  markFollowUp: (messageId) => api.patch(`/messages/${messageId}/follow-up`),
+  markFollowUp: (messageId) => api.patch(`/messages/${messageId}/followup`),
 };
 
 // Usage API
