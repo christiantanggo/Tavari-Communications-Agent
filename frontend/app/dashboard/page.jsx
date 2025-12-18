@@ -18,8 +18,26 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [showSmsBanner, setShowSmsBanner] = useState(false);
   const prevPathnameRef = useRef(pathname);
+  const isLoadingRef = useRef(false);
+  const lastLoadTimeRef = useRef(0);
 
   const loadData = async () => {
+    // Prevent concurrent calls
+    if (isLoadingRef.current) {
+      console.log('[Dashboard] Load already in progress, skipping...');
+      return;
+    }
+
+    // Debounce: Don't load if called within last 2 seconds
+    const now = Date.now();
+    if (now - lastLoadTimeRef.current < 2000) {
+      console.log('[Dashboard] Load called too soon, skipping...');
+      return;
+    }
+
+    isLoadingRef.current = true;
+    lastLoadTimeRef.current = now;
+
     try {
       console.log('[Dashboard] Loading data...');
       const [userRes, usageRes, callsRes, messagesRes] = await Promise.all([
