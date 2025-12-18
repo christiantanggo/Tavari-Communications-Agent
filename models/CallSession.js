@@ -31,6 +31,8 @@ export class CallSession {
       insertData.transfer_attempted = transfer_attempted;
     }
     
+    console.log('[CallSession Model] Creating call session with data:', insertData);
+    
     const { data: session, error } = await supabaseClient
       .from('call_sessions')
       .insert(insertData)
@@ -40,23 +42,51 @@ export class CallSession {
     // If error is about missing columns, try without them
     if (error && (error.message && (error.message.includes('column') || error.message.includes('does not exist')))) {
       console.warn('⚠️ VAPI columns missing, inserting without them. Run RUN_THIS_MIGRATION.sql');
+      console.warn('⚠️ Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      
+      const fallbackData = {
+        business_id,
+        voximplant_call_id: voximplant_call_id || null,
+        caller_number: caller_number || null,
+        caller_name: caller_name || null,
+        status: status || 'ringing',
+        started_at: started_at || new Date().toISOString(),
+      };
+      
+      console.log('[CallSession Model] Retrying with fallback data:', fallbackData);
+      
       const { data: session2, error: error2 } = await supabaseClient
         .from('call_sessions')
-        .insert({
-          business_id,
-          voximplant_call_id,
-          caller_number,
-          caller_name,
-          status,
-          started_at: started_at || new Date().toISOString(),
-        })
+        .insert(fallbackData)
         .select()
         .single();
-      if (error2) throw error2;
+        
+      if (error2) {
+        console.error('[CallSession Model] ❌ Fallback insert also failed:', error2);
+        throw error2;
+      }
+      
+      console.log('[CallSession Model] ✅ Call session created with fallback data:', session2.id);
       return session2;
     }
     
-    if (error) throw error;
+    if (error) {
+      console.error('[CallSession Model] ❌ Error creating call session:', error);
+      console.error('[CallSession Model] Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
+    
+    console.log('[CallSession Model] ✅ Call session created successfully:', session.id);
     return session;
   }
   
@@ -145,6 +175,17 @@ export class CallSession {
     });
   }
   
+  static async findById(id) {
+    const { data, error } = await supabaseClient
+      .from('call_sessions')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    return data;
+  }
+
   static async findByBusinessId(business_id, limit = 50) {
     const { data, error } = await supabaseClient
       .from('call_sessions')

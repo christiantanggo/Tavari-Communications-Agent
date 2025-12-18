@@ -11,19 +11,41 @@ const router = express.Router();
 router.get('/', authenticate, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
+    console.log('[Calls API] ========== GET CALLS START ==========');
+    console.log('[Calls API] businessId:', req.businessId, 'limit:', limit);
+    
+    if (!req.businessId) {
+      console.error('[Calls API] No businessId in request');
+      return res.status(400).json({ error: 'Business ID required' });
+    }
+    
     const calls = await CallSession.findByBusinessId(req.businessId, limit);
-    res.json({ calls });
+    console.log('[Calls API] Found calls:', calls?.length || 0);
+    console.log('[Calls API] ========== GET CALLS SUCCESS ==========');
+    
+    // Ensure we always return an array
+    res.json({ calls: calls || [] });
   } catch (error) {
-    console.error('Get calls error:', error);
-    res.status(500).json({ error: 'Failed to get calls' });
+    console.error('[Calls API] ========== GET CALLS ERROR ==========');
+    console.error('[Calls API] Get calls error:', error);
+    console.error('[Calls API] Error message:', error.message);
+    console.error('[Calls API] Error stack:', error.stack);
+    
+    // Return empty array instead of error to prevent dashboard from breaking
+    res.status(200).json({ calls: [] });
   }
 });
 
 // Get specific call session
 router.get('/:callId', authenticate, async (req, res) => {
   try {
-    // Try VAPI call ID first, then voximplant (legacy)
-    let call = await CallSession.findByVapiCallId(req.params.callId);
+    // Try database ID first (most common case from frontend)
+    let call = await CallSession.findById(req.params.callId);
+    
+    // If not found by ID, try VAPI call ID, then voximplant (legacy)
+    if (!call) {
+      call = await CallSession.findByVapiCallId(req.params.callId);
+    }
     if (!call) {
       call = await CallSession.findByVoximplantCallId(req.params.callId);
     }
