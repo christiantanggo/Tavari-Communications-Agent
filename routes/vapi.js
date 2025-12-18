@@ -508,13 +508,10 @@ router.get("/webhook/diagnostic", async (req, res) => {
  * VAPI needs a fast response to answer calls properly
  */
 router.post("/webhook", async (req, res) => {
-  // 🔥 IMMEDIATE LOG - First thing we do
-  console.log("🔥🔥🔥 INBOUND WEBHOOK HIT 🔥🔥🔥");
-  console.log("🔥 Timestamp:", new Date().toISOString());
-  console.log("🔥 Method:", req.method);
-  console.log("🔥 URL:", req.url);
-  console.log("🔥 Body:", JSON.stringify(req.body, null, 2));
-  console.log("🔥 Headers:", JSON.stringify(req.headers, null, 2));
+  // 🔥 IMMEDIATE LOG - First thing we do (concise)
+  const eventType = req.body?.type || req.body?.event || req.body?.message?.type;
+  const callId = req.body?.call?.id || req.body?.message?.call?.id;
+  console.log(`🔥🔥🔥 INBOUND WEBHOOK HIT 🔥🔥🔥 [${eventType || 'unknown'}] Call: ${callId || 'N/A'}`);
   
   // RESPOND IMMEDIATELY - Don't wait for anything
   // This tells VAPI we received the webhook
@@ -525,10 +522,7 @@ router.post("/webhook", async (req, res) => {
   setImmediate(async () => {
     const webhookId = `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     try {
-      console.log(`[VAPI Webhook ${webhookId}] ========== WEBHOOK PROCESSING START ==========`);
-      console.log(`[VAPI Webhook ${webhookId}] 📥 Incoming POST request to /api/vapi/webhook`);
-      console.log(`[VAPI Webhook ${webhookId}] Headers:`, JSON.stringify(req.headers, null, 2));
-      console.log(`[VAPI Webhook ${webhookId}] Body:`, JSON.stringify(req.body, null, 2));
+      console.log(`[VAPI Webhook ${webhookId}] 📥 Processing ${eventType || 'unknown'} event`);
 
       // Verify webhook signature if secret is provided
       if (process.env.VAPI_WEBHOOK_SECRET) {
@@ -546,8 +540,7 @@ router.post("/webhook", async (req, res) => {
 
       if (!eventType) {
         console.warn(`[VAPI Webhook ${webhookId}] ⚠️  No event type found in request body`);
-        console.warn(`[VAPI Webhook ${webhookId}] Full event object:`, JSON.stringify(event, null, 2));
-        console.log(`[VAPI Webhook ${webhookId}] ========== WEBHOOK PROCESSING END (NO EVENT TYPE) ==========`);
+        console.warn(`[VAPI Webhook ${webhookId}] Event keys:`, Object.keys(event).join(', '));
         return;
       }
 
@@ -629,8 +622,8 @@ router.post("/webhook", async (req, res) => {
  * Handle call-start event
  */
 async function handleCallStart(event) {
-  console.log(`[VAPI Webhook] ========== HANDLE CALL START ==========`);
-  console.log(`[VAPI Webhook] Full event:`, JSON.stringify(event, null, 2));
+  const callId = (event.call || event.message?.call || event.message?.artifact?.call)?.id;
+  console.log(`[VAPI Webhook] 📞 Handling call-start for call: ${callId || 'unknown'}`);
   
   try {
     // Handle nested message structure (status-update)
@@ -797,13 +790,12 @@ async function handleCallStart(event) {
  * Handle call-end event
  */
 async function handleCallEnd(event) {
-  console.log(`[VAPI Webhook] ========== HANDLE CALL END START ==========`);
-  console.log(`[VAPI Webhook] Full event data:`, JSON.stringify(event, null, 2));
-  
   // Handle nested message structure (status-update, end-of-call-report)
   // VAPI can send: event.call, event.message.call, or event.message.artifact.call
   const call = event.call || event.message?.call || event.message?.artifact?.call || event;
   const callId = call.id || call.callId || event.message?.call?.id || event.message?.artifact?.call?.id;
+  
+  console.log(`[VAPI Webhook] 📞 Handling call-end for call: ${callId || 'unknown'}`);
   
   // Extract duration from multiple possible locations
   // Check: call.duration, call.durationSeconds, event.durationSeconds, event.message.artifact.durationSeconds

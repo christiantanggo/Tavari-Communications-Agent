@@ -13,6 +13,9 @@ dotenv.config();
 const PORT = Number(process.env.PORT || 5001);
 const app = express();
 
+// Trust proxy for Railway/behind reverse proxy (fixes rate limiter warnings)
+app.set('trust proxy', true);
+
 // Basic middleware
 app.use(helmet());
 app.use(cors({
@@ -38,6 +41,30 @@ app.get("/health", (_req, res) => {
     server: "Tavari VAPI Server",
     timestamp: new Date().toISOString(),
     webhook: "/api/vapi/webhook",
+  });
+});
+
+// Direct environment variable check - shows what server actually sees
+app.get("/env-check", (_req, res) => {
+  res.status(200).json({
+    timestamp: new Date().toISOString(),
+    nodeEnv: process.env.NODE_ENV,
+    environmentVariables: {
+      SUPABASE_URL: process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL.substring(0, 30)}...` : "❌ NOT SET",
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ SET (hidden)" : "❌ NOT SET",
+      VAPI_API_KEY: process.env.VAPI_API_KEY ? "✅ SET (hidden)" : "❌ NOT SET",
+      BACKEND_URL: process.env.BACKEND_URL || "❌ NOT SET",
+      RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN || "❌ NOT SET",
+      DATABASE_URL: process.env.DATABASE_URL ? "✅ SET (hidden)" : "❌ NOT SET",
+    },
+    allEnvKeys: Object.keys(process.env).filter(key => 
+      key.includes('SUPABASE') || 
+      key.includes('VAPI') || 
+      key.includes('DATABASE') ||
+      key.includes('RAILWAY') ||
+      key.includes('BACKEND')
+    ).sort(),
+    note: "Check if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are in the 'allEnvKeys' list above",
   });
 });
 
@@ -93,6 +120,7 @@ import invoicesRoutes from "./routes/invoices.js";
 import accountRoutes from "./routes/account.js";
 import businessRoutes from "./routes/business.js";
 import callsRoutes from "./routes/calls.js";
+import analyticsRoutes from "./routes/analytics.js";
 
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
@@ -114,6 +142,7 @@ app.use("/api/invoices", invoicesRoutes);
 app.use("/api/account", accountRoutes);
 app.use("/api/business", businessRoutes);
 app.use("/api/calls", callsRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 // Error handler
 import { errorHandler } from "./middleware/errorHandler.js";
