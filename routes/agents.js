@@ -119,5 +119,25 @@ router.put('/', authenticate, async (req, res) => {
   }
 });
 
+// Rebuild VAPI assistant (manual trigger)
+router.post('/rebuild', authenticate, async (req, res) => {
+  try {
+    console.log('[Agent Rebuild] ========== MANUAL REBUILD REQUEST ==========');
+    console.log('[Agent Rebuild] Business ID:', req.businessId);
+    
+    const { rebuildAssistant } = await import('../services/vapi.js');
+    await rebuildAssistant(req.businessId);
+    
+    console.log('[Agent Rebuild] ✅ Manual rebuild completed successfully');
+    res.json({ success: true, message: 'AI agent rebuilt successfully' });
+  } catch (error) {
+    console.error('[Agent Rebuild] ❌ Error during manual rebuild:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to rebuild agent' 
+    });
+  }
+});
+
 export default router;
 

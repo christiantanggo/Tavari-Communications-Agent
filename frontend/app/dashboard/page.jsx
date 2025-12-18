@@ -3,9 +3,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
+import DashboardHeader from '@/components/DashboardHeader';
 import { authAPI, usageAPI, callsAPI, messagesAPI } from '@/lib/api';
-import { logout } from '@/lib/auth';
-import Link from 'next/link';
 
 function DashboardContent() {
   const router = useRouter();
@@ -141,19 +140,7 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-blue-600">Tavari Dashboard</h1>
-          <div className="space-x-4">
-            <Link href="/dashboard/settings" className="text-gray-700 hover:text-blue-600">
-              Settings
-            </Link>
-            <button onClick={logout} className="text-gray-700 hover:text-blue-600">
-              Logout
-            </button>
-          </div>
-        </div>
-      </nav>
+      <DashboardHeader />
 
       <main className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-8">

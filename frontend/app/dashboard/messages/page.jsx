@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
+import DashboardHeader from '@/components/DashboardHeader';
 import { messagesAPI } from '@/lib/api';
-import Link from 'next/link';
 
 function MessagesPage() {
   const router = useRouter();
@@ -56,16 +56,7 @@ function MessagesPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen bg-gray-50">
-        <nav className="bg-white shadow-sm">
-          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-            <h1 className="text-xl font-bold text-blue-600">Messages</h1>
-            <div className="space-x-4">
-              <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
-                Dashboard
-              </Link>
-            </div>
-          </div>
-        </nav>
+        <DashboardHeader />
 
         <main className="container mx-auto px-4 py-8">
           <div className="bg-white rounded-lg shadow">

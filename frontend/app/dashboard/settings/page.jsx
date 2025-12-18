@@ -1,27 +1,69 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
-import { authAPI, billingAPI, businessAPI } from '@/lib/api';
-import { logout, getToken } from '@/lib/auth';
-import Link from 'next/link';
+import DashboardHeader from '@/components/DashboardHeader';
+import { authAPI, billingAPI, businessAPI, agentsAPI } from '@/lib/api';
+import { getToken } from '@/lib/auth';
+import TimeInput12Hour from '@/components/TimeInput12Hour';
 
 function SettingsPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [billing, setBilling] = useState(null);
+  const [agent, setAgent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [sendingTestSMS, setSendingTestSMS] = useState(false);
   const [sendingTestMissedCall, setSendingTestMissedCall] = useState(false);
-  const [settings, setSettings] = useState({
+  const [activeTab, setActiveTab] = useState('business');
+  
+  // Business info state
+  const [businessInfo, setBusinessInfo] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    timezone: 'America/New_York',
+    public_phone_number: '',
+  });
+  
+  // Business hours state
+  const [businessHours, setBusinessHours] = useState({
+    monday: { open: '09:00', close: '17:00', closed: false },
+    tuesday: { open: '09:00', close: '17:00', closed: false },
+    wednesday: { open: '09:00', close: '17:00', closed: false },
+    thursday: { open: '09:00', close: '17:00', closed: false },
+    friday: { open: '09:00', close: '17:00', closed: false },
+    saturday: { closed: true },
+    sunday: { closed: true },
+  });
+  
+  // Greetings state
+  const [greetings, setGreetings] = useState({
+    opening_greeting: '',
+    ending_greeting: '',
+  });
+  
+  // FAQs state
+  const [faqs, setFaqs] = useState([]);
+  
+  // Holiday hours state
+  const [holidayHours, setHolidayHours] = useState([]);
+  
+  // AI Settings state
+  const [aiSettings, setAiSettings] = useState({
     ai_enabled: true,
     call_forward_rings: 4,
     after_hours_behavior: 'take_message',
     allow_call_transfer: true,
+  });
+  
+  // Notifications state
+  const [notifications, setNotifications] = useState({
     email_ai_answered: true,
     email_missed_calls: false,
     sms_enabled: false,
@@ -30,28 +72,131 @@ function SettingsPage() {
 
   useEffect(() => {
     loadData();
+  }, [pathname]);
+
+  // Reload data when page becomes visible (user navigates back)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const loadData = async () => {
     try {
-      const [userRes, billingRes] = await Promise.all([
+      setLoading(true);
+      const [userRes, billingRes, agentRes] = await Promise.all([
         authAPI.getMe(),
         billingAPI.getStatus().catch(() => ({ data: null })),
+        agentsAPI.get().catch(() => ({ data: { agent: null } })),
       ]);
+      
+      console.log('[Settings Load] Raw API responses:', {
+        business: userRes.data?.business,
+        agent: agentRes.data?.agent,
+      });
+      console.log('[Settings Load] Business public_phone_number:', userRes.data?.business?.public_phone_number);
+      console.log('[Settings Load] Business address:', userRes.data?.business?.address);
+      console.log('[Settings Load] Agent opening_greeting:', agentRes.data?.agent?.opening_greeting);
+      console.log('[Settings Load] Agent ending_greeting:', agentRes.data?.agent?.ending_greeting);
+      
       setUser(userRes.data);
       setBilling(billingRes.data);
       
       if (userRes.data?.business) {
-        setSettings({
-          ai_enabled: userRes.data.business.ai_enabled ?? true,
-          call_forward_rings: userRes.data.business.call_forward_rings || 4,
-          after_hours_behavior: userRes.data.business.after_hours_behavior || 'take_message',
-          allow_call_transfer: userRes.data.business.allow_call_transfer ?? true,
-          email_ai_answered: userRes.data.business.email_ai_answered ?? true,
-          email_missed_calls: userRes.data.business.email_missed_calls ?? false,
-          sms_enabled: userRes.data.business.sms_enabled ?? false,
-          sms_notification_number: userRes.data.business.sms_notification_number || '',
-        });
+        const business = userRes.data.business;
+        const loadedBusinessInfo = {
+          name: business.name || '',
+          phone: business.phone || '',
+          address: business.address || '',
+          timezone: business.timezone || 'America/New_York',
+          public_phone_number: business.public_phone_number || '',
+        };
+        console.log('[Settings Load] Setting businessInfo:', loadedBusinessInfo);
+        setBusinessInfo(loadedBusinessInfo);
+        
+        const loadedAiSettings = {
+          ai_enabled: business.ai_enabled ?? true,
+          call_forward_rings: business.call_forward_rings || 4,
+          after_hours_behavior: business.after_hours_behavior || 'take_message',
+          allow_call_transfer: business.allow_call_transfer ?? true,
+        };
+        console.log('[Settings Load] Setting aiSettings:', loadedAiSettings);
+        setAiSettings(loadedAiSettings);
+        
+        const loadedNotifications = {
+          email_ai_answered: business.email_ai_answered ?? true,
+          email_missed_calls: business.email_missed_calls ?? false,
+          sms_enabled: business.sms_enabled ?? false,
+          sms_notification_number: business.sms_notification_number || '',
+        };
+        console.log('[Settings Load] Setting notifications:', loadedNotifications);
+        setNotifications(loadedNotifications);
+      }
+      
+      if (agentRes.data?.agent) {
+        const agentData = agentRes.data.agent;
+        
+        // Always set business hours - use defaults if missing
+        const loadedBusinessHours = (agentData.business_hours && typeof agentData.business_hours === 'object' && Object.keys(agentData.business_hours).length > 0)
+          ? JSON.parse(JSON.stringify(agentData.business_hours))
+          : {
+              monday: { open: '09:00', close: '17:00', closed: false },
+              tuesday: { open: '09:00', close: '17:00', closed: false },
+              wednesday: { open: '09:00', close: '17:00', closed: false },
+              thursday: { open: '09:00', close: '17:00', closed: false },
+              friday: { open: '09:00', close: '17:00', closed: false },
+              saturday: { closed: true },
+              sunday: { closed: true },
+            };
+        console.log('[Settings Load] Setting businessHours:', loadedBusinessHours);
+        setBusinessHours(loadedBusinessHours);
+        
+        // Always set FAQs
+        const loadedFaqs = (agentData.faqs && Array.isArray(agentData.faqs)) 
+          ? agentData.faqs.map(faq => ({ ...faq }))
+          : [];
+        console.log('[Settings Load] Setting faqs:', loadedFaqs);
+        setFaqs(loadedFaqs);
+        
+        // Handle greetings
+        const loadedGreetings = {
+          opening_greeting: agentData.opening_greeting || '',
+          ending_greeting: agentData.ending_greeting || '',
+        };
+        console.log('[Settings Load] Setting greetings:', loadedGreetings);
+        setGreetings(loadedGreetings);
+        
+        // Handle holiday hours - filter out past holidays and sort by date
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset to start of day for comparison
+        
+        const loadedHolidayHours = (agentData.holiday_hours && Array.isArray(agentData.holiday_hours))
+          ? agentData.holiday_hours
+              .map(h => ({ ...h }))
+              .filter(h => {
+                if (!h.date) return false; // Remove holidays without dates
+                const holidayDate = new Date(h.date);
+                holidayDate.setHours(0, 0, 0, 0);
+                return holidayDate >= today; // Keep only future/current holidays
+              })
+              .sort((a, b) => {
+                // Sort by date: closest to today first
+                if (!a.date) return 1; // Holidays without dates go to end
+                if (!b.date) return -1;
+                const dateA = new Date(a.date);
+                const dateB = new Date(b.date);
+                return dateA - dateB; // Ascending order (closest first)
+              })
+          : [];
+        console.log('[Settings Load] Setting holiday hours (filtered and sorted):', loadedHolidayHours);
+        setHolidayHours(loadedHolidayHours);
       }
     } catch (error) {
       console.error('Failed to load settings data:', error);
@@ -63,26 +208,78 @@ function SettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Update business settings via API
-      const response = await businessAPI.updateSettings(settings);
+      console.log('[Settings Save] Current state before save:', {
+        businessInfo,
+        greetings,
+        businessHours,
+        faqs,
+      });
       
-      if (response.data?.success) {
-        alert('Settings saved successfully!');
-        await loadData();
-        // Navigate to dashboard with refresh parameter to force reload
-        router.push('/dashboard?refresh=' + Date.now());
-      } else {
-        alert('Failed to save settings');
+      // Save business info
+      const businessPayload = {
+        name: businessInfo.name,
+        phone: businessInfo.phone,
+        address: businessInfo.address,
+        timezone: businessInfo.timezone,
+        public_phone_number: businessInfo.public_phone_number,
+        ...aiSettings,
+        ...notifications,
+      };
+      
+      console.log('[Settings Save] Business payload:', businessPayload);
+      
+      const businessResponse = await businessAPI.updateSettings(businessPayload);
+      
+      if (!businessResponse.data?.success) {
+        throw new Error('Failed to save business settings');
       }
+      
+      // Filter out past holidays and sort by date before saving (clean up old holidays)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const activeHolidayHours = holidayHours
+        .filter(h => {
+          if (!h.date) return true; // Keep holidays without dates (new ones being added)
+          const holidayDate = new Date(h.date);
+          holidayDate.setHours(0, 0, 0, 0);
+          return holidayDate >= today; // Keep only future/current holidays
+        })
+        .sort((a, b) => {
+          // Sort by date: closest to today first
+          if (!a.date) return 1; // Holidays without dates go to end
+          if (!b.date) return -1;
+          const dateA = new Date(a.date);
+          const dateB = new Date(b.date);
+          return dateA - dateB; // Ascending order (closest first)
+        });
+      
+      // Save agent settings (business hours, FAQs, greetings, holiday hours)
+      const agentPayload = {
+        business_hours: businessHours,
+        faqs: faqs,
+        opening_greeting: greetings.opening_greeting || '',
+        ending_greeting: greetings.ending_greeting || '',
+        holiday_hours: activeHolidayHours, // Save only active (future) holidays
+      };
+      
+      console.log('[Settings Save] Agent payload:', agentPayload);
+      console.log('[Settings Save] Greetings state:', greetings);
+      
+      const agentResponse = await agentsAPI.update(agentPayload);
+      
+      if (!agentResponse.data?.agent) {
+        throw new Error('Failed to save agent settings');
+      }
+      
+      alert('Settings saved successfully!');
+      
+      // Reload data to ensure UI reflects saved changes
+      await loadData();
     } catch (error) {
-      console.error('Save error:', error);
-      console.error('Error response:', error.response?.data);
+      console.error('[Settings Save] Save error:', error);
+      console.error('[Settings Save] Error response:', error.response?.data);
+      console.error('[Settings Save] Error stack:', error.stack);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to save settings';
-      const errorDetails = error.response?.data?.details;
-      console.error('Error message:', errorMessage);
-      if (errorDetails) {
-        console.error('Error details:', errorDetails);
-      }
       alert(`Failed to save settings: ${errorMessage}`);
     } finally {
       setSaving(false);
@@ -109,7 +306,6 @@ function SettingsPage() {
       if (response.data?.success) {
         alert(`Phone number provisioned successfully! Your Tavari number is: ${response.data.phone_number}`);
         await loadData();
-        // Navigate to dashboard to see updated checklist
         router.push('/dashboard?refresh=' + Date.now());
       } else {
         alert('Failed to provision phone number. Please try again or contact support.');
@@ -124,133 +320,118 @@ function SettingsPage() {
   };
 
   const handleSendTestSMS = async () => {
-    console.log('[Test SMS UI] ========== TEST SMS BUTTON CLICKED ==========');
-    console.log('[Test SMS UI] User business:', user?.business);
-    console.log('[Test SMS UI] Settings:', settings);
-    
-    if (!settings.sms_enabled) {
-      console.error('[Test SMS UI] ❌ SMS not enabled in settings');
+    if (!notifications.sms_enabled) {
       alert('SMS is not enabled. Please enable SMS notifications first.');
       return;
     }
 
-    if (!settings.sms_notification_number) {
-      console.error('[Test SMS UI] ❌ No SMS number configured in settings');
+    if (!notifications.sms_notification_number) {
       alert('SMS notification number is not configured. Please add a phone number first.');
       return;
     }
 
-    console.log('[Test SMS UI] SMS number:', settings.sms_notification_number);
     setSendingTestSMS(true);
     
     try {
-      console.log('[Test SMS UI] Step 1: Calling API...');
       const response = await businessAPI.sendTestSMS({
-        sms_enabled: settings.sms_enabled,
-        sms_notification_number: settings.sms_notification_number,
+        sms_enabled: notifications.sms_enabled,
+        sms_notification_number: notifications.sms_notification_number,
       });
-      console.log('[Test SMS UI] Step 2: API response received:', response.data);
       
       if (response.data?.success) {
-        console.log('[Test SMS UI] ✅ Success response from API');
-        alert(`Test SMS sent successfully to ${settings.sms_notification_number}! Check your phone.`);
+        alert(`Test SMS sent successfully to ${notifications.sms_notification_number}! Check your phone.`);
       } else {
-        console.error('[Test SMS UI] ❌ API returned success=false');
         alert('Failed to send test SMS. Please try again.');
       }
     } catch (error) {
-      console.error('[Test SMS UI] ========== TEST SMS ERROR ==========');
-      console.error('[Test SMS UI] Error:', error);
-      console.error('[Test SMS UI] Error response:', error.response);
-      console.error('[Test SMS UI] Error data:', error.response?.data);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test SMS';
-      console.error('[Test SMS UI] Error message:', errorMessage);
       alert(`Failed to send test SMS: ${errorMessage}`);
     } finally {
       setSendingTestSMS(false);
-      console.log('[Test SMS UI] ========== TEST SMS COMPLETE ==========');
     }
   };
 
   const handleSendTestMissedCall = async () => {
-    console.log('[Test Missed Call UI] ========== TEST MISSED CALL BUTTON CLICKED ==========');
-    console.log('[Test Missed Call UI] User business:', user?.business);
-    
     if (!user?.business?.email) {
-      console.error('[Test Missed Call UI] ❌ No business email found');
       alert('No email address found for your business. Please update your business email.');
       return;
     }
 
-    console.log('[Test Missed Call UI] Business email:', user.business.email);
     setSendingTestMissedCall(true);
     
     try {
-      console.log('[Test Missed Call UI] Step 1: Calling API...');
-      const response = await businessAPI.sendTestMissedCall({
-        email_missed_calls: settings.email_missed_calls,
-      });
-      console.log('[Test Missed Call UI] Step 2: API response received:', response.data);
+      const response = await businessAPI.sendTestMissedCall();
       
       if (response.data?.success) {
-        console.log('[Test Missed Call UI] ✅ Success response from API');
-        alert(`Test missed call email sent successfully to ${user.business.email}! Check your inbox to see what your missed call emails will look like.`);
+        alert(`Test missed call email sent successfully to ${user.business.email}!`);
       } else {
-        console.error('[Test Missed Call UI] ❌ API returned success=false');
         alert('Failed to send test missed call email. Please try again.');
       }
     } catch (error) {
-      console.error('[Test Missed Call UI] ========== TEST MISSED CALL ERROR ==========');
-      console.error('[Test Missed Call UI] Error:', error);
-      console.error('[Test Missed Call UI] Error response:', error.response);
-      console.error('[Test Missed Call UI] Error data:', error.response?.data);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test missed call email';
-      console.error('[Test Missed Call UI] Error message:', errorMessage);
       alert(`Failed to send test missed call email: ${errorMessage}`);
     } finally {
       setSendingTestMissedCall(false);
-      console.log('[Test Missed Call UI] ========== TEST MISSED CALL COMPLETE ==========');
     }
   };
 
   const handleSendTestEmail = async () => {
-    console.log('[Test Email UI] ========== TEST EMAIL BUTTON CLICKED ==========');
-    console.log('[Test Email UI] User business:', user?.business);
-    
     if (!user?.business?.email) {
-      console.error('[Test Email UI] ❌ No business email found');
       alert('No email address found for your business. Please update your business email.');
       return;
     }
 
-    console.log('[Test Email UI] Business email:', user.business.email);
     setSendingTestEmail(true);
     
     try {
-      console.log('[Test Email UI] Step 1: Calling API...');
       const response = await businessAPI.sendTestEmail();
-      console.log('[Test Email UI] Step 2: API response received:', response.data);
       
       if (response.data?.success) {
-        console.log('[Test Email UI] ✅ Success response from API');
-        alert(`Test email sent successfully to ${user.business.email}! Check your inbox to see what your call summary emails will look like.`);
+        alert(`Test email sent successfully to ${user.business.email}!`);
       } else {
-        console.error('[Test Email UI] ❌ API returned success=false');
         alert('Failed to send test email. Please try again.');
       }
     } catch (error) {
-      console.error('[Test Email UI] ========== TEST EMAIL ERROR ==========');
-      console.error('[Test Email UI] Error:', error);
-      console.error('[Test Email UI] Error response:', error.response);
-      console.error('[Test Email UI] Error data:', error.response?.data);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to send test email';
-      console.error('[Test Email UI] Error message:', errorMessage);
       alert(`Failed to send test email: ${errorMessage}`);
     } finally {
       setSendingTestEmail(false);
-      console.log('[Test Email UI] ========== TEST EMAIL COMPLETE ==========');
     }
   };
+
+  const addFAQ = () => {
+    if (faqs.length >= 5) {
+      alert('Maximum of 5 FAQs allowed');
+      return;
+    }
+    setFaqs([...faqs, { question: '', answer: '' }]);
+  };
+
+  const removeFAQ = (index) => {
+    setFaqs(faqs.filter((_, i) => i !== index));
+  };
+
+  const updateFAQ = (index, field, value) => {
+    const newFaqs = [...faqs];
+    newFaqs[index] = { ...newFaqs[index], [field]: value };
+    setFaqs(newFaqs);
+  };
+
+  const updateBusinessHours = (day, field, value) => {
+    setBusinessHours({
+      ...businessHours,
+      [day]: { ...businessHours[day], [field]: value },
+    });
+  };
+
+  const tabs = [
+    { id: 'business', label: 'Business Info' },
+    { id: 'hours', label: 'Business Hours' },
+    { id: 'greetings', label: 'Greetings' },
+    { id: 'faqs', label: 'FAQs' },
+    { id: 'ai', label: 'AI Settings' },
+    { id: 'notifications', label: 'Notifications' },
+  ];
 
   if (loading) {
     return (
@@ -265,279 +446,557 @@ function SettingsPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen bg-gray-50">
-        <nav className="bg-white shadow-sm">
-          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-            <h1 className="text-xl font-bold text-blue-600">Settings</h1>
-            <div className="space-x-4">
-              <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
-                Dashboard
-              </Link>
-            </div>
-          </div>
-        </nav>
+        <DashboardHeader />
 
-        <main className="container mx-auto px-4 py-8 max-w-4xl">
-          {/* Business Information */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">Business Information</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Business Name</label>
-                <p className="text-gray-900">{user?.business?.name}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Public Phone Number</label>
-                <p className="text-gray-900">{user?.business?.public_phone_number || 'Not set'}</p>
-              </div>
-              {user?.business?.vapi_phone_number ? (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Your Tavari Number</label>
-                  <div className="flex items-center justify-between">
-                    <span className="text-2xl font-bold text-blue-600">{user.business.vapi_phone_number}</span>
-                    <button
-                      onClick={copyPhoneNumber}
-                      className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-600 mt-2">
-                    Forward calls from your public number to this number
-                  </p>
-                  </div>
-                ) : (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Phone Number Not Provisioned</label>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Your phone number was not provisioned during signup. Click the button below to provision a phone number now.
-                    </p>
-                    <button
-                      onClick={handleRetryActivation}
-                      disabled={activating}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                    >
-                      {activating ? 'Provisioning...' : 'Provision Phone Number'}
-                    </button>
-                  </div>
-                )}
-                
-                {/* Link Assistant Button - Show if phone number exists but might not be linked */}
-                {user?.business?.vapi_phone_number && user?.business?.vapi_assistant_id && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Troubleshooting</label>
-                    <p className="text-sm text-gray-600 mb-3">
-                      If calls aren't being answered, the assistant might not be linked to the phone number. Click below to verify and link them.
-                    </p>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const response = await businessAPI.linkAssistant();
-                          if (response.data?.success) {
-                            alert('Assistant successfully linked to phone number!');
-                          }
-                        } catch (error) {
-                          alert(`Failed to link: ${error.response?.data?.error || error.message}`);
-                        }
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
-                    >
-                      Link Assistant to Phone Number
-                    </button>
-                  </div>
-                )}
-            </div>
-          </div>
-
-          {/* AI Settings */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">AI Settings</h2>
-            <div className="space-y-4">
+        <main className="container mx-auto px-4 py-8 max-w-6xl">
+          {/* Tavari Phone Number Display */}
+          {user?.business?.vapi_phone_number ? (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Your Tavari Number</label>
               <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    AI Phone Agent Enabled
-                  </label>
-                  <p className="text-xs text-gray-500">
-                    When enabled, AI answers calls after X rings. When disabled, calls are immediately forwarded back to your restaurant.
-                  </p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.ai_enabled}
-                    onChange={(e) => setSettings({ ...settings, ai_enabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
-              </div>
-
-              {settings.ai_enabled && (
-                <>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
-                      Answer after X rings
-                    </label>
-                    <select
-                      value={settings.call_forward_rings}
-                      onChange={(e) => setSettings({ ...settings, call_forward_rings: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                    >
-                      <option value={2} className="text-gray-900">2 rings</option>
-                      <option value={3} className="text-gray-900">3 rings</option>
-                      <option value={4} className="text-gray-900">4 rings</option>
-                      <option value={5} className="text-gray-900">5 rings</option>
-                      <option value={6} className="text-gray-900">6 rings</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
-                      After-hours behavior
-                    </label>
-                    <select
-                      value={settings.after_hours_behavior}
-                      onChange={(e) => setSettings({ ...settings, after_hours_behavior: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                    >
-                      <option value="take_message" className="text-gray-900">Take message (after answering FAQs)</option>
-                      <option value="state_hours" className="text-gray-900">State hours only (after answering FAQs)</option>
-                    </select>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Note: FAQs are always answered, even after hours. This setting only controls whether you offer to take a message after answering their questions.
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Call Handling */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">Call Handling</h2>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Allow Tavari to try connecting the caller to the restaurant
-                  </label>
-                  <p className="text-xs text-gray-500">
-                    If enabled, Tavari may offer to transfer callers back to your restaurant when staff might be available. The caller must approve the transfer.
-                  </p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.allow_call_transfer}
-                    onChange={(e) => setSettings({ ...settings, allow_call_transfer: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
+                <span className="text-2xl font-bold text-blue-600">{user.business.vapi_phone_number}</span>
+                <button
+                  onClick={copyPhoneNumber}
+                  className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                >
+                  Copy
+                </button>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Phone Number Not Provisioned</label>
+              <p className="text-sm text-gray-600 mb-3">
+                Your phone number was not provisioned during signup. Click the button below to provision a phone number now.
+              </p>
+              <button
+                onClick={handleRetryActivation}
+                disabled={activating}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              >
+                {activating ? 'Provisioning...' : 'Provision Phone Number'}
+              </button>
+            </div>
+          )}
 
-          {/* Notifications */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">Notifications</h2>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Email when Tavari answers the phone
-                  </label>
-                  <p className="text-xs text-gray-500">Get an email summary every time Tavari handles a call</p>
-                </div>
-                <div className="flex items-center gap-3">
+          {/* Tabs */}
+          <div className="bg-white rounded-lg shadow mb-6">
+            <div className="border-b border-gray-200">
+              <nav className="flex -mb-px">
+                {tabs.map((tab) => (
                   <button
-                    onClick={handleSendTestEmail}
-                    disabled={sendingTestEmail}
-                    className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                      activeTab === tab.id
+                        ? 'border-blue-500 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
                   >
-                    {sendingTestEmail ? 'Sending...' : 'Test Email'}
+                    {tab.label}
                   </button>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.email_ai_answered}
-                      onChange={(e) => setSettings({ ...settings, email_ai_answered: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-              </div>
+                ))}
+              </nav>
+            </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Calls your team couldn't answer during busy times
-                  </label>
-                  <p className="text-xs text-gray-500">Get email summaries for calls that went unanswered during your business hours</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  {settings.email_missed_calls && (
-                    <button
-                      onClick={handleSendTestMissedCall}
-                      disabled={sendingTestMissedCall}
-                      className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            <div className="p-6">
+              {/* Business Info Tab */}
+              {activeTab === 'business' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Business Name</label>
+                    <input
+                      type="text"
+                      value={businessInfo.name}
+                      onChange={(e) => setBusinessInfo({ ...businessInfo, name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={businessInfo.phone}
+                      onChange={(e) => setBusinessInfo({ ...businessInfo, phone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Public Phone Number</label>
+                    <input
+                      type="tel"
+                      value={businessInfo.public_phone_number}
+                      onChange={(e) => setBusinessInfo({ ...businessInfo, public_phone_number: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      placeholder="+1 (555) 123-4567"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">This is the number customers call. Forward calls from this number to your Tavari number above.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Address</label>
+                    <textarea
+                      value={businessInfo.address}
+                      onChange={(e) => setBusinessInfo({ ...businessInfo, address: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      rows={3}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Timezone</label>
+                    <select
+                      value={businessInfo.timezone}
+                      onChange={(e) => setBusinessInfo({ ...businessInfo, timezone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     >
-                      {sendingTestMissedCall ? 'Sending...' : 'Test Email'}
-                    </button>
-                  )}
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.email_missed_calls}
-                      onChange={(e) => setSettings({ ...settings, email_missed_calls: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
+                      <option value="America/New_York">Eastern Time (ET)</option>
+                      <option value="America/Chicago">Central Time (CT)</option>
+                      <option value="America/Denver">Mountain Time (MT)</option>
+                      <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                      <option value="America/Phoenix">Arizona Time</option>
+                      <option value="America/Anchorage">Alaska Time</option>
+                      <option value="Pacific/Honolulu">Hawaii Time</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="border-t pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex-1">
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
-                      SMS for urgent callbacks
-                    </label>
-                    <p className="text-xs text-gray-500">Receive SMS alerts when callers request urgent callbacks (premium feature)</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.sms_enabled}
-                      onChange={(e) => setSettings({ ...settings, sms_enabled: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-                {settings.sms_enabled && (
-                  <div className="mt-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="tel"
-                        placeholder="+1 (555) 123-4567"
-                        value={settings.sms_notification_number}
-                        onChange={(e) => setSettings({ ...settings, sms_notification_number: e.target.value })}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 bg-white"
-                      />
-                      <button
-                        onClick={handleSendTestSMS}
-                        disabled={sendingTestSMS || !settings.sms_notification_number}
-                        className="px-3 py-2 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium whitespace-nowrap"
-                      >
-                        {sendingTestSMS ? 'Sending...' : 'Test SMS'}
-                      </button>
+              {/* Business Hours Tab */}
+              {activeTab === 'hours' && (
+                <div className="space-y-6">
+                  {/* Regular Business Hours */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-3">Regular Business Hours</h3>
+                    <div className="space-y-2">
+                      {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => {
+                        const dayHours = businessHours[day] || { closed: true, open: '09:00', close: '17:00' };
+                        return (
+                          <div key={day} className="flex items-center space-x-4 p-3 bg-gray-50 rounded-lg">
+                            <div className="w-24 capitalize font-medium text-gray-700">{day}</div>
+                            <label className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={!dayHours.closed}
+                                onChange={(e) => updateBusinessHours(day, 'closed', !e.target.checked)}
+                                className="w-4 h-4"
+                              />
+                              <span className="text-sm text-gray-700">Open</span>
+                            </label>
+                            {!dayHours.closed && (
+                              <>
+                                <TimeInput12Hour
+                                  value={dayHours.open || '09:00'}
+                                  onChange={(value) => updateBusinessHours(day, 'open', value)}
+                                  className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                />
+                                <span className="text-gray-600">to</span>
+                                <TimeInput12Hour
+                                  value={dayHours.close || '17:00'}
+                                  onChange={(value) => updateBusinessHours(day, 'close', value)}
+                                  className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                />
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">SMS messages are charged per message</p>
                   </div>
-                )}
-              </div>
+
+                  {/* Holiday Hours */}
+                  <div className="border-t pt-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800">Holiday Hours</h3>
+                        <p className="text-sm text-gray-600 mt-1">Set special hours for holidays (e.g., Christmas Day, New Year's Day). Past holidays are automatically removed.</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            // Add new holiday and sort by date
+                            const newHoliday = { name: '', date: '', closed: false, open: '09:00', close: '17:00' };
+                            const updated = [...holidayHours, newHoliday].sort((a, b) => {
+                              // Sort by date: closest to today first
+                              if (!a.date) return 1; // Holidays without dates go to end
+                              if (!b.date) return -1;
+                              const dateA = new Date(a.date);
+                              const dateB = new Date(b.date);
+                              return dateA - dateB; // Ascending order (closest first)
+                            });
+                            setHolidayHours(updated);
+                          }}
+                          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium text-sm"
+                        >
+                          Add Holiday
+                        </button>
+                        <button
+                          onClick={handleSave}
+                          disabled={saving}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                        >
+                          {saving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                    {holidayHours.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
+                        <p>No holiday hours set. Click "Add Holiday" to get started.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {holidayHours.map((holiday, index) => (
+                          <div key={index} className="border border-gray-300 p-4 rounded-lg bg-white">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                              <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Holiday Name</label>
+                                <input
+                                  type="text"
+                                  value={holiday.name}
+                                  onChange={(e) => {
+                                    const updated = [...holidayHours];
+                                    updated[index].name = e.target.value;
+                                    setHolidayHours(updated);
+                                  }}
+                                  placeholder="e.g., Christmas Day, New Year's Day"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+                                <input
+                                  type="date"
+                                  value={holiday.date}
+                                  onChange={(e) => {
+                                    const updated = [...holidayHours];
+                                    updated[index].date = e.target.value;
+                                    // Sort by date after updating
+                                    const sorted = updated.sort((a, b) => {
+                                      if (!a.date) return 1; // Holidays without dates go to end
+                                      if (!b.date) return -1;
+                                      const dateA = new Date(a.date);
+                                      const dateB = new Date(b.date);
+                                      return dateA - dateB; // Ascending order (closest first)
+                                    });
+                                    setHolidayHours(sorted);
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              <div className="flex items-center space-x-4">
+                                <TimeInput12Hour
+                                  value={holiday.open || '09:00'}
+                                  onChange={(value) => {
+                                    const updated = [...holidayHours];
+                                    updated[index].open = value;
+                                    setHolidayHours(updated);
+                                  }}
+                                  placeholder="Open time"
+                                  disabled={holiday.closed}
+                                  className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                                />
+                                <span className="text-gray-600">to</span>
+                                <TimeInput12Hour
+                                  value={holiday.close || '17:00'}
+                                  onChange={(value) => {
+                                    const updated = [...holidayHours];
+                                    updated[index].close = value;
+                                    setHolidayHours(updated);
+                                  }}
+                                  placeholder="Close time"
+                                  disabled={holiday.closed}
+                                  className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                                />
+                                <label className="flex items-center space-x-2 ml-4">
+                                  <input
+                                    type="checkbox"
+                                    checked={holiday.closed}
+                                    onChange={(e) => {
+                                      const updated = [...holidayHours];
+                                      updated[index].closed = e.target.checked;
+                                      setHolidayHours(updated);
+                                    }}
+                                    className="w-4 h-4"
+                                  />
+                                  <span className="text-sm text-gray-700">Closed for the entire day</span>
+                                </label>
+                                <button
+                                  onClick={() => setHolidayHours(holidayHours.filter((_, i) => i !== index))}
+                                  className="ml-auto px-3 py-1 text-sm text-red-600 hover:text-red-700 font-medium"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Greetings Tab */}
+              {activeTab === 'greetings' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Opening Greeting</label>
+                    <textarea
+                      value={greetings.opening_greeting}
+                      onChange={(e) => setGreetings({ ...greetings, opening_greeting: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      rows={3}
+                      placeholder="Hello! Thanks for calling [Business Name]. How can I help you today?"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">This is what the AI says when answering the phone.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Closing Greeting</label>
+                    <textarea
+                      value={greetings.ending_greeting}
+                      onChange={(e) => setGreetings({ ...greetings, ending_greeting: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      rows={3}
+                      placeholder="Thank you for calling! Have a great day!"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">This is what the AI says when ending the call (optional).</p>
+                  </div>
+                </div>
+              )}
+
+              {/* FAQs Tab */}
+              {activeTab === 'faqs' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-4">
+                    <p className="text-sm text-gray-600">Add up to 5 frequently asked questions</p>
+                    {faqs.length < 5 && (
+                      <button
+                        onClick={addFAQ}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                      >
+                        Add FAQ
+                      </button>
+                    )}
+                  </div>
+                  {faqs.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>No FAQs yet. Click "Add FAQ" to get started.</p>
+                    </div>
+                  ) : (
+                    faqs.map((faq, index) => (
+                      <div key={index} className="border border-gray-300 p-4 rounded-lg bg-gray-50">
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Question {index + 1}</label>
+                        <input
+                          type="text"
+                          value={faq.question || ''}
+                          onChange={(e) => updateFAQ(index, 'question', e.target.value)}
+                          className="w-full mb-3 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                          placeholder="What are your hours?"
+                        />
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Answer</label>
+                        <textarea
+                          value={faq.answer || ''}
+                          onChange={(e) => updateFAQ(index, 'answer', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                          rows={2}
+                          placeholder="We're open Monday-Friday 9am-5pm"
+                        />
+                        <button
+                          onClick={() => removeFAQ(index)}
+                          className="mt-2 text-red-600 text-sm hover:text-red-700 font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* AI Settings Tab */}
+              {activeTab === 'ai' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        AI Phone Agent Enabled
+                      </label>
+                      <p className="text-xs text-gray-500">
+                        When enabled, AI answers calls after X rings. When disabled, calls are immediately forwarded.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={aiSettings.ai_enabled}
+                        onChange={(e) => setAiSettings({ ...aiSettings, ai_enabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+
+                  {aiSettings.ai_enabled && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                          Answer after X rings
+                        </label>
+                        <select
+                          value={aiSettings.call_forward_rings}
+                          onChange={(e) => setAiSettings({ ...aiSettings, call_forward_rings: parseInt(e.target.value) })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        >
+                          <option value={2}>2 rings</option>
+                          <option value={3}>3 rings</option>
+                          <option value={4}>4 rings</option>
+                          <option value={5}>5 rings</option>
+                          <option value={6}>6 rings</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                          After-hours behavior
+                        </label>
+                        <select
+                          value={aiSettings.after_hours_behavior}
+                          onChange={(e) => setAiSettings({ ...aiSettings, after_hours_behavior: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        >
+                          <option value="take_message">Take message (after answering FAQs)</option>
+                          <option value="state_hours">State hours only (after answering FAQs)</option>
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Note: FAQs are always answered, even after hours.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <label className="block text-sm font-semibold text-gray-700 mb-1">
+                            Allow call transfer
+                          </label>
+                          <p className="text-xs text-gray-500">
+                            Allow Tavari to offer transferring callers back to your business.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={aiSettings.allow_call_transfer}
+                            onChange={(e) => setAiSettings({ ...aiSettings, allow_call_transfer: e.target.checked })}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Notifications Tab */}
+              {activeTab === 'notifications' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        Email when Tavari answers the phone
+                      </label>
+                      <p className="text-xs text-gray-500">Get an email summary every time Tavari handles a call</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleSendTestEmail}
+                        disabled={sendingTestEmail}
+                        className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                      >
+                        {sendingTestEmail ? 'Sending...' : 'Test Email'}
+                      </button>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={notifications.email_ai_answered}
+                          onChange={(e) => setNotifications({ ...notifications, email_ai_answered: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        Calls your team couldn't answer during busy times
+                      </label>
+                      <p className="text-xs text-gray-500">Get email summaries for calls that went unanswered during your business hours</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {notifications.email_missed_calls && (
+                        <button
+                          onClick={handleSendTestMissedCall}
+                          disabled={sendingTestMissedCall}
+                          className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                        >
+                          {sendingTestMissedCall ? 'Sending...' : 'Test Email'}
+                        </button>
+                      )}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={notifications.email_missed_calls}
+                          onChange={(e) => setNotifications({ ...notifications, email_missed_calls: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex-1">
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                          SMS for urgent callbacks
+                        </label>
+                        <p className="text-xs text-gray-500">Receive SMS alerts when callers request urgent callbacks</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={notifications.sms_enabled}
+                          onChange={(e) => setNotifications({ ...notifications, sms_enabled: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                    {notifications.sms_enabled && (
+                      <div className="mt-2">
+                        <div className="flex gap-2">
+                          <input
+                            type="tel"
+                            placeholder="+1 (555) 123-4567"
+                            value={notifications.sms_notification_number}
+                            onChange={(e) => setNotifications({ ...notifications, sms_notification_number: e.target.value })}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 bg-white"
+                          />
+                          <button
+                            onClick={handleSendTestSMS}
+                            disabled={sendingTestSMS || !notifications.sms_notification_number}
+                            className="px-3 py-2 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium whitespace-nowrap"
+                          >
+                            {sendingTestSMS ? 'Sending...' : 'Test SMS'}
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">SMS messages are charged per message</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

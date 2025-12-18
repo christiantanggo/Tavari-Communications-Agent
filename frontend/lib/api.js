@@ -47,6 +47,7 @@ export const authAPI = {
 export const agentsAPI = {
   get: () => api.get('/agents'),
   update: (data) => api.put('/agents', data),
+  rebuild: () => api.post('/agents/rebuild'),
 };
 
 // Calls API
