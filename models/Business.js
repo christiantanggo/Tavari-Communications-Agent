@@ -56,6 +56,8 @@ export class Business {
       updated_at: new Date().toISOString(),
     };
     
+    console.log('[Business Model] Updating business:', { id, updateData });
+    
     const { data: business, error } = await supabaseClient
       .from('businesses')
       .update(updateData)
@@ -63,7 +65,22 @@ export class Business {
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      console.error('[Business Model] Update error:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
+    
+    console.log('[Business Model] Update successful:', {
+      id: business.id,
+      name: business.name,
+      website: business.website,
+    });
+    
     return business;
   }
   

@@ -229,6 +229,7 @@ router.get('/me', authenticate, async (req, res) => {
         phone: business.phone,
         public_phone_number: business.public_phone_number,
         address: business.address,
+        website: business.website,
         timezone: business.timezone,
         onboarding_complete: business.onboarding_complete,
         vapi_phone_number: business.vapi_phone_number,
