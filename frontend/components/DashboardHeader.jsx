@@ -40,9 +40,19 @@ export default function DashboardHeader() {
           <Link href="/dashboard" className="text-gray-700 hover:text-blue-600">
             Dashboard
           </Link>
+          <span className="text-gray-300">|</span>
+          <Link href="/dashboard/faqs" className="text-gray-700 hover:text-blue-600">
+            FAQ's
+          </Link>
+          <span className="text-gray-300">|</span>
           <Link href="/dashboard/settings" className="text-gray-700 hover:text-blue-600">
             Settings
           </Link>
+          <span className="text-gray-300">|</span>
+          <Link href="/dashboard/billing" className="text-gray-700 hover:text-blue-600">
+            Billing
+          </Link>
+          <span className="text-gray-300">|</span>
           <button onClick={logout} className="text-gray-700 hover:text-blue-600">
             Logout
           </button>

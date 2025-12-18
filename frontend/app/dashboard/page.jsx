@@ -406,9 +406,7 @@ function DashboardContent() {
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
             <h3 className="text-sm font-semibold text-gray-600 mb-2">Recent Calls</h3>
             <p className="text-3xl font-bold text-gray-900 mb-1">{calls.length}</p>
-            <Link href="/dashboard/calls" className="text-xs text-blue-600 hover:underline">
-              View all →
-            </Link>
+            <p className="text-xs text-gray-500">Total calls received</p>
           </div>
         </div>
 
@@ -531,40 +529,6 @@ function DashboardContent() {
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Link
-            href="/dashboard/settings"
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
-          >
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">Settings</h3>
-            <p className="text-gray-600 text-sm">Manage your account and preferences</p>
-          </Link>
-
-          <Link
-            href="/dashboard/faqs"
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
-          >
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">FAQs</h3>
-            <p className="text-gray-600 text-sm">Add and edit frequently asked questions</p>
-          </Link>
-
-          <Link
-            href="/dashboard/calls"
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
-          >
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">Call History</h3>
-            <p className="text-gray-600 text-sm">View and manage your call sessions</p>
-          </Link>
-
-          <Link
-            href="/dashboard/messages"
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-1"
-          >
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">Messages</h3>
-            <p className="text-gray-600 text-sm">View messages left by callers</p>
-          </Link>
-        </div>
       </main>
     </div>
   );
