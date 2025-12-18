@@ -702,6 +702,14 @@ export async function linkAssistantToNumber(assistantId, phoneNumberId) {
  */
 export async function updateAssistant(assistantId, updates) {
   try {
+    console.log(`[updateAssistant] Updating assistant ${assistantId}`);
+    console.log(`[updateAssistant] Updates received:`, {
+      hasModel: !!updates.model,
+      hasFirstMessage: !!updates.firstMessage,
+      hasEndCallFunction: !!updates.endCallFunctionEnabled,
+      modelMessagesCount: updates.model?.messages?.length || 0,
+    });
+    
     // Handle systemPrompt updates - VAPI API expects it in model.messages
     const updatePayload = { ...updates };
     
@@ -720,10 +728,31 @@ export async function updateAssistant(assistantId, updates) {
       delete updatePayload.systemPrompt;
     }
     
+    console.log(`[updateAssistant] Sending update payload to VAPI:`, {
+      hasModel: !!updatePayload.model,
+      hasFirstMessage: !!updatePayload.firstMessage,
+      hasEndCallFunction: !!updatePayload.endCallFunctionEnabled,
+      modelProvider: updatePayload.model?.provider,
+      modelModel: updatePayload.model?.model,
+    });
+    
     const response = await getVapiClient().patch(`/assistant/${assistantId}`, updatePayload);
+    
+    console.log(`[updateAssistant] ✅ Assistant updated successfully:`, {
+      assistantId: response.data?.id || assistantId,
+      name: response.data?.name,
+    });
+    
     return response.data;
   } catch (error) {
-    console.error("Error updating VAPI assistant:", error.response?.data || error.message);
+    console.error("[updateAssistant] ❌❌❌ ERROR updating VAPI assistant:", {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      assistantId,
+    });
     throw new Error(`Failed to update VAPI assistant: ${error.response?.data?.message || error.message}`);
   }
 }
