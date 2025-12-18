@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 export default function AdminGuard({ children }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -25,7 +27,7 @@ export default function AdminGuard({ children }) {
       }
 
       // Verify token with backend
-      const response = await fetch('/api/admin/me', {
+      const response = await fetch(`${API_URL}/api/admin/me`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
