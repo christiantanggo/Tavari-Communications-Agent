@@ -60,6 +60,7 @@ export const callsAPI = {
 export const messagesAPI = {
   list: (params) => api.get('/messages', { params }),
   markRead: (messageId) => api.patch(`/messages/${messageId}/read`),
+  markFollowUp: (messageId) => api.patch(`/messages/${messageId}/follow-up`),
 };
 
 // Usage API
@@ -117,6 +118,13 @@ export const businessAPI = {
   sendTestEmail: () => api.post('/business/test-email'),
   sendTestSMS: (data) => api.post('/business/test-sms', data),
   sendTestMissedCall: (data) => api.post('/business/test-missed-call', data),
+};
+
+// Analytics API
+export const analyticsAPI = {
+  getCallAnalytics: (params) => api.get('/analytics/calls', { params }),
+  getUsageTrends: (params) => api.get('/analytics/usage/trends', { params }),
+  exportData: (type) => api.get('/analytics/export', { params: { type }, responseType: 'blob' }),
 };
 
 // Phone Numbers API (Voximplant - legacy)

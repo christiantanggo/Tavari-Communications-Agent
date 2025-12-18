@@ -10,6 +10,7 @@ function MessagesPage() {
   const router = useRouter();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('new'); // 'new', 'read', 'follow_up'
 
   useEffect(() => {
     loadMessages();
@@ -30,18 +31,72 @@ function MessagesPage() {
     try {
       await messagesAPI.markRead(messageId);
       setMessages((prev) =>
-        prev.map((msg) => (msg.id === messageId ? { ...msg, read: true } : msg))
+        prev.map((msg) => 
+          msg.id === messageId 
+            ? { ...msg, is_read: true, status: 'read' } 
+            : msg
+        )
       );
     } catch (error) {
       console.error('Failed to mark message as read:', error);
     }
   };
 
+  const markAsFollowUp = async (messageId) => {
+    try {
+      await messagesAPI.markFollowUp(messageId);
+      setMessages((prev) =>
+        prev.map((msg) => 
+          msg.id === messageId 
+            ? { ...msg, status: 'follow_up' } 
+            : msg
+        )
+      );
+    } catch (error) {
+      console.error('Failed to mark message as follow up:', error);
+    }
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString();
+    // Ensure the date string is treated as UTC if it doesn't have timezone info
+    let date;
+    if (dateString.includes('Z') || dateString.includes('+') || dateString.includes('-', 10)) {
+      // Already has timezone info
+      date = new Date(dateString);
+    } else {
+      // Assume UTC if no timezone specified (database timestamps are typically UTC)
+      date = new Date(dateString + 'Z');
+    }
+    
+    // Convert to local timezone for display
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
   };
+
+  // Filter messages based on active tab
+  const filteredMessages = messages.filter((message) => {
+    if (activeTab === 'new') {
+      return !message.is_read && message.status !== 'follow_up';
+    } else if (activeTab === 'read') {
+      return message.is_read || message.status === 'read';
+    } else if (activeTab === 'follow_up') {
+      return message.status === 'follow_up';
+    }
+    return true;
+  });
+
+  // Count messages for each tab
+  const newCount = messages.filter(m => !m.is_read && m.status !== 'follow_up').length;
+  const readCount = messages.filter(m => m.is_read || m.status === 'read').length;
+  const followUpCount = messages.filter(m => m.status === 'follow_up').length;
 
   if (loading) {
     return (
@@ -60,16 +115,82 @@ function MessagesPage() {
 
         <main className="container mx-auto px-4 py-8">
           <div className="bg-white rounded-lg shadow">
-            {messages.length === 0 ? (
+            {/* Tabs */}
+            <div className="border-b border-gray-200">
+              <nav className="flex -mb-px" aria-label="Tabs">
+                <button
+                  onClick={() => setActiveTab('new')}
+                  className={`
+                    px-6 py-4 text-sm font-medium border-b-2 transition-colors
+                    ${activeTab === 'new'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }
+                  `}
+                >
+                  New Messages
+                  {newCount > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                      {newCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('read')}
+                  className={`
+                    px-6 py-4 text-sm font-medium border-b-2 transition-colors
+                    ${activeTab === 'read'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }
+                  `}
+                >
+                  Read
+                  {readCount > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
+                      {readCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('follow_up')}
+                  className={`
+                    px-6 py-4 text-sm font-medium border-b-2 transition-colors
+                    ${activeTab === 'follow_up'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }
+                  `}
+                >
+                  Follow Up
+                  {followUpCount > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                      {followUpCount}
+                    </span>
+                  )}
+                </button>
+              </nav>
+            </div>
+
+            {/* Messages List */}
+            {filteredMessages.length === 0 ? (
               <div className="p-8 text-center">
-                <p className="text-gray-600">No messages yet. Messages left by callers will appear here.</p>
+                <p className="text-gray-600">
+                  {activeTab === 'new' && 'No new messages.'}
+                  {activeTab === 'read' && 'No read messages.'}
+                  {activeTab === 'follow_up' && 'No messages marked for follow up.'}
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
-                {messages.map((message) => (
+                {filteredMessages.map((message) => (
                   <div
                     key={message.id}
-                    className={`p-6 ${!message.read ? 'bg-blue-50' : 'bg-white'}`}
+                    className={`p-6 ${
+                      activeTab === 'new' ? 'bg-blue-50' : 
+                      activeTab === 'follow_up' ? 'bg-yellow-50' : 
+                      'bg-white'
+                    }`}
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
@@ -77,9 +198,14 @@ function MessagesPage() {
                           <h3 className="text-lg font-semibold text-gray-900">
                             {message.caller_name || 'Unknown Caller'}
                           </h3>
-                          {!message.read && (
+                          {activeTab === 'new' && (
                             <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-600 text-white">
                               New
+                            </span>
+                          )}
+                          {activeTab === 'follow_up' && (
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-600 text-white">
+                              Follow Up
                             </span>
                           )}
                         </div>
@@ -109,14 +235,32 @@ function MessagesPage() {
                           <p className="text-gray-900 whitespace-pre-wrap">{message.message_text}</p>
                         </div>
                       </div>
-                      {!message.read && (
-                        <button
-                          onClick={() => markAsRead(message.id)}
-                          className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
-                        >
-                          Mark as Read
-                        </button>
-                      )}
+                      <div className="ml-4 flex flex-col space-y-2">
+                        {activeTab === 'new' && (
+                          <>
+                            <button
+                              onClick={() => markAsRead(message.id)}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium whitespace-nowrap"
+                            >
+                              Mark as Read
+                            </button>
+                            <button
+                              onClick={() => markAsFollowUp(message.id)}
+                              className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 text-sm font-medium whitespace-nowrap"
+                            >
+                              Follow Up
+                            </button>
+                          </>
+                        )}
+                        {activeTab === 'follow_up' && (
+                          <button
+                            onClick={() => markAsRead(message.id)}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium whitespace-nowrap"
+                          >
+                            Mark as Read
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -130,4 +274,3 @@ function MessagesPage() {
 }
 
 export default MessagesPage;
-
