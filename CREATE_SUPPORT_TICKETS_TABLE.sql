@@ -1,3 +1,17 @@
+-- Create admin_users table first (required for foreign key reference)
+CREATE TABLE IF NOT EXISTS admin_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(100),
+  last_name VARCHAR(100),
+  role VARCHAR(50) DEFAULT 'support',
+  is_active BOOLEAN DEFAULT TRUE,
+  last_login TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Create support_tickets table
 CREATE TABLE IF NOT EXISTS support_tickets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -13,6 +27,9 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Create indexes for admin_users
+CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
 
 -- Create indexes for support_tickets
 CREATE INDEX IF NOT EXISTS idx_support_tickets_business_id ON support_tickets(business_id);
