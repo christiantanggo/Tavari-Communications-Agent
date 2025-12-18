@@ -225,18 +225,46 @@ router.get("/accounts/:id/usage", authenticateAdmin, async (req, res) => {
   try {
     const { UsageMinutes } = await import("../models/UsageMinutes.js");
     const { calculateBillingCycle } = await import("../services/billing.js");
+    const { getCurrentCycleUsage } = await import("../services/usage.js");
     const business = await Business.findById(req.params.id);
     if (!business) {
       return res.status(404).json({ error: "Business not found" });
     }
     
+    // Initialize billing cycle if not set
+    if (!business.billing_day || !business.next_billing_date) {
+      const { initializeBillingCycle } = await import("../services/billing.js");
+      await initializeBillingCycle(business.id, business.created_at || new Date());
+      // Reload business to get updated billing info
+      const updatedBusiness = await Business.findById(req.params.id);
+      Object.assign(business, updatedBusiness);
+    }
+    
     // Get current billing cycle
     const billingCycle = calculateBillingCycle(business);
     
-    // Get current billing cycle usage
-    const usage = await UsageMinutes.getCurrentCycleUsage(req.params.id, billingCycle.start, billingCycle.end);
+    // Get current billing cycle usage (same as customer side)
+    const usage = await getCurrentCycleUsage(req.params.id, billingCycle.start, billingCycle.end);
     
-    res.json({ usage });
+    // Format response same as customer side
+    const planLimit = business.usage_limit_minutes || 0;
+    const bonusMinutes = business.bonus_minutes || 0;
+    const totalAvailable = planLimit + bonusMinutes;
+    const minutesRemaining = Math.max(0, totalAvailable - usage.totalMinutes);
+    const usagePercent = totalAvailable > 0 ? (usage.totalMinutes / totalAvailable) * 100 : 0;
+    
+    const formattedUsage = {
+      minutes_used: usage.totalMinutes || 0,
+      minutes_total: totalAvailable,
+      minutes_remaining: minutesRemaining,
+      usage_percent: Math.round(usagePercent),
+      overage_minutes: usage.overageMinutes || 0,
+      billing_cycle_start: billingCycle.start.toISOString().split('T')[0],
+      billing_cycle_end: billingCycle.end.toISOString().split('T')[0],
+      next_billing_date: billingCycle.next.toISOString().split('T')[0],
+    };
+    
+    res.json({ usage: formattedUsage });
   } catch (error) {
     console.error("Get usage error:", error);
     res.status(500).json({ error: "Failed to get usage" });
@@ -247,10 +275,17 @@ router.get("/accounts/:id/usage", authenticateAdmin, async (req, res) => {
 router.get("/accounts/:id/activity", authenticateAdmin, async (req, res) => {
   try {
     const logs = await AdminActivityLog.findByBusiness(req.params.id, 50);
-    res.json({ logs });
+    res.json({ logs: logs || [] });
   } catch (error) {
     console.error("Get activity error:", error);
-    res.status(500).json({ error: "Failed to get activity" });
+    console.error("Error details:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    // Return empty array instead of error to prevent UI breaking
+    res.json({ logs: [] });
   }
 });
 
