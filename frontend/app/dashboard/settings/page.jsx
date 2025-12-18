@@ -254,21 +254,6 @@ function SettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      console.log('[Settings Save] ========== WEBSITE FIELD DEBUG START ==========');
-      console.log('[Settings Save] businessInfo state:', JSON.stringify(businessInfo, null, 2));
-      console.log('[Settings Save] businessInfo.website value:', businessInfo.website);
-      console.log('[Settings Save] businessInfo.website type:', typeof businessInfo.website);
-      console.log('[Settings Save] businessInfo.website is undefined?', businessInfo.website === undefined);
-      console.log('[Settings Save] businessInfo.website is null?', businessInfo.website === null);
-      console.log('[Settings Save] businessInfo.website is empty string?', businessInfo.website === '');
-      
-      console.log('[Settings Save] Current state before save:', {
-        businessInfo,
-        greetings,
-        businessHours,
-        faqs,
-      });
-      
       // Save business info
       // IMPORTANT: Put website AFTER spreads to ensure it's not overwritten
       const businessPayload = {
@@ -283,21 +268,7 @@ function SettingsPage() {
         website: businessInfo.website,
       };
       
-      console.log('[Settings Save] ========== WEBSITE IN PAYLOAD ==========');
-      console.log('[Settings Save] businessPayload.website:', businessPayload.website);
-      console.log('[Settings Save] businessPayload.website type:', typeof businessPayload.website);
-      console.log('[Settings Save] Full businessPayload:', JSON.stringify(businessPayload, null, 2));
-      console.log('[Settings Save] ========== WEBSITE FIELD DEBUG END ==========');
-      
-      console.log('[Settings Save] ========== MAKING API CALL ==========');
-      console.log('[Settings Save] API endpoint: PUT /api/business/settings');
-      console.log('[Settings Save] Payload being sent:', JSON.stringify(businessPayload, null, 2));
-      
       const businessResponse = await businessAPI.updateSettings(businessPayload);
-      
-      console.log('[Settings Save] ========== API RESPONSE RECEIVED ==========');
-      console.log('[Settings Save] Response status:', businessResponse.status);
-      console.log('[Settings Save] Response data:', JSON.stringify(businessResponse.data, null, 2));
       
       if (!businessResponse.data?.success) {
         throw new Error('Failed to save business settings');

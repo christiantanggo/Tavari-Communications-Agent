@@ -51,21 +51,11 @@ export class Business {
   }
   
   static async update(id, data) {
-    console.log('[Business Model] ========== WEBSITE FIELD DEBUG START ==========');
-    console.log('[Business Model] Received data.website:', data.website);
-    console.log('[Business Model] Received data.website type:', typeof data.website);
-    console.log('[Business Model] Received data.website is undefined?', data.website === undefined);
-    console.log('[Business Model] Full received data:', JSON.stringify(data, null, 2));
-    
     const updateData = {
       ...data,
       updated_at: new Date().toISOString(),
     };
     
-    console.log('[Business Model] ========== updateData AFTER SPREAD ==========');
-    console.log('[Business Model] updateData.website:', updateData.website);
-    console.log('[Business Model] updateData.website type:', typeof updateData.website);
-    console.log('[Business Model] Full updateData:', JSON.stringify(updateData, null, 2));
     console.log('[Business Model] Updating business:', { id, updateData });
     
     const { data: business, error } = await supabaseClient
@@ -76,7 +66,6 @@ export class Business {
       .single();
     
     if (error) {
-      console.error('[Business Model] ========== UPDATE ERROR ==========');
       console.error('[Business Model] Update error:', {
         message: error.message,
         code: error.code,
@@ -86,16 +75,11 @@ export class Business {
       throw error;
     }
     
-    console.log('[Business Model] ========== UPDATE SUCCESS - CHECKING RESULT ==========');
-    console.log('[Business Model] Updated business.website:', business.website);
-    console.log('[Business Model] Updated business.website type:', typeof business.website);
     console.log('[Business Model] Update successful:', {
       id: business.id,
       name: business.name,
       website: business.website,
     });
-    console.log('[Business Model] Full updated business:', JSON.stringify(business, null, 2));
-    console.log('[Business Model] ========== WEBSITE FIELD DEBUG END ==========');
     
     return business;
   }
