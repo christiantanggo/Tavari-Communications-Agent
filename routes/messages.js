@@ -35,9 +35,8 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// Mark message as follow up (define before /read to avoid route conflicts)
-// Using 'followup' instead of 'follow-up' to avoid potential route matching issues
-router.patch('/:messageId/followup', authenticate, async (req, res) => {
+// Handler function for marking message as follow up
+const handleMarkAsFollowUp = async (req, res) => {
   try {
     console.log('[Messages API] ========== MARK AS FOLLOW UP START ==========');
     console.log('[Messages API] Message ID:', req.params.messageId);
@@ -72,14 +71,13 @@ router.patch('/:messageId/followup', authenticate, async (req, res) => {
     console.error('[Messages API] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to mark message as follow up' });
   }
-});
+};
 
-// Also support the hyphenated version for backwards compatibility
-router.patch('/:messageId/follow-up', authenticate, async (req, res) => {
-  // Redirect to the non-hyphenated version
-  req.url = req.url.replace('/follow-up', '/followup');
-  return router.handle(req, res);
-});
+// Mark message as follow up (using 'followup' to avoid hyphen issues)
+router.patch('/:messageId/followup', authenticate, handleMarkAsFollowUp);
+
+// Also support hyphenated version for backwards compatibility
+router.patch('/:messageId/follow-up', authenticate, handleMarkAsFollowUp);
 
 // Mark message as read
 router.patch('/:messageId/read', authenticate, async (req, res) => {
