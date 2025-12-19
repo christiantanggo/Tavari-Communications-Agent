@@ -14,7 +14,15 @@ router.get("/", authenticate, async (req, res) => {
     res.json({ invoices });
   } catch (error) {
     console.error("Get invoices error:", error);
-    res.status(500).json({ error: "Failed to get invoices" });
+    console.error("Error details:", {
+      message: error.message,
+      stack: error.stack,
+      businessId: req.businessId,
+    });
+    res.status(500).json({ 
+      error: "Failed to get invoices",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

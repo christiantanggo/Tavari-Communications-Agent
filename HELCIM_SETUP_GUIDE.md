@@ -35,7 +35,9 @@ This guide will walk you through setting up Helcim for payment processing in the
 ### Step 3: Account Verification
 1. Helcim will verify your business information
 2. This may take 1-2 business days
-3. You can use the sandbox/test environment while waiting
+3. **Important**: API access may be limited until account verification is complete
+4. You may receive 401 errors during review period - this is normal
+5. Contact Helcim support if verification takes longer than expected
 
 ---
 

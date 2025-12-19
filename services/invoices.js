@@ -200,18 +200,32 @@ export async function getInvoiceById(invoiceId) {
  * Get invoices for business
  */
 export async function getInvoicesByBusiness(businessId, limit = 50) {
-  const { data, error } = await supabaseClient
-    .from("invoices")
-    .select("*")
-    .eq("business_id", businessId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  try {
+    const { data, error } = await supabaseClient
+      .from("invoices")
+      .select("*")
+      .eq("business_id", businessId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
 
-  if (error) {
-    throw new Error(`Failed to get invoices: ${error.message}`);
+    if (error) {
+      // If table doesn't exist, return empty array instead of throwing
+      if (error.code === 'PGRST205' || error.message.includes('does not exist')) {
+        console.warn(`[Invoices] Table 'invoices' does not exist, returning empty array`);
+        return [];
+      }
+      throw new Error(`Failed to get invoices: ${error.message}`);
+    }
+
+    return data || [];
+  } catch (error) {
+    // If it's a table not found error, return empty array
+    if (error.message && error.message.includes('does not exist')) {
+      console.warn(`[Invoices] Table not found, returning empty array`);
+      return [];
+    }
+    throw error;
   }
-
-  return data || [];
 }
 
 /**

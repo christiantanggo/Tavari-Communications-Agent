@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
 import api from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 
 function SupportPage() {
+  const router = useRouter();
   const { success, error: showError } = useToast();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +58,7 @@ function SupportPage() {
     switch (status) {
       case 'open':
         return 'bg-blue-100 text-blue-800';
+      case 'in-progress':
       case 'in_progress':
         return 'bg-yellow-100 text-yellow-800';
       case 'resolved':
@@ -185,9 +189,19 @@ function SupportPage() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {tickets.map((ticket) => (
-                      <tr key={ticket.id} className="hover:bg-gray-50">
+                      <tr 
+                        key={ticket.id} 
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => router.push(`/dashboard/support/${ticket.id}`)}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {ticket.id.substring(0, 8)}...
+                          <Link 
+                            href={`/dashboard/support/${ticket.id}`}
+                            className="text-blue-600 hover:text-blue-800 font-medium"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {ticket.id.substring(0, 8)}...
+                          </Link>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
                           {ticket.issue_type.replace('_', ' ')}

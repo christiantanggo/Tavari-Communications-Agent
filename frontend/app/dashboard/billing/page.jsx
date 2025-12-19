@@ -12,6 +12,7 @@ function BillingPage() {
   const [usage, setUsage] = useState(null);
   const [billing, setBilling] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadingPortal, setLoadingPortal] = useState(false);
@@ -27,16 +28,18 @@ function BillingPage() {
 
   const loadData = async () => {
     try {
-      const [userRes, usageRes, billingRes, invoicesRes] = await Promise.all([
+      const [userRes, usageRes, billingRes, invoicesRes, packagesRes] = await Promise.all([
         authAPI.getMe(),
         usageAPI.getStatus().catch(() => ({ data: null })),
         billingAPI.getStatus().catch(() => ({ data: null })),
         invoicesAPI.list().catch(() => ({ data: { invoices: [] } })),
+        billingAPI.getPackages().catch(() => ({ data: { packages: [] } })),
       ]);
       setUser(userRes.data);
       setUsage(usageRes.data);
       setBilling(billingRes.data);
       setInvoices(invoicesRes.data.invoices || []);
+      setPackages(packagesRes.data.packages || []);
       
       if (userRes.data?.business) {
         setSettings({
@@ -151,7 +154,7 @@ function BillingPage() {
                   <h2 className="text-xl font-bold text-gray-900">Current Plan</h2>
                   <button
                     onClick={handleManageBilling}
-                    disabled={loadingPortal || !billing?.customer_id}
+                    disabled={loadingPortal}
                     className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loadingPortal ? 'Loading...' : 'Manage Billing'}
@@ -242,7 +245,7 @@ function BillingPage() {
                   )}
                   <button
                     onClick={handleManageBilling}
-                    disabled={loadingPortal || !billing?.customer_id}
+                    disabled={loadingPortal}
                     className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loadingPortal ? 'Loading...' : 'Update Payment Method'}
@@ -253,7 +256,7 @@ function BillingPage() {
                   <p className="text-sm text-gray-600 mb-4">No payment method on file</p>
                   <button
                     onClick={handleManageBilling}
-                    disabled={loadingPortal || !billing?.customer_id}
+                    disabled={loadingPortal}
                     className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loadingPortal ? 'Loading...' : 'Add Payment Method'}
@@ -413,76 +416,81 @@ function BillingPage() {
           {/* Available Plans */}
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <h2 className="text-xl font-bold mb-4 text-gray-900">Available Plans</h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              {['starter', 'core', 'pro'].map((tier) => {
-                const plan = getPlanDetails(tier);
-                const isCurrent = billing?.plan_tier === tier;
-                const isUpgrade = ['starter', 'core'].includes(billing?.plan_tier || '') && 
-                                 ['core', 'pro'].includes(tier) &&
-                                 (billing?.plan_tier === 'starter' && tier === 'core' || 
-                                  billing?.plan_tier === 'starter' && tier === 'pro' ||
-                                  billing?.plan_tier === 'core' && tier === 'pro');
-                
-                return (
-                  <div 
-                    key={tier}
-                    className={`border rounded-lg p-6 ${
-                      isCurrent 
-                        ? 'border-blue-500 bg-blue-50' 
-                        : isUpgrade
-                        ? 'border-green-500'
-                        : 'border-gray-200'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">{plan.name}</h3>
-                      {isCurrent && (
-                        <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full font-medium">
-                          Current
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-3xl font-bold text-gray-900 mb-1">
-                      ${plan.price}
-                      <span className="text-sm font-normal text-gray-600">/month</span>
-                    </p>
-                    <div className="space-y-2 mb-4 text-sm text-gray-600">
-                      <div className="flex items-center">
-                        <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        {plan.minutes} minutes/month
-                      </div>
-                      <div className="flex items-center">
-                        <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        {plan.faqs} FAQs
-                      </div>
-                      <div className="flex items-center">
-                        <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        Email & SMS notifications
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleUpgrade(tier)}
-                      disabled={isCurrent}
-                      className={`w-full px-4 py-2 rounded-md font-medium ${
-                        isCurrent
-                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            {packages.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No packages available at this time.</p>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-3 gap-4">
+                {packages.map((pkg) => {
+                  const isCurrent = user?.business?.package_id === pkg.id;
+                  const currentPackagePrice = packages.find(p => p.id === user?.business?.package_id)?.monthly_price || 0;
+                  const isUpgrade = pkg.monthly_price > currentPackagePrice;
+                  
+                  return (
+                    <div 
+                      key={pkg.id}
+                      className={`border rounded-lg p-6 ${
+                        isCurrent 
+                          ? 'border-blue-500 bg-blue-50' 
                           : isUpgrade
-                          ? 'bg-green-600 text-white hover:bg-green-700'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          ? 'border-green-500'
+                          : 'border-gray-200'
                       }`}
                     >
-                      {isCurrent ? 'Current Plan' : isUpgrade ? 'Upgrade' : 'Select'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                      <div className="flex justify-between items-start mb-2">
+                        <h3 className="text-lg font-semibold text-gray-900">{pkg.name}</h3>
+                        {isCurrent && (
+                          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full font-medium">
+                            Current
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-3xl font-bold text-gray-900 mb-1">
+                        ${pkg.monthly_price}
+                        <span className="text-sm font-normal text-gray-600">/month</span>
+                      </p>
+                      {pkg.description && (
+                        <p className="text-sm text-gray-600 mb-4">{pkg.description}</p>
+                      )}
+                      <div className="space-y-2 mb-4 text-sm text-gray-600">
+                        <div className="flex items-center">
+                          <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          {pkg.minutes_included} minutes/month
+                        </div>
+                        <div className="flex items-center">
+                          <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          {pkg.max_faqs} FAQs
+                        </div>
+                        <div className="flex items-center">
+                          <svg className="w-4 h-4 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          Email & SMS notifications
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleUpgrade(pkg.id)}
+                        disabled={isCurrent}
+                        className={`w-full px-4 py-2 rounded-md font-medium ${
+                          isCurrent
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            : isUpgrade
+                            ? 'bg-green-600 text-white hover:bg-green-700'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {isCurrent ? 'Current Plan' : isUpgrade ? 'Upgrade' : 'Select'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Save Button */}

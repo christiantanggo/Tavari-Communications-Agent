@@ -274,12 +274,11 @@ frontend/
 ## ⚠️ What Is Broken / Needs Attention
 
 ### Critical Issues
-1. **Email Notifications Not Sending**
-   - **Status**: Partially working
-   - **Issue**: `SUPABASE_ANON_KEY` missing in production, emails fail
+1. ~~**Email Notifications Not Sending**~~ ✅ RESOLVED
+   - **Status**: ✅ Working - Confirmed in production
+   - **Issue**: ~~`SUPABASE_ANON_KEY` missing in production~~ - Fallback to `SUPABASE_SERVICE_ROLE_KEY` is working
    - **Location**: `services/notifications.js`
-   - **Fix Needed**: Use `SUPABASE_SERVICE_ROLE_KEY` as fallback (already implemented, but verify it works)
-   - **Impact**: Callback emails and call summaries not being sent
+   - **Status**: Callback emails and call summaries are sending correctly
 
 2. **Support Ticket Admin Management**
    - **Status**: View only

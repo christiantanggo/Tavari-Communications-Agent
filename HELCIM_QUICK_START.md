@@ -8,7 +8,8 @@ Get Helcim payment processing up and running in 5 minutes!
 1. Go to [https://www.helcim.com](https://www.helcim.com)
 2. Click **"Get Started"** and sign up
 3. Complete basic business information
-4. **You can use sandbox/test environment for now**
+4. **Note**: Account verification may take 1-2 business days
+5. API may not work until verification is complete (401 errors are normal during review)
 
 ### Step 2: Get Your API Token (1 minute)
 1. In Helcim Dashboard, go to **"All Tools"** → **"Integrations"** → **"API Access Configurations"**

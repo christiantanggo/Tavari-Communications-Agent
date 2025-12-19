@@ -8,6 +8,7 @@ import { AdminActivityLog } from "../models/AdminActivityLog.js";
 import { Business } from "../models/Business.js";
 import { generateToken } from "../utils/auth.js";
 import { hashPassword } from "../utils/auth.js";
+import { sendSupportTicketUpdateNotification } from "../services/notifications.js";
 
 const router = express.Router();
 
@@ -530,19 +531,31 @@ router.post("/packages", authenticateAdmin, async (req, res) => {
   try {
     const packageData = req.body;
     
+    console.log("Creating package with data:", packageData);
+    
     const pkg = await PricingPackage.create(packageData);
 
-    // Log activity
-    await AdminActivityLog.create({
+    // Log activity (non-blocking)
+    AdminActivityLog.create({
       admin_user_id: req.adminId,
       action: "create_package",
       details: { package_id: pkg.id, package_name: pkg.name },
+    }).catch((logError) => {
+      console.error("[Admin] Failed to log activity (non-blocking):", logError);
     });
 
     res.status(201).json({ package: pkg });
   } catch (error) {
     console.error("Create package error:", error);
-    res.status(500).json({ error: "Failed to create package" });
+    console.error("Error details:", {
+      message: error.message,
+      stack: error.stack,
+      packageData: req.body,
+    });
+    res.status(500).json({ 
+      error: "Failed to create package",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -642,6 +655,316 @@ router.post("/packages/:packageId/assign/:businessId", authenticateAdmin, async 
   } catch (error) {
     console.error("Assign package error:", error);
     res.status(500).json({ error: "Failed to assign package" });
+  }
+});
+
+// Get all support tickets (admin)
+router.get("/support/tickets", authenticateAdmin, async (req, res) => {
+  try {
+    const { status, urgency, search } = req.query;
+    const { supabaseClient } = await import("../config/database.js");
+    
+    let query = supabaseClient
+      .from("support_tickets")
+      .select(`
+        *,
+        businesses (
+          id,
+          name,
+          email,
+          phone
+        ),
+        users (
+          id,
+          email,
+          first_name,
+          last_name
+        )
+      `)
+      .order("created_at", { ascending: false });
+    
+    if (status) {
+      query = query.eq("status", status);
+    }
+    
+    if (urgency) {
+      query = query.eq("urgency", urgency);
+    }
+    
+    if (search) {
+      query = query.or(`description.ilike.%${search}%,issue_type.ilike.%${search}%`);
+    }
+    
+    const { data, error } = await query.limit(100);
+    
+    if (error) throw error;
+    
+    res.json({ tickets: data || [] });
+  } catch (error) {
+    console.error("Get support tickets error:", error);
+    res.status(500).json({ error: "Failed to get support tickets" });
+  }
+});
+
+// Get single support ticket (admin)
+router.get("/support/tickets/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { supabaseClient } = await import("../config/database.js");
+    
+    // First get the ticket
+    const { data: ticket, error: ticketError } = await supabaseClient
+      .from("support_tickets")
+      .select("*")
+      .eq("id", id)
+      .single();
+    
+    if (ticketError) throw ticketError;
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+    
+    // Fetch related data separately if business_id exists
+    let business = null;
+    let user = null;
+    let resolvedByAdmin = null;
+    
+    if (ticket.business_id) {
+      const { data: businessData, error: businessError } = await supabaseClient
+        .from("businesses")
+        .select("id, name, email, phone, vapi_phone_number")
+        .eq("id", ticket.business_id)
+        .single();
+      
+      if (businessError) {
+        console.error("Error fetching business for ticket:", {
+          ticketId: id,
+          businessId: ticket.business_id,
+          error: businessError,
+        });
+      } else if (businessData) {
+        business = businessData;
+        console.log("Successfully fetched business:", business.name);
+      } else {
+        console.warn(`Business not found for business_id: ${ticket.business_id}`);
+      }
+    } else {
+      console.warn(`Ticket ${id} has no business_id`);
+    }
+    
+    if (ticket.user_id) {
+      const { data: userData, error: userError } = await supabaseClient
+        .from("users")
+        .select("id, email, first_name, last_name")
+        .eq("id", ticket.user_id)
+        .single();
+      
+      if (!userError && userData) {
+        user = userData;
+      }
+    }
+    
+    if (ticket.resolved_by) {
+      const { data: adminData, error: adminError } = await supabaseClient
+        .from("admin_users")
+        .select("id, email, first_name, last_name")
+        .eq("id", ticket.resolved_by)
+        .single();
+      
+      if (!adminError && adminData) {
+        resolvedByAdmin = adminData;
+      }
+    }
+    
+    // Combine the data
+    const ticketWithRelations = {
+      ...ticket,
+      businesses: business,
+      users: user,
+      resolved_by_admin: resolvedByAdmin,
+    };
+    
+    // Debug logging
+    console.log("Ticket response:", {
+      ticketId: id,
+      hasBusinessId: !!ticket.business_id,
+      businessId: ticket.business_id,
+      hasBusiness: !!business,
+      businessName: business?.name,
+    });
+    
+    res.json({ ticket: ticketWithRelations });
+  } catch (error) {
+    console.error("Get support ticket error:", error);
+    res.status(500).json({ error: "Failed to get support ticket" });
+  }
+});
+
+// Update support ticket status (admin)
+router.patch("/support/tickets/:id/status", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, resolution_notes } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ error: "Status is required" });
+    }
+    
+    const { supabaseClient } = await import("../config/database.js");
+    
+    const updateData = {
+      status,
+      updated_at: new Date().toISOString(),
+    };
+    
+    if (status === "resolved" || status === "closed") {
+      updateData.resolved_by = req.adminId;
+      updateData.resolved_at = new Date().toISOString();
+      if (resolution_notes) {
+        updateData.resolution_notes = resolution_notes;
+      }
+    }
+    
+    const { data, error } = await supabaseClient
+      .from("support_tickets")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // Log activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: data.business_id,
+      action: "update_ticket_status",
+      details: { ticket_id: id, status, resolution_notes },
+    });
+    
+    // Send email notification to business (non-blocking)
+    if (data.business_id) {
+      const business = await Business.findById(data.business_id);
+      if (business) {
+        sendSupportTicketUpdateNotification(
+          data,
+          business,
+          "status",
+          req.admin.first_name || req.admin.email
+        ).catch((err) => {
+          console.error("[Admin] Failed to send ticket status update notification (non-blocking):", err);
+        });
+      }
+    }
+    
+    res.json({ ticket: data });
+  } catch (error) {
+    console.error("Update ticket status error:", error);
+    res.status(500).json({ error: "Failed to update ticket status" });
+  }
+});
+
+// Add response/note to support ticket (admin)
+router.post("/support/tickets/:id/response", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { response_text } = req.body;
+    
+    if (!response_text) {
+      return res.status(400).json({ error: "Response text is required" });
+    }
+    
+    const { supabaseClient } = await import("../config/database.js");
+    
+    // Get ticket
+    const { data: ticket, error: ticketError } = await supabaseClient
+      .from("support_tickets")
+      .select("*")
+      .eq("id", id)
+      .single();
+    
+    if (ticketError) throw ticketError;
+    
+    // Fetch business separately
+    let business = null;
+    if (ticket.business_id) {
+      try {
+        business = await Business.findById(ticket.business_id);
+        if (!business) {
+          console.warn(`[Admin] Business not found for business_id: ${ticket.business_id}`);
+        }
+      } catch (businessError) {
+        console.error("[Admin] Error fetching business for ticket response:", businessError);
+        // Continue without business - email notification will be skipped
+      }
+    }
+    
+    // Update ticket with response in resolution_notes
+    const currentNotes = ticket.resolution_notes || "";
+    const timestamp = new Date().toLocaleString();
+    const adminName = (req.admin && (req.admin.first_name || req.admin.email)) || "Support Team";
+    const newNotes = currentNotes 
+      ? `${currentNotes}\n\n--- Response from ${adminName} (${timestamp}) ---\n${response_text}`
+      : `--- Response from ${adminName} (${timestamp}) ---\n${response_text}`;
+    
+    const newStatus = ticket.status === "open" ? "in-progress" : ticket.status;
+    
+    const { data, error } = await supabaseClient
+      .from("support_tickets")
+      .update({
+        resolution_notes: newNotes,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // Log activity (non-blocking - don't fail if logging fails)
+    AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: ticket.business_id,
+      action: "respond_to_ticket",
+      details: { ticket_id: id, response_text },
+    }).catch((logError) => {
+      console.error("[Admin] Failed to log activity (non-blocking):", logError);
+    });
+    
+    // Send email notification to business (non-blocking)
+    if (business) {
+      // Use the updated ticket data, but ensure all fields are present
+      const ticketForNotification = {
+        ...ticket,
+        ...data,
+        status: newStatus,
+        resolution_notes: newNotes,
+      };
+      
+      sendSupportTicketUpdateNotification(
+        ticketForNotification,
+        business,
+        "response",
+        (req.admin && (req.admin.first_name || req.admin.email)) || "Support Team",
+        response_text
+      ).catch((err) => {
+        console.error("[Admin] Failed to send ticket response notification (non-blocking):", err);
+      });
+    }
+    
+    res.json({ ticket: data });
+  } catch (error) {
+    console.error("Add ticket response error:", error);
+    console.error("Error details:", {
+      message: error.message,
+      stack: error.stack,
+      ticketId: id,
+    });
+    res.status(500).json({ 
+      error: "Failed to add ticket response",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

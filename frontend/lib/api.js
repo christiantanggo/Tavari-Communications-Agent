@@ -85,6 +85,7 @@ export const setupAPI = {
 export const billingAPI = {
   getStatus: () => api.get('/billing/status'),
   getPortal: () => api.get('/billing/portal'),
+  getPackages: () => api.get('/billing/packages'),
   createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
 };
 
@@ -99,6 +100,8 @@ export const invoicesAPI = {
 export const supportAPI = {
   createTicket: (data) => api.post('/support/tickets', data),
   getTickets: () => api.get('/support/tickets'),
+  getTicket: (id) => api.get(`/support/tickets/${id}`),
+  addResponse: (id, responseText) => api.post(`/support/tickets/${id}/response`, { response_text: responseText }),
 };
 
 // Account API
@@ -127,24 +130,20 @@ export const analyticsAPI = {
   exportData: (type) => api.get('/analytics/export', { params: { type }, responseType: 'blob' }),
 };
 
-// Phone Numbers API (Voximplant - legacy)
+// Phone Numbers API (unified API for VAPI/Telnyx)
 export const phoneNumbersAPI = {
   search: (params) => api.get('/phone-numbers/search', { params }),
-  purchase: (phoneNumber, countryCode) => api.post('/phone-numbers/purchase', { phoneNumber, countryCode }),
-  getCurrent: () => api.get('/phone-numbers/current'),
-};
-
-// Telnyx Phone Numbers API
-export const telnyxPhoneNumbersAPI = {
-  search: (params) => api.get('/telnyx-phone-numbers/search', { params }),
-  purchase: (phoneNumber, countryCode) => api.post('/telnyx-phone-numbers/purchase', { phoneNumber, countryCode }),
-  getCurrent: () => api.get('/telnyx-phone-numbers/current'),
-};
-
-// Phone Numbers API (new unified API)
-export const phoneNumbersAPI = {
   getAvailable: (areaCode) => api.get('/phone-numbers/available', { params: areaCode ? { areaCode } : {} }),
   assign: (phoneNumber, purchaseNew = false) => api.post('/phone-numbers/assign', { phone_number: phoneNumber, purchase_new: purchaseNew }),
+  provision: (phoneNumber) => api.post('/phone-numbers/provision', { phoneNumber }),
+};
+
+// Telnyx Phone Numbers API (legacy - used in setup wizard)
+// Note: Uses provision endpoint which handles both existing and new number purchase
+export const telnyxPhoneNumbersAPI = {
+  search: (params) => api.get('/phone-numbers/search', { params }),
+  purchase: (phoneNumber, countryCode) => api.post('/business/phone-numbers/provision', { phoneNumber }),
+  getCurrent: () => api.get('/phone-numbers/available'),
 };
 
 // Admin Phone Numbers API
@@ -152,5 +151,34 @@ export const adminPhoneNumbersAPI = {
   getAvailable: (areaCode) => api.get('/phone-numbers/admin/available', { params: areaCode ? { areaCode } : {} }),
   assign: (businessId, phoneNumber, purchaseNew = false) => api.post(`/phone-numbers/admin/assign/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
   change: (businessId, phoneNumber, purchaseNew = false) => api.post(`/phone-numbers/admin/change/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
+};
+
+// Admin API (uses admin token from cookie)
+const adminApi = axios.create({
+  baseURL: `${API_URL}/api/admin`,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add admin auth token to requests
+adminApi.interceptors.request.use((config) => {
+  if (typeof document !== 'undefined') {
+    const cookies = document.cookie.split(';');
+    const tokenCookie = cookies.find(c => c.trim().startsWith('admin_token='));
+    const token = tokenCookie ? tokenCookie.split('=')[1] : null;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// Admin Support API
+export const adminSupportAPI = {
+  getTickets: (params) => adminApi.get('/support/tickets', { params }),
+  getTicket: (id) => adminApi.get(`/support/tickets/${id}`),
+  updateStatus: (id, status, resolutionNotes) => adminApi.patch(`/support/tickets/${id}/status`, { status, resolution_notes: resolutionNotes }),
+  addResponse: (id, responseText) => adminApi.post(`/support/tickets/${id}/response`, { response_text: responseText }),
 };
 

@@ -68,6 +68,9 @@ function AdminDashboardPage() {
               <Link href="/admin/activity" className="text-gray-700 hover:text-blue-600">
                 Activity
               </Link>
+              <Link href="/admin/support" className="text-gray-700 hover:text-blue-600">
+                Support Tickets
+              </Link>
               <button
                 onClick={handleLogout}
                 className="text-gray-700 hover:text-blue-600"
@@ -134,6 +137,12 @@ function AdminDashboardPage() {
               className="px-6 py-3 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium"
             >
               View Activity Logs
+            </Link>
+            <Link
+              href="/admin/support"
+              className="px-6 py-3 bg-orange-600 text-white rounded-md hover:bg-orange-700 font-medium"
+            >
+              Support Tickets
             </Link>
             <Link
               href="/admin/test-vapi"

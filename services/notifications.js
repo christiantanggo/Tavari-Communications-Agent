@@ -538,3 +538,125 @@ export async function sendSupportTicketNotification(ticket, business) {
   }
 }
 
+/**
+ * Send email notification to business when their support ticket is updated
+ */
+export async function sendSupportTicketUpdateNotification(ticket, business, updateType, adminName = null, responseText = null) {
+  try {
+    if (!business.email) {
+      console.warn(`[Notifications] Business ${business.id} has no email, skipping ticket update notification`);
+      return;
+    }
+
+    const ticketIdShort = ticket.id.substring(0, 8);
+    let subject = "";
+    let bodyText = "";
+    let bodyHtml = "";
+
+    if (updateType === "response") {
+      subject = `Update on Your Support Ticket #${ticketIdShort}`;
+      bodyText = `Hello ${business.name},\n\n` +
+        `We have an update on your support ticket:\n\n` +
+        `Ticket ID: ${ticket.id}\n` +
+        `Issue Type: ${ticket.issue_type}\n` +
+        `Status: ${ticket.status}\n\n` +
+        `Response from ${adminName || "our support team"}:\n` +
+        `${responseText}\n\n` +
+        `You can view your ticket and respond at any time through your dashboard.\n\n` +
+        `Thank you,\n` +
+        `Tavari Support Team`;
+      
+      bodyHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">Update on Your Support Ticket</h2>
+          <p>Hello ${business.name},</p>
+          <p>We have an update on your support ticket:</p>
+          <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>Ticket ID:</strong> ${ticket.id}</p>
+            <p><strong>Issue Type:</strong> ${ticket.issue_type}</p>
+            <p><strong>Status:</strong> ${ticket.status}</p>
+          </div>
+          <div style="background-color: #eff6ff; padding: 15px; border-left: 4px solid #2563eb; margin: 20px 0;">
+            <p><strong>Response from ${adminName || "our support team"}:</strong></p>
+            <p style="white-space: pre-wrap;">${responseText}</p>
+          </div>
+          <p>You can view your ticket and respond at any time through your dashboard.</p>
+          <p>Thank you,<br>Tavari Support Team</p>
+        </div>
+      `;
+    } else if (updateType === "status") {
+      const statusMessages = {
+        "in-progress": "is now being worked on",
+        "resolved": "has been resolved",
+        "closed": "has been closed",
+      };
+      const statusMessage = statusMessages[ticket.status] || "has been updated";
+      
+      subject = `Your Support Ticket #${ticketIdShort} ${statusMessage}`;
+      bodyText = `Hello ${business.name},\n\n` +
+        `Your support ticket has been updated:\n\n` +
+        `Ticket ID: ${ticket.id}\n` +
+        `Issue Type: ${ticket.issue_type}\n` +
+        `New Status: ${ticket.status}\n\n` +
+        (ticket.resolution_notes ? `Resolution Notes:\n${ticket.resolution_notes}\n\n` : "") +
+        `You can view your ticket and respond at any time through your dashboard.\n\n` +
+        `Thank you,\n` +
+        `Tavari Support Team`;
+      
+      bodyHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">Your Support Ticket ${statusMessage}</h2>
+          <p>Hello ${business.name},</p>
+          <p>Your support ticket has been updated:</p>
+          <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>Ticket ID:</strong> ${ticket.id}</p>
+            <p><strong>Issue Type:</strong> ${ticket.issue_type}</p>
+            <p><strong>New Status:</strong> ${ticket.status}</p>
+          </div>
+          ${ticket.resolution_notes ? `
+          <div style="background-color: #eff6ff; padding: 15px; border-left: 4px solid #2563eb; margin: 20px 0;">
+            <p><strong>Resolution Notes:</strong></p>
+            <p style="white-space: pre-wrap;">${ticket.resolution_notes}</p>
+          </div>
+          ` : ""}
+          <p>You can view your ticket and respond at any time through your dashboard.</p>
+          <p>Thank you,<br>Tavari Support Team</p>
+        </div>
+      `;
+    } else {
+      // Generic update
+      subject = `Update on Your Support Ticket #${ticketIdShort}`;
+      bodyText = `Hello ${business.name},\n\n` +
+        `Your support ticket has been updated:\n\n` +
+        `Ticket ID: ${ticket.id}\n` +
+        `Issue Type: ${ticket.issue_type}\n` +
+        `Status: ${ticket.status}\n\n` +
+        `You can view your ticket and respond at any time through your dashboard.\n\n` +
+        `Thank you,\n` +
+        `Tavari Support Team`;
+      
+      bodyHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">Update on Your Support Ticket</h2>
+          <p>Hello ${business.name},</p>
+          <p>Your support ticket has been updated:</p>
+          <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>Ticket ID:</strong> ${ticket.id}</p>
+            <p><strong>Issue Type:</strong> ${ticket.issue_type}</p>
+            <p><strong>Status:</strong> ${ticket.status}</p>
+          </div>
+          <p>You can view your ticket and respond at any time through your dashboard.</p>
+          <p>Thank you,<br>Tavari Support Team</p>
+        </div>
+      `;
+    }
+
+    const displayName = `Tavari Support`;
+    await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
+    console.log(`[Notifications] Sent ticket update notification to ${business.email} for ticket ${ticket.id}`);
+  } catch (error) {
+    console.error(`[Notifications] Error sending support ticket update notification:`, error);
+    // Don't throw - email failures shouldn't break the ticket update
+  }
+}
+
