@@ -142,7 +142,7 @@ export const phoneNumbersAPI = {
 // Note: Uses provision endpoint which handles both existing and new number purchase
 export const telnyxPhoneNumbersAPI = {
   search: (params) => api.get('/phone-numbers/search', { params }),
-  purchase: (phoneNumber, countryCode) => api.post('/business/phone-numbers/provision', { phoneNumber }),
+  purchase: (phoneNumber, _countryCode) => api.post('/business/phone-numbers/provision', { phoneNumber }),
   getCurrent: () => api.get('/phone-numbers/available'),
 };
 

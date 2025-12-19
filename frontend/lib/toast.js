@@ -12,9 +12,12 @@ export function showToast(message, type = 'info', duration = 5000) {
   if (toastContext) {
     toastContext.showToast(message, type, duration);
   } else {
-    // Fallback to browser alert if toast context not available
-    console.warn('Toast context not available, falling back to alert');
-    alert(message);
+    // Fallback to console if toast context not available (SSR-safe)
+    console.warn('Toast context not available:', message);
+    if (typeof window !== 'undefined') {
+      // Only use alert in browser environment
+      alert(message);
+    }
   }
 }
 

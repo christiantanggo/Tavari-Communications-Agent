@@ -33,6 +33,8 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [phoneError, setPhoneError] = useState('');
+  const [activationStatus, setActivationStatus] = useState(null);
+  const [vapiPhoneNumber, setVapiPhoneNumber] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;

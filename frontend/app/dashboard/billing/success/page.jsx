@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import Link from 'next/link';
 
-function BillingSuccessPage() {
+function BillingSuccessContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -84,6 +84,20 @@ function BillingSuccessPage() {
         </div>
       </div>
     </AuthGuard>
+  );
+}
+
+function BillingSuccessPage() {
+  return (
+    <Suspense fallback={
+      <AuthGuard>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-lg">Loading...</div>
+        </div>
+      </AuthGuard>
+    }>
+      <BillingSuccessContent />
+    </Suspense>
   );
 }
 

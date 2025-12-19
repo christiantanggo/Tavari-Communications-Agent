@@ -1,7 +1,7 @@
 // frontend/lib/phoneFormatter.js
 // Phone number formatting for frontend
 
-import { parsePhoneNumber, isValidPhoneNumber, formatIncompletePhoneNumber, AsYouType } from 'libphonenumber-js';
+import { parsePhoneNumber, isValidPhoneNumber, AsYouType } from 'libphonenumber-js';
 
 /**
  * Format phone number as user types (US format by default)
