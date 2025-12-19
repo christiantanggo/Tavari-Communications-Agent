@@ -246,8 +246,27 @@ router.get("/accounts/:id/usage", authenticateAdmin, async (req, res) => {
     // Get current billing cycle usage (same as customer side)
     const usage = await getCurrentCycleUsage(req.params.id, billingCycle.start, billingCycle.end);
     
+    // Get minutes from package if business has one, otherwise use business.usage_limit_minutes
+    let planLimit = business.usage_limit_minutes || 0;
+    
+    if (business.package_id) {
+      const { PricingPackage } = await import("../models/PricingPackage.js");
+      const pkg = await PricingPackage.findById(business.package_id);
+      
+      if (pkg) {
+        // Use package minutes
+        planLimit = pkg.minutes_included || 0;
+        
+        // Sync business.usage_limit_minutes with package if they don't match
+        if (business.usage_limit_minutes !== pkg.minutes_included) {
+          await Business.update(business.id, {
+            usage_limit_minutes: pkg.minutes_included,
+          });
+        }
+      }
+    }
+    
     // Format response same as customer side
-    const planLimit = business.usage_limit_minutes || 0;
     const bonusMinutes = business.bonus_minutes || 0;
     const totalAvailable = planLimit + bonusMinutes;
     const minutesRemaining = Math.max(0, totalAvailable - usage.totalMinutes);

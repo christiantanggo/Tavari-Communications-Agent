@@ -247,7 +247,7 @@ function PackagesPage() {
                       type="text"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                       required
                     />
                   </div>
@@ -258,7 +258,7 @@ function PackagesPage() {
                       step="0.01"
                       value={formData.monthly_price}
                       onChange={(e) => setFormData({ ...formData, monthly_price: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                       required
                     />
                   </div>
@@ -268,7 +268,7 @@ function PackagesPage() {
                       type="number"
                       value={formData.minutes_included}
                       onChange={(e) => setFormData({ ...formData, minutes_included: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                       required
                     />
                   </div>
@@ -279,7 +279,7 @@ function PackagesPage() {
                       step="0.0001"
                       value={formData.overage_price_per_minute}
                       onChange={(e) => setFormData({ ...formData, overage_price_per_minute: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -288,7 +288,7 @@ function PackagesPage() {
                       type="number"
                       value={formData.sms_included}
                       onChange={(e) => setFormData({ ...formData, sms_included: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -298,7 +298,7 @@ function PackagesPage() {
                       step="0.0001"
                       value={formData.sms_overage_price}
                       onChange={(e) => setFormData({ ...formData, sms_overage_price: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -307,7 +307,7 @@ function PackagesPage() {
                       type="number"
                       value={formData.emails_included}
                       onChange={(e) => setFormData({ ...formData, emails_included: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -317,7 +317,7 @@ function PackagesPage() {
                       step="0.0001"
                       value={formData.emails_overage_price}
                       onChange={(e) => setFormData({ ...formData, emails_overage_price: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -326,7 +326,7 @@ function PackagesPage() {
                       type="number"
                       value={formData.max_faqs}
                       onChange={(e) => setFormData({ ...formData, max_faqs: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -335,7 +335,7 @@ function PackagesPage() {
                       type="text"
                       value={formData.stripe_product_id}
                       onChange={(e) => setFormData({ ...formData, stripe_product_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                   <div>
@@ -344,7 +344,7 @@ function PackagesPage() {
                       type="text"
                       value={formData.stripe_price_id}
                       onChange={(e) => setFormData({ ...formData, stripe_price_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
                 </div>
@@ -353,7 +353,7 @@ function PackagesPage() {
                   <textarea
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     rows={3}
                   />
                 </div>

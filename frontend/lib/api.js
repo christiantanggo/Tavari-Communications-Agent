@@ -85,7 +85,7 @@ export const setupAPI = {
 export const billingAPI = {
   getStatus: () => api.get('/billing/status'),
   getPortal: () => api.get('/billing/portal'),
-  createCheckout: (priceId) => api.post('/billing/checkout', { priceId }),
+  createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
 };
 
 // Invoices API
@@ -139,5 +139,18 @@ export const telnyxPhoneNumbersAPI = {
   search: (params) => api.get('/telnyx-phone-numbers/search', { params }),
   purchase: (phoneNumber, countryCode) => api.post('/telnyx-phone-numbers/purchase', { phoneNumber, countryCode }),
   getCurrent: () => api.get('/telnyx-phone-numbers/current'),
+};
+
+// Phone Numbers API (new unified API)
+export const phoneNumbersAPI = {
+  getAvailable: (areaCode) => api.get('/phone-numbers/available', { params: areaCode ? { areaCode } : {} }),
+  assign: (phoneNumber, purchaseNew = false) => api.post('/phone-numbers/assign', { phone_number: phoneNumber, purchase_new: purchaseNew }),
+};
+
+// Admin Phone Numbers API
+export const adminPhoneNumbersAPI = {
+  getAvailable: (areaCode) => api.get('/phone-numbers/admin/available', { params: areaCode ? { areaCode } : {} }),
+  assign: (businessId, phoneNumber, purchaseNew = false) => api.post(`/phone-numbers/admin/assign/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
+  change: (businessId, phoneNumber, purchaseNew = false) => api.post(`/phone-numbers/admin/change/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
 };
 

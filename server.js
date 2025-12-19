@@ -121,6 +121,7 @@ import accountRoutes from "./routes/account.js";
 import businessRoutes from "./routes/business.js";
 import callsRoutes from "./routes/calls.js";
 import analyticsRoutes from "./routes/analytics.js";
+import phoneNumbersRoutes from "./routes/phone-numbers.js";
 
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
@@ -143,6 +144,7 @@ app.use("/api/account", accountRoutes);
 app.use("/api/business", businessRoutes);
 app.use("/api/calls", callsRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/phone-numbers", phoneNumbersRoutes);
 
 // Error handler
 import { errorHandler } from "./middleware/errorHandler.js";

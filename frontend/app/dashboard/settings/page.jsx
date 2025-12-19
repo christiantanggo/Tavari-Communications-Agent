@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
-import { authAPI, billingAPI, businessAPI, agentsAPI } from '@/lib/api';
+import { authAPI, billingAPI, businessAPI, agentsAPI, phoneNumbersAPI } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import TimeInput12Hour from '@/components/TimeInput12Hour';
 import { useToast } from '@/components/ToastProvider';
@@ -23,6 +23,12 @@ function SettingsPage() {
   const [sendingTestSMS, setSendingTestSMS] = useState(false);
   const [sendingTestMissedCall, setSendingTestMissedCall] = useState(false);
   const [activeTab, setActiveTab] = useState('business');
+  const [showPhoneSelector, setShowPhoneSelector] = useState(false);
+  const [availableNumbers, setAvailableNumbers] = useState({ unassigned: [], available: [] });
+  const [loadingNumbers, setLoadingNumbers] = useState(false);
+  const [assigningNumber, setAssigningNumber] = useState(false);
+  const [selectedPhoneNumber, setSelectedPhoneNumber] = useState('');
+  const [purchaseNew, setPurchaseNew] = useState(false);
   
   // Business info state
   const [businessInfo, setBusinessInfo] = useState({
@@ -400,29 +406,50 @@ function SettingsPage() {
     }
   };
 
-  const handleRetryActivation = async () => {
-    if (!confirm('This will attempt to provision a phone number for your account. Continue?')) {
+  const loadAvailableNumbers = async (areaCode = null) => {
+    setLoadingNumbers(true);
+    try {
+      const response = await phoneNumbersAPI.getAvailable(areaCode);
+      setAvailableNumbers(response.data);
+    } catch (error) {
+      console.error('Failed to load available numbers:', error);
+      showError('Failed to load available phone numbers');
+    } finally {
+      setLoadingNumbers(false);
+    }
+  };
+
+  const handleSelectPhoneNumber = async () => {
+    if (!selectedPhoneNumber) {
+      showError('Please select a phone number');
       return;
     }
 
-    setActivating(true);
+    setAssigningNumber(true);
     try {
-      const response = await businessAPI.retryActivation();
-      
-      if (response.data?.success) {
-        success(`Phone number provisioned successfully! Your Tavari number is: ${response.data.phone_number}`);
+      const response = await phoneNumbersAPI.assign(selectedPhoneNumber, purchaseNew);
+      if (response.data.success) {
+        success(`Phone number ${response.data.phone_number} assigned successfully!`);
+        setShowPhoneSelector(false);
+        setSelectedPhoneNumber('');
         await loadData();
         router.push('/dashboard?refresh=' + Date.now());
       } else {
-        showError('Failed to provision phone number. Please try again or contact support.');
+        showError('Failed to assign phone number. Please try again.');
       }
     } catch (error) {
-      console.error('Activation error:', error);
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to provision phone number';
-      showError(`Failed to provision phone number: ${errorMessage}`);
+      console.error('Assign phone number error:', error);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to assign phone number';
+      showError(`Failed to assign phone number: ${errorMessage}`);
     } finally {
-      setActivating(false);
+      setAssigningNumber(false);
     }
+  };
+
+  const handleRetryActivation = async () => {
+    // Load available numbers and show selector
+    await loadAvailableNumbers();
+    setShowPhoneSelector(true);
   };
 
   const handleSendTestSMS = async () => {
@@ -573,15 +600,136 @@ function SettingsPage() {
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
               <label className="block text-sm font-semibold text-gray-700 mb-2">Phone Number Not Provisioned</label>
               <p className="text-sm text-gray-600 mb-3">
-                Your phone number was not provisioned during signup. Click the button below to provision a phone number now.
+                Your phone number was not provisioned during signup. Click the button below to select a phone number.
               </p>
               <button
                 onClick={handleRetryActivation}
-                disabled={activating}
+                disabled={loadingNumbers}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               >
-                {activating ? 'Provisioning...' : 'Provision Phone Number'}
+                {loadingNumbers ? 'Loading...' : 'Select Phone Number'}
               </button>
+            </div>
+          )}
+
+          {/* Phone Number Selector Modal */}
+          {showPhoneSelector && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">Select Phone Number</h3>
+                  <button
+                    onClick={() => {
+                      setShowPhoneSelector(false);
+                      setSelectedPhoneNumber('');
+                      setPurchaseNew(false);
+                    }}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {loadingNumbers ? (
+                  <div className="text-center py-8">Loading available numbers...</div>
+                ) : (
+                  <>
+                    {/* Unassigned Numbers (Free) */}
+                    {availableNumbers.unassigned && availableNumbers.unassigned.length > 0 && (
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available Numbers (Already Purchased - Free)</h4>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {availableNumbers.unassigned.map((num, idx) => (
+                            <label
+                              key={idx}
+                              className={`flex items-center p-3 border rounded-md cursor-pointer hover:bg-gray-50 ${
+                                selectedPhoneNumber === num.phone_number ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="phoneNumber"
+                                value={num.phone_number}
+                                checked={selectedPhoneNumber === num.phone_number}
+                                onChange={(e) => {
+                                  setSelectedPhoneNumber(e.target.value);
+                                  setPurchaseNew(false);
+                                }}
+                                className="mr-3"
+                              />
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{num.phone_number}</div>
+                                <div className="text-xs text-gray-500">No additional cost</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Available to Purchase */}
+                    {availableNumbers.available && availableNumbers.available.length > 0 && (
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available to Purchase</h4>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {availableNumbers.available.map((num, idx) => (
+                            <label
+                              key={idx}
+                              className={`flex items-center p-3 border rounded-md cursor-pointer hover:bg-gray-50 ${
+                                selectedPhoneNumber === num.phone_number ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="phoneNumber"
+                                value={num.phone_number}
+                                checked={selectedPhoneNumber === num.phone_number}
+                                onChange={(e) => {
+                                  setSelectedPhoneNumber(e.target.value);
+                                  setPurchaseNew(true);
+                                }}
+                                className="mr-3"
+                              />
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{num.phone_number}</div>
+                                <div className="text-xs text-gray-500">
+                                  ${(num.cost || 0).toFixed(2)} one-time purchase
+                                </div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {availableNumbers.unassigned?.length === 0 && availableNumbers.available?.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        No phone numbers available at this time. Please try again later or contact support.
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 mt-6">
+                      <button
+                        onClick={handleSelectPhoneNumber}
+                        disabled={!selectedPhoneNumber || assigningNumber}
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                      >
+                        {assigningNumber ? 'Assigning...' : 'Assign Selected Number'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowPhoneSelector(false);
+                          setSelectedPhoneNumber('');
+                          setPurchaseNew(false);
+                        }}
+                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           )}
 

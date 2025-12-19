@@ -10,10 +10,9 @@ import { Message } from "../models/Message.js";
 import { AIAgent } from "../models/AIAgent.js";
 import { getInvoicesByBusiness } from "../services/invoices.js";
 import { supabaseClient } from "../config/database.js";
-import Stripe from "stripe";
+import { HelcimService } from "../services/helcim.js";
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Cancel subscription
 router.post("/cancel", authenticate, async (req, res) => {
@@ -25,14 +24,11 @@ router.post("/cancel", authenticate, async (req, res) => {
       return res.status(404).json({ error: "Business not found" });
     }
 
-    if (business.stripe_subscription_id) {
-      if (cancel_immediately) {
-        await stripe.subscriptions.cancel(business.stripe_subscription_id);
-      } else {
-        await stripe.subscriptions.update(business.stripe_subscription_id, {
-          cancel_at_period_end: true,
-        });
-      }
+    if (business.helcim_subscription_id) {
+      await HelcimService.cancelSubscription(
+        business.helcim_subscription_id,
+        cancel_immediately
+      );
     }
 
     const cancellationDate = cancel_immediately
@@ -68,12 +64,12 @@ router.post("/delete", authenticate, async (req, res) => {
       return res.status(400).json({ error: "Email confirmation does not match" });
     }
 
-    // Cancel Stripe subscription
-    if (business.stripe_subscription_id) {
+    // Cancel Helcim subscription
+    if (business.helcim_subscription_id) {
       try {
-        await stripe.subscriptions.cancel(business.stripe_subscription_id);
+        await HelcimService.cancelSubscription(business.helcim_subscription_id, true);
       } catch (error) {
-        console.error("Error canceling Stripe subscription:", error);
+        console.error("Error canceling Helcim subscription:", error);
       }
     }
 

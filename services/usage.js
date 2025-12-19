@@ -31,8 +31,27 @@ export async function checkMinutesAvailable(businessId, callDurationMinutes = 0)
   const totalMinutesUsed = usage.totalMinutes;
   const overageMinutes = usage.overageMinutes;
 
+  // Get minutes from package if business has one, otherwise use business.usage_limit_minutes
+  let planLimit = business.usage_limit_minutes || 0;
+  
+  if (business.package_id) {
+    const { PricingPackage } = await import("../models/PricingPackage.js");
+    const pkg = await PricingPackage.findById(business.package_id);
+    
+    if (pkg) {
+      // Use package minutes
+      planLimit = pkg.minutes_included || 0;
+      
+      // Sync business.usage_limit_minutes with package if they don't match
+      if (business.usage_limit_minutes !== pkg.minutes_included) {
+        await Business.update(business.id, {
+          usage_limit_minutes: pkg.minutes_included,
+        });
+      }
+    }
+  }
+  
   // Calculate available minutes (plan limit + bonus - used)
-  const planLimit = business.usage_limit_minutes || 0;
   const bonusMinutes = business.bonus_minutes || 0;
   const totalAvailable = planLimit + bonusMinutes;
   const minutesRemaining = totalAvailable - totalMinutesUsed;
@@ -163,7 +182,27 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
 
   // Determine if this is overage
   const usage = await getCurrentCycleUsage(businessId, billingCycle.start, billingCycle.end);
-  const planLimit = business.usage_limit_minutes || 0;
+  
+  // Get minutes from package if business has one, otherwise use business.usage_limit_minutes
+  let planLimit = business.usage_limit_minutes || 0;
+  
+  if (business.package_id) {
+    const { PricingPackage } = await import("../models/PricingPackage.js");
+    const pkg = await PricingPackage.findById(business.package_id);
+    
+    if (pkg) {
+      // Use package minutes
+      planLimit = pkg.minutes_included || 0;
+      
+      // Sync business.usage_limit_minutes with package if they don't match
+      if (business.usage_limit_minutes !== pkg.minutes_included) {
+        await Business.update(business.id, {
+          usage_limit_minutes: pkg.minutes_included,
+        });
+      }
+    }
+  }
+  
   const bonusMinutes = business.bonus_minutes || 0;
   const totalAvailable = planLimit + bonusMinutes;
   const isOverage = usage.totalMinutes >= totalAvailable;

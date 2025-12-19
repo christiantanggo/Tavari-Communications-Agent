@@ -48,7 +48,38 @@ router.get('/status', authenticate, async (req, res) => {
     const usage = await getCurrentCycleUsage(req.businessId, billingCycle.start, billingCycle.end);
     console.log('[Usage API] Usage data:', JSON.stringify(usage, null, 2));
     
-    const planLimit = business.usage_limit_minutes || 0;
+    // Get minutes from package if business has one, otherwise use business.usage_limit_minutes
+    let planLimit = business.usage_limit_minutes || 0;
+    
+    if (business.package_id) {
+      const { PricingPackage } = await import('../models/PricingPackage.js');
+      const pkg = await PricingPackage.findById(business.package_id);
+      
+      if (pkg) {
+        console.log('[Usage API] Package found:', {
+          package_id: pkg.id,
+          package_name: pkg.name,
+          minutes_included: pkg.minutes_included,
+        });
+        
+        // Use package minutes
+        planLimit = pkg.minutes_included || 0;
+        
+        // Sync business.usage_limit_minutes with package if they don't match
+        if (business.usage_limit_minutes !== pkg.minutes_included) {
+          console.log('[Usage API] Syncing usage_limit_minutes from package:', {
+            old: business.usage_limit_minutes,
+            new: pkg.minutes_included,
+          });
+          await Business.update(business.id, {
+            usage_limit_minutes: pkg.minutes_included,
+          });
+        }
+      } else {
+        console.warn('[Usage API] Package not found for package_id:', business.package_id);
+      }
+    }
+    
     const bonusMinutes = business.bonus_minutes || 0;
     const totalAvailable = planLimit + bonusMinutes;
     const minutesRemaining = Math.max(0, totalAvailable - usage.totalMinutes);

@@ -68,19 +68,20 @@ function BillingPage() {
     }
   };
 
-  const handleUpgrade = async (planTier) => {
-    // Handle plan upgrade
-    const priceIds = {
-      starter: process.env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID,
-      core: process.env.NEXT_PUBLIC_STRIPE_CORE_PRICE_ID,
-      pro: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID,
-    };
-    
+  const handleUpgrade = async (packageId) => {
+    // Handle plan upgrade - packageId should be passed from the plan selection
     try {
-      const res = await billingAPI.createCheckout(priceIds[planTier]);
-      window.location.href = res.data.url;
+      const res = await billingAPI.createCheckout(packageId);
+      // Redirect to success page or show success message
+      if (res.data.url) {
+        window.location.href = res.data.url;
+      } else {
+        success('Subscription created successfully!');
+        await loadData(); // Reload to show updated subscription
+      }
     } catch (error) {
-      showError('Failed to start upgrade process');
+      console.error('Upgrade error:', error);
+      showError(error.response?.data?.error || 'Failed to start upgrade process');
     }
   };
 

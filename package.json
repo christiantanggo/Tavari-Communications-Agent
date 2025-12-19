@@ -25,6 +25,9 @@
     "test:webhook": "node scripts/test-vapi-webhook.js",
     "diagnose:webhook": "node scripts/diagnose-webhook.js",
     "create-admin": "node scripts/create-admin-user.js",
+    "check:phones": "node scripts/check-and-fix-phone-numbers.js",
+    "setup:helcim": "node scripts/setup-helcim-products.js",
+    "test:helcim": "node scripts/test-helcim-connection.js",
     "auto-commit": "node -e \"require('child_process').execSync('git add -A && git commit -m \\\"Auto-commit: Update files\\\" && git push origin main', {stdio: 'inherit'})\"",
     "deploy": "npm run auto-commit"
   },
@@ -55,7 +58,6 @@
     "libphonenumber-js": "^1.12.31",
     "node-fetch": "^3.3.2",
     "pdfkit": "^0.14.0",
-    "stripe": "^14.7.0",
     "winston": "^3.11.0"
   },
   "devDependencies": {

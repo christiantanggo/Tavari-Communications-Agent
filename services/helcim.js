@@ -1,0 +1,323 @@
+// services/helcim.js
+// Helcim payment processing service
+
+import axios from 'axios';
+import dotenv from 'dotenv';
+import { Business } from '../models/Business.js';
+
+dotenv.config();
+
+const HELCIM_API_BASE_URL = process.env.HELCIM_API_BASE_URL || 'https://api.helcim.com/v2';
+const HELCIM_API_TOKEN = process.env.HELCIM_API_TOKEN;
+
+// Create axios instance for Helcim API
+const helcimApi = axios.create({
+  baseURL: HELCIM_API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+    'api-token': HELCIM_API_TOKEN,
+  },
+});
+
+export class HelcimService {
+  // Create or get Helcim customer
+  static async getOrCreateCustomer(businessId, email, name, phone = null) {
+    const business = await Business.findById(businessId);
+    
+    if (business.helcim_customer_id) {
+      try {
+        const response = await helcimApi.get(`/customers/${business.helcim_customer_id}`);
+        return response.data;
+      } catch (error) {
+        console.error('Error retrieving Helcim customer:', error.response?.data || error.message);
+        // If customer doesn't exist, create a new one
+      }
+    }
+    
+    // Create new customer
+    try {
+      const response = await helcimApi.post('/customers', {
+        contactName: name,
+        contactEmail: email,
+        contactPhone: phone || business.phone || '',
+        billingAddress1: business.address || '',
+        billingCity: business.city || '',
+        billingProvince: business.province || '',
+        billingPostalCode: business.postal_code || '',
+        billingCountry: business.country || 'CA',
+      });
+      
+      const customer = response.data;
+      
+      // Save customer ID
+      await Business.update(businessId, {
+        helcim_customer_id: customer.customerId,
+      });
+      
+      return customer;
+    } catch (error) {
+      console.error('Error creating Helcim customer:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+  
+  // Create payment page for checkout
+  static async createPaymentPage(businessId, amount, description, returnUrl, cancelUrl) {
+    const business = await Business.findById(businessId);
+    const customer = await this.getOrCreateCustomer(
+      businessId,
+      business.email,
+      business.name,
+      business.phone
+    );
+    
+    try {
+      // Helcim uses hosted payment pages or direct API calls
+      // For subscriptions, we'll use the recurring payment API
+      const response = await helcimApi.post('/payment/cc', {
+        customerId: customer.customerId,
+        amount: amount,
+        currency: 'CAD', // or USD based on your needs
+        paymentType: 'purchase',
+        invoiceNumber: `Tavari-${businessId}-${Date.now()}`,
+        description: description,
+        // For recurring, we'll handle subscription creation separately
+      });
+      
+      return {
+        id: response.data.transactionId,
+        url: returnUrl, // Helcim doesn't provide a checkout URL like Stripe
+        // Instead, we'll use Helcim.js or hosted payment pages
+      };
+    } catch (error) {
+      console.error('Error creating Helcim payment:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+  
+  // Create recurring subscription
+  static async createSubscription(businessId, amount, interval = 'monthly', description = '') {
+    const business = await Business.findById(businessId);
+    const customer = await this.getOrCreateCustomer(
+      businessId,
+      business.email,
+      business.name,
+      business.phone
+    );
+    
+    try {
+      // Helcim recurring payment setup
+      const response = await helcimApi.post('/recurring', {
+        customerId: customer.customerId,
+        amount: amount,
+        currency: 'CAD',
+        frequency: interval === 'monthly' ? 'monthly' : 'yearly',
+        description: description || `Subscription for ${business.name}`,
+        startDate: new Date().toISOString().split('T')[0],
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error creating Helcim subscription:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+  
+  // Handle webhook events
+  static async handleWebhook(event) {
+    // Helcim webhook events structure
+    const eventType = event.type || event.eventType;
+    
+    switch (eventType) {
+      case 'payment.completed':
+      case 'payment.succeeded':
+        await this.handlePaymentSucceeded(event);
+        break;
+        
+      case 'payment.failed':
+        await this.handlePaymentFailed(event);
+        break;
+        
+      case 'subscription.created':
+      case 'subscription.updated':
+        await this.handleSubscriptionUpdate(event);
+        break;
+        
+      case 'subscription.cancelled':
+      case 'subscription.deleted':
+        await this.handleSubscriptionDeleted(event);
+        break;
+        
+      default:
+        console.log(`Unhandled Helcim event type: ${eventType}`);
+    }
+  }
+  
+  // Handle payment succeeded
+  static async handlePaymentSucceeded(event) {
+    const customerId = event.customerId || event.customer?.customerId;
+    if (!customerId) return;
+    
+    const { supabaseClient } = await import('../config/database.js');
+    const { data: businesses, error } = await supabaseClient
+      .from('businesses')
+      .select('*')
+      .eq('helcim_customer_id', customerId)
+      .limit(1);
+    
+    if (error || !businesses || businesses.length === 0) return;
+    
+    const businessId = businesses[0].id;
+    console.log('Payment succeeded for business:', businessId);
+    
+    // Update subscription status if this is a subscription payment
+    if (event.subscriptionId) {
+      await this.handleSubscriptionUpdate({
+        subscriptionId: event.subscriptionId,
+        customerId: customerId,
+        status: 'active',
+      });
+    }
+  }
+  
+  // Handle payment failed
+  static async handlePaymentFailed(event) {
+    const customerId = event.customerId || event.customer?.customerId;
+    if (!customerId) return;
+    
+    const { supabaseClient } = await import('../config/database.js');
+    const { data: businesses, error } = await supabaseClient
+      .from('businesses')
+      .select('*')
+      .eq('helcim_customer_id', customerId)
+      .limit(1);
+    
+    if (error || !businesses || businesses.length === 0) return;
+    
+    console.log('Payment failed for business:', businesses[0].id);
+    // Could implement grace period logic here
+  }
+  
+  // Handle subscription update
+  static async handleSubscriptionUpdate(event) {
+    const customerId = event.customerId || event.customer?.customerId;
+    if (!customerId) return;
+    
+    const { supabaseClient } = await import('../config/database.js');
+    const { data: businesses, error } = await supabaseClient
+      .from('businesses')
+      .select('*')
+      .eq('helcim_customer_id', customerId)
+      .limit(1);
+    
+    if (error || !businesses || businesses.length === 0) return;
+    
+    const businessId = businesses[0].id;
+    const subscriptionId = event.subscriptionId || event.id;
+    
+    // Determine plan tier and limits based on amount
+    const amount = event.amount || event.planAmount;
+    const planTier = this.getPlanTierFromAmount(amount);
+    const usageLimit = this.getUsageLimitFromTier(planTier);
+    
+    await Business.update(businessId, {
+      helcim_subscription_id: subscriptionId,
+      plan_tier: planTier,
+      usage_limit_minutes: usageLimit,
+    });
+  }
+  
+  // Handle subscription deletion
+  static async handleSubscriptionDeleted(event) {
+    const customerId = event.customerId || event.customer?.customerId;
+    if (!customerId) return;
+    
+    const { supabaseClient } = await import('../config/database.js');
+    const { data: businesses, error } = await supabaseClient
+      .from('businesses')
+      .select('*')
+      .eq('helcim_customer_id', customerId)
+      .limit(1);
+    
+    if (error || !businesses || businesses.length === 0) return;
+    
+    const businessId = businesses[0].id;
+    
+    // Set to free tier or suspend
+    await Business.update(businessId, {
+      helcim_subscription_id: null,
+      plan_tier: 'free',
+      usage_limit_minutes: 100, // Reduced limit
+    });
+  }
+  
+  // Get plan tier from amount
+  static getPlanTierFromAmount(amount) {
+    if (!amount) return 'starter';
+    
+    const amountNum = typeof amount === 'string' ? parseFloat(amount) : amount;
+    
+    if (amountNum >= 179) {
+      return 'pro';
+    } else if (amountNum >= 129) {
+      return 'core';
+    } else if (amountNum >= 79) {
+      return 'starter';
+    }
+    return 'starter';
+  }
+  
+  // Get usage limit from tier
+  static getUsageLimitFromTier(tier) {
+    const limits = {
+      free: 100,
+      starter: 250,
+      core: 500,
+      pro: 750,
+      enterprise: 20000,
+    };
+    return limits[tier] || 250;
+  }
+  
+  // Get subscription details
+  static async getSubscription(subscriptionId) {
+    try {
+      const response = await helcimApi.get(`/recurring/${subscriptionId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error retrieving Helcim subscription:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+  
+  // Cancel subscription
+  static async cancelSubscription(subscriptionId, cancelImmediately = false) {
+    try {
+      if (cancelImmediately) {
+        const response = await helcimApi.delete(`/recurring/${subscriptionId}`);
+        return response.data;
+      } else {
+        // Cancel at period end
+        const response = await helcimApi.put(`/recurring/${subscriptionId}`, {
+          status: 'cancelled',
+        });
+        return response.data;
+      }
+    } catch (error) {
+      console.error('Error cancelling Helcim subscription:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+  
+  // Get customer payment methods
+  static async getCustomerPaymentMethods(customerId) {
+    try {
+      const response = await helcimApi.get(`/customers/${customerId}/payment-methods`);
+      return response.data;
+    } catch (error) {
+      console.error('Error retrieving payment methods:', error.response?.data || error.message);
+      return null;
+    }
+  }
+}
+

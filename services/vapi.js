@@ -14,15 +14,27 @@ export function getVapiClient() {
 
     if (!VAPI_API_KEY) {
       console.warn("⚠️  VAPI_API_KEY not set. VAPI functions will not work.");
+      // Still create client but it will fail on API calls - better to fail fast
     }
 
     vapiClient = axios.create({
       baseURL: VAPI_BASE_URL,
       headers: {
-        Authorization: `Bearer ${VAPI_API_KEY}`,
+        Authorization: `Bearer ${VAPI_API_KEY || ''}`,
         "Content-Type": "application/json",
       },
     });
+    
+    // Add response interceptor to log errors
+    vapiClient.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          console.error("[VAPI] ❌ Authentication failed - check VAPI_API_KEY");
+        }
+        return Promise.reject(error);
+      }
+    );
   }
   return vapiClient;
 }
@@ -239,6 +251,64 @@ export async function searchAvailablePhoneNumbers(countryCode = 'US', phoneType 
 }
 
 /**
+ * Get all phone numbers from VAPI
+ * @returns {Promise<Array>} Array of all VAPI phone number objects
+ */
+export async function getAllVapiPhoneNumbers() {
+  try {
+    const response = await getVapiClient().get('/phone-number');
+    const allVapiNumbers = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+    console.log(`[VAPI] Found ${allVapiNumbers.length} phone numbers in VAPI`);
+    return allVapiNumbers;
+  } catch (error) {
+    console.error('[VAPI] Error getting VAPI phone numbers:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Check if a phone number is already provisioned in VAPI
+ * @param {string} phoneNumber - Phone number in E.164 format
+ * @returns {Promise<Object|null>} VAPI phone number object if found, null otherwise
+ */
+export async function checkIfNumberProvisionedInVAPI(phoneNumber) {
+  try {
+    // Normalize phone number
+    let normalized = phoneNumber.replace(/[^0-9+]/g, '');
+    if (!normalized.startsWith('+')) {
+      normalized = '+' + normalized;
+    }
+    
+    // Get all phone numbers from VAPI
+    const response = await getVapiClient().get('/phone-number');
+    const allVapiNumbers = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+    
+    // Find matching number
+    const matching = allVapiNumbers.find(vapiNum => {
+      const vapiPhone = vapiNum.phoneNumber || vapiNum.phone_number || vapiNum.number;
+      if (!vapiPhone) return false;
+      
+      let vapiNormalized = vapiPhone.replace(/[^0-9+]/g, '');
+      if (!vapiNormalized.startsWith('+')) {
+        vapiNormalized = '+' + vapiNormalized;
+      }
+      
+      return vapiNormalized === normalized;
+    });
+    
+    if (matching) {
+      console.log(`[VAPI] Phone number ${normalized} is already provisioned in VAPI`);
+      return matching;
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn(`[VAPI] Could not check if number is provisioned in VAPI:`, error.message);
+    return null;
+  }
+}
+
+/**
  * Find unassigned phone numbers in Telnyx (numbers not assigned to any business)
  * @param {string} preferredAreaCode - Optional area code to prefer
  * @returns {Promise<Array>} Array of unassigned phone number objects
@@ -298,8 +368,8 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
     
     console.log(`[VAPI] Found ${assignedNumbers.size} phone numbers assigned to businesses`);
     
-    // Find unassigned numbers
-    const unassignedNumbers = allTelnyxNumbers.filter(telnyxNum => {
+    // Find unassigned numbers in Telnyx
+    const unassignedTelnyxNumbers = allTelnyxNumbers.filter(telnyxNum => {
       const telnyxPhone = telnyxNum.phone_number || telnyxNum.number;
       if (!telnyxPhone) return false;
       
@@ -312,13 +382,39 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
       return !assignedNumbers.has(normalized);
     });
     
-    console.log(`[VAPI] Found ${unassignedNumbers.length} unassigned phone numbers`);
+    console.log(`[VAPI] Found ${unassignedTelnyxNumbers.length} unassigned phone numbers in Telnyx`);
+    
+    // Also check VAPI for numbers not assigned to businesses
+    let unassignedVapiNumbers = [];
+    try {
+      const vapiNumbers = await getAllVapiPhoneNumbers();
+      unassignedVapiNumbers = vapiNumbers.filter(vapiNum => {
+        const vapiPhone = vapiNum.phoneNumber || vapiNum.phone_number || vapiNum.number;
+        if (!vapiPhone) return false;
+        
+        // Normalize for comparison
+        let normalized = vapiPhone.replace(/[^0-9+]/g, '');
+        if (!normalized.startsWith('+')) {
+          normalized = '+' + normalized;
+        }
+        
+        return !assignedNumbers.has(normalized);
+      });
+      
+      console.log(`[VAPI] Found ${unassignedVapiNumbers.length} unassigned phone numbers in VAPI`);
+    } catch (error) {
+      console.warn('[VAPI] Could not check VAPI numbers:', error.message);
+    }
+    
+    // Combine both lists (VAPI numbers are preferred since they're already provisioned)
+    const unassignedNumbers = [...unassignedVapiNumbers, ...unassignedTelnyxNumbers];
+    console.log(`[VAPI] Total unassigned numbers available: ${unassignedNumbers.length}`);
     
     // If preferred area code is provided, prioritize numbers with that area code
     if (preferredAreaCode && unassignedNumbers.length > 0) {
       const cleanAreaCode = preferredAreaCode.replace(/\D/g, '');
       const preferred = unassignedNumbers.filter(num => {
-        const phone = (num.phone_number || num.number || '').replace(/[^0-9]/g, '');
+        const phone = (num.phoneNumber || num.phone_number || num.number || '').replace(/[^0-9]/g, '');
         return phone.startsWith(cleanAreaCode) || phone.startsWith('1' + cleanAreaCode);
       });
       
@@ -607,6 +703,13 @@ export async function provisionPhoneNumber(specificNumber = null, businessPhoneN
     }
     
     console.log("[VAPI] Request body:", JSON.stringify(requestBody, null, 2));
+    
+    // Check if VAPI_API_KEY is set before making the request
+    const VAPI_API_KEY = process.env.VAPI_API_KEY;
+    if (!VAPI_API_KEY) {
+      throw new Error('VAPI_API_KEY is not set. Cannot provision phone number to VAPI. Please set VAPI_API_KEY in your environment variables.');
+    }
+    
     const response = await getVapiClient().post("/phone-number", requestBody);
     
     // VAPI returns phone number in different possible fields
@@ -616,13 +719,33 @@ export async function provisionPhoneNumber(specificNumber = null, businessPhoneN
                        phoneNumberData?.number ||
                        phoneNumberData?.id;
     
+    // Extract phoneNumberId - this is critical for linking
+    const phoneNumberId = phoneNumberData?.id || 
+                         phoneNumberData?.phoneNumberId || 
+                         phoneNumberData?.phone_number_id;
+    
+    if (!phoneNumberId) {
+      console.error("[VAPI] ⚠️  WARNING: phoneNumberId not found in VAPI response!");
+      console.error("[VAPI] Response data:", JSON.stringify(phoneNumberData, null, 2));
+      // Try to extract from nested structure
+      if (phoneNumberData?.data?.id) {
+        phoneNumberData.id = phoneNumberData.data.id;
+        phoneNumberData.phoneNumberId = phoneNumberData.data.id;
+      }
+    }
+    
     console.log("[VAPI] ✅ Phone number provisioned successfully");
     console.log("[VAPI] Phone number:", phoneNumber);
+    console.log("[VAPI] Phone number ID:", phoneNumberId || 'NOT FOUND');
     console.log("[VAPI] Full response:", JSON.stringify(phoneNumberData, null, 2));
     
-    // Ensure phoneNumber field exists for consistency
+    // Ensure phoneNumber and id fields exist for consistency
     if (!phoneNumberData.phoneNumber && phoneNumber) {
       phoneNumberData.phoneNumber = phoneNumber;
+    }
+    if (!phoneNumberData.id && phoneNumberId) {
+      phoneNumberData.id = phoneNumberId;
+      phoneNumberData.phoneNumberId = phoneNumberId;
     }
     
     return phoneNumberData;

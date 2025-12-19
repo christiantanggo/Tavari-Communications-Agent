@@ -77,6 +77,26 @@ This will verify:
 - ✅ Can list phone numbers
 - ✅ Webhook connectivity (if server is running)
 
+## Helcim Configuration
+
+**Required for billing and subscriptions:**
+- `HELCIM_API_TOKEN` - Your Helcim API token from the dashboard
+- `HELCIM_WEBHOOK_SECRET` - Webhook signing secret (optional, for webhook verification)
+
+**Getting Your Helcim API Token:**
+1. Go to [https://www.helcim.com](https://www.helcim.com) and create an account
+2. In Helcim Dashboard → **"All Tools"** → **"Integrations"** → **"API Access Configurations"**
+3. Click **"New API Access"** and create a token with appropriate permissions
+4. Copy the **API Token**
+5. For webhooks, go to **"All Tools"** → **"Integrations"** → **"Webhooks"** → Add endpoint → Copy webhook secret
+
+**Quick Setup:**
+1. Set `HELCIM_API_TOKEN` in `.env`
+2. Run database migration: `ADD_HELCIM_FIELDS.sql` (adds helcim_customer_id and helcim_subscription_id columns)
+3. Test: `npm run test:helcim`
+
+See [HELCIM_QUICK_START.md](./HELCIM_QUICK_START.md) for detailed Helcim setup instructions.
+
 ## All Environment Variables
 
 See `.env.example` for the complete list of all environment variables needed for the full application.
