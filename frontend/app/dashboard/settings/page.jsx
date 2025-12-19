@@ -69,6 +69,8 @@ function SettingsPage() {
     call_forward_rings: 4,
     after_hours_behavior: 'take_message',
     allow_call_transfer: true,
+    max_call_duration_minutes: null,
+    detect_conversation_end: true,
   });
   
   // Voice settings state
@@ -142,6 +144,8 @@ function SettingsPage() {
           call_forward_rings: business.call_forward_rings || 4,
           after_hours_behavior: business.after_hours_behavior || 'take_message',
           allow_call_transfer: business.allow_call_transfer ?? true,
+          max_call_duration_minutes: business.max_call_duration_minutes ?? null,
+          detect_conversation_end: business.detect_conversation_end ?? true,
         };
         console.log('[Settings Load] Setting aiSettings:', loadedAiSettings);
         setAiSettings(loadedAiSettings);
@@ -1157,6 +1161,46 @@ function SettingsPage() {
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
+                      </div>
+
+                      <div className="border-t pt-4 mt-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1">
+                            Detect Conversation End
+                          </label>
+                          <p className="text-xs text-gray-500 mb-2">
+                            When enabled, the AI will ask "Is there anything else I can help you with?" before ending calls. If the answer is no, it will move to the closing message and end the call.
+                          </p>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={aiSettings.detect_conversation_end}
+                              onChange={(e) => setAiSettings({ ...aiSettings, detect_conversation_end: e.target.checked })}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4 mt-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1">
+                            Maximum Call Duration (minutes)
+                          </label>
+                          <p className="text-xs text-gray-500 mb-2">
+                            Set a maximum duration for calls. The AI will wrap up the conversation as it approaches this limit. Leave empty for no limit.
+                          </p>
+                          <input
+                            type="number"
+                            min="1"
+                            max="60"
+                            value={aiSettings.max_call_duration_minutes || ''}
+                            onChange={(e) => setAiSettings({ ...aiSettings, max_call_duration_minutes: e.target.value ? parseInt(e.target.value) : null })}
+                            placeholder="No limit"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                          />
+                        </div>
                       </div>
 
                       <div className="border-t pt-4 mt-4">

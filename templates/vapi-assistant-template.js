@@ -21,6 +21,8 @@ export async function generateAssistantPrompt(businessData) {
     personality = "professional",
     opening_greeting,
     ending_greeting,
+    max_call_duration_minutes = null,
+    detect_conversation_end = true,
   } = businessData;
 
   // Format business hours
@@ -191,6 +193,26 @@ MESSAGE TAKING:
   - This read-back step is MANDATORY - never skip it, even if you think you heard the number correctly
 - Confirm ALL information (name, phone number, and message details) before ending the call
 - Be clear that someone will call them back.
+
+${detect_conversation_end ? `CONVERSATION END DETECTION:
+- After you have answered the caller's question(s) or completed their request, you MUST ask: "Is there anything else I can help you with?"
+- WAIT for the caller's response.
+- If the caller says "no", "nope", "nothing else", "that's all", "that's it", "no thanks", or similar negative responses:
+  - Immediately move to your closing message: "${ending_greeting || `Thank you for calling ${name}. Have a great day!`}"
+  - After saying the closing message, end the call gracefully.
+- If the caller says "yes" or indicates they have another question:
+  - Answer their next question and then ask again: "Is there anything else I can help you with?"
+  - Repeat this process until they say no or the conversation naturally concludes.
+- This helps ensure the caller's needs are fully met before ending the call.
+` : ''}
+
+${max_call_duration_minutes ? `CALL DURATION LIMIT:
+- This call has a maximum duration of ${max_call_duration_minutes} minutes.
+- If the call approaches this time limit, politely wrap up the conversation.
+- Say something like: "I want to make sure we've covered everything. Is there anything else I can help you with today?"
+- If they say no, move to your closing message and end the call.
+- If they have more questions, answer them but be mindful of the time limit.
+` : ''}
 
 REMEMBER:
 - Speak ONLY in English

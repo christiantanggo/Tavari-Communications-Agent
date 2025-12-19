@@ -26,6 +26,8 @@ router.put("/settings", authenticate, async (req, res) => {
       minutes_exhausted_behavior,
       overage_billing_enabled,
       overage_cap_minutes,
+      max_call_duration_minutes,
+      detect_conversation_end,
       // Business info fields
       name,
       phone,
@@ -56,6 +58,8 @@ router.put("/settings", authenticate, async (req, res) => {
     if (minutes_exhausted_behavior !== undefined) updateData.minutes_exhausted_behavior = minutes_exhausted_behavior;
     if (overage_billing_enabled !== undefined) updateData.overage_billing_enabled = overage_billing_enabled;
     if (overage_cap_minutes !== undefined) updateData.overage_cap_minutes = overage_cap_minutes;
+    if (max_call_duration_minutes !== undefined) updateData.max_call_duration_minutes = max_call_duration_minutes;
+    if (detect_conversation_end !== undefined) updateData.detect_conversation_end = detect_conversation_end;
     // Business info fields
     if (name !== undefined) updateData.name = name;
     if (phone !== undefined) updateData.phone = phone;
