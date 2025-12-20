@@ -45,12 +45,15 @@ Add the payment page URL to your backend environment variables:
 
 **Railway:**
 1. Go to Railway Dashboard → Your backend service → Variables
-2. Add: `HELCIM_PAYMENT_PAGE_URL` = `https://secure.helcim.com/pay/your-page-id`
+2. Add: `HELCIM_PAYMENT_PAGE_URL` = `https://your-business-name.myhelcim.com/hosted/?token=xxxxx`
+3. Example: `HELCIM_PAYMENT_PAGE_URL=https://off-the-wall-kids.myhelcim.com/hosted/?token=77f3a70e791bde1bc7ea98`
 
 **Local `.env`:**
 ```bash
-HELCIM_PAYMENT_PAGE_URL=https://secure.helcim.com/pay/your-page-id
+HELCIM_PAYMENT_PAGE_URL=https://your-business-name.myhelcim.com/hosted/?token=xxxxx
 ```
+
+**Important:** Include the full URL with the `?token=` parameter. The system will automatically append `&amount=XX.XX` for dynamic pricing.
 
 ### Step 4: Test the Integration
 

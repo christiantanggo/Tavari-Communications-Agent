@@ -77,10 +77,15 @@ router.post('/checkout', authenticate, async (req, res) => {
     if (process.env.HELCIM_PAYMENT_PAGE_URL) {
       const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
       const amount = pkg.monthly_price.toFixed(2);
+      
+      // Helcim hosted payment pages use token-based URLs
+      // Format: https://business-name.myhelcim.com/hosted/?token=xxx
+      // We can append amount and other parameters
       const separator = paymentPageUrl.includes('?') ? '&' : '?';
       
       // Create payment URL with dynamic amount
-      // Try common parameter names: amount, total, amt, price
+      // Helcim may support: amount, total, amt, or other parameter names
+      // Also include package_id for tracking
       const paymentUrl = `${paymentPageUrl}${separator}amount=${amount}&package_id=${packageId}`;
       
       // Update business with package (payment will be processed on Helcim's page)
