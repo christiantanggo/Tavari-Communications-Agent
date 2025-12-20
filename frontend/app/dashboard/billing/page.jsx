@@ -76,16 +76,44 @@ function BillingPage() {
     // Handle plan upgrade - packageId should be passed from the plan selection
     try {
       const res = await billingAPI.createCheckout(packageId);
-      // Redirect to success page or show success message
+      
+      // If payment was processed successfully (has transactionId)
+      if (res.data.success && res.data.transactionId) {
+        success('Payment processed successfully!');
+        await loadData(); // Reload to show updated subscription
+        // Redirect to success page if URL provided
+        if (res.data.url) {
+          window.location.href = res.data.url;
+        }
+        return;
+      }
+      
+      // If redirect URL is provided (for hosted payment page)
       if (res.data.url) {
         window.location.href = res.data.url;
-      } else {
-        success('Subscription created successfully!');
-        await loadData(); // Reload to show updated subscription
+        return;
       }
+      
+      // Fallback success message
+      success('Subscription created successfully!');
+      await loadData();
     } catch (error) {
       console.error('Upgrade error:', error);
-      showError(error.response?.data?.error || 'Failed to start upgrade process');
+      
+      // Handle 402 Payment Required - user needs to add payment method first
+      if (error.response?.status === 402) {
+        const errorData = error.response?.data || {};
+        showError(errorData.message || 'Please add a payment method first, then try again.');
+        
+        // Automatically redirect to add payment method after a short delay
+        setTimeout(() => {
+          handleManageBilling(); // This will redirect to hosted payment page
+        }, 2000);
+        return;
+      }
+      
+      // Handle other errors
+      showError(error.response?.data?.error || error.response?.data?.message || 'Failed to start upgrade process');
     }
   };
 
