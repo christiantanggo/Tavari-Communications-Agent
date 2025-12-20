@@ -17,7 +17,8 @@ This guide explains how to set up Helcim's hosted payment pages to avoid PCI com
 2. Navigate to **"All Tools"** → **"Payment Pages"**
 3. Click **"New Payment Page"**
 4. Choose page type:
-   - **"Editable Amount"** ⭐ **RECOMMENDED** - Allows dynamic pricing via URL parameters. Customers can pay any amount, and you can pre-fill the amount based on the selected package.
+   - **"Fixed Amount"** ⭐ **RECOMMENDED FOR SECURITY** - Amount is locked and cannot be changed by customers. However, this requires creating a new page for each price point OR using Helcim API to create checkout links dynamically.
+   - **"Editable Amount"** ⚠️ **NOT RECOMMENDED** - Allows customers to change the amount, which is a security risk. Only use if Helcim API checkout link creation is not available.
    - **"Product Purchase"** - Requires creating products in Helcim for each package (not recommended for dynamic pricing)
 5. Configure the page:
    - **Name**: `Tavari Payment Page` (or any name)

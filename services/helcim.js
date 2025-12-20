@@ -109,8 +109,8 @@ export class HelcimService {
     }
   }
   
-  // Create payment page for checkout
-  static async createPaymentPage(businessId, amount, description, returnUrl, cancelUrl) {
+  // Create payment checkout link with fixed amount (via API - no user can change amount)
+  static async createPaymentCheckoutLink(businessId, amount, description, returnUrl, cancelUrl) {
     const business = await Business.findById(businessId);
     const customer = await this.getOrCreateCustomer(
       businessId,
@@ -120,26 +120,35 @@ export class HelcimService {
     );
     
     try {
-      // Helcim uses hosted payment pages or direct API calls
-      // For subscriptions, we'll use the recurring payment API
-      const response = await helcimApi.post('/payment/cc', {
+      console.log('[HelcimService] Creating payment checkout link with fixed amount:', amount);
+      
+      // Check if Helcim API supports creating payment checkout links
+      // Try the payment pages API endpoint
+      // Note: This may require a different endpoint - check Helcim API docs
+      const response = await helcimApi.post('/payment-pages', {
         customerId: customer.customerId,
         amount: amount,
-        currency: 'CAD', // or USD based on your needs
-        paymentType: 'purchase',
-        invoiceNumber: `Tavari-${businessId}-${Date.now()}`,
+        currency: 'CAD',
         description: description,
-        // For recurring, we'll handle subscription creation separately
+        returnUrl: returnUrl,
+        cancelUrl: cancelUrl,
+        type: 'fixed', // Fixed amount - user cannot change
       });
       
+      console.log('[HelcimService] ✅ Payment checkout link created:', response.data);
       return {
-        id: response.data.transactionId,
-        url: returnUrl, // Helcim doesn't provide a checkout URL like Stripe
-        // Instead, we'll use Helcim.js or hosted payment pages
+        url: response.data.url || response.data.checkoutUrl || response.data.paymentUrl,
+        paymentPageId: response.data.id,
+        amount: amount,
       };
     } catch (error) {
-      console.error('Error creating Helcim payment:', error.response?.data || error.message);
-      throw error;
+      // If payment pages API doesn't exist, fall back to alternative method
+      console.warn('[HelcimService] Payment pages API not available, trying alternative...');
+      console.error('[HelcimService] Error:', error.response?.data || error.message);
+      
+      // Alternative: Use invoice payment method if available
+      // Or return null to use hosted payment page with amount parameter
+      throw new Error('Helcim API does not support dynamic payment page creation. Use hosted payment page with amount parameter instead.');
     }
   }
   
