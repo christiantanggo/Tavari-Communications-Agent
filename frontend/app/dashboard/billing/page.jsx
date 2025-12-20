@@ -92,10 +92,30 @@ function BillingPage() {
     setLoadingPortal(true);
     try {
       const res = await billingAPI.getPortal();
-      window.location.href = res.data.url;
+      
+      // Check if response has a URL (for future Helcim.js implementation)
+      if (res.data.url) {
+        window.location.href = res.data.url;
+      } else {
+        // Helcim doesn't provide a customer portal URL
+        // Show user-friendly error message
+        showError(
+          res.data.message || 
+          'Payment method management is not yet available. Please contact support to add a payment method.'
+        );
+        console.error('Helcim portal error:', res.data);
+      }
     } catch (error) {
       console.error('Failed to open billing portal:', error);
-      showError('Failed to open billing portal. Please try again.');
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          'Failed to open billing portal. Please try again.';
+      showError(errorMessage);
+      
+      // Log additional details if available
+      if (error.response?.data?.solution) {
+        console.info('Solution:', error.response.data.solution);
+      }
     } finally {
       setLoadingPortal(false);
     }
