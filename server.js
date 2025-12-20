@@ -147,13 +147,8 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api/phone-numbers", phoneNumbersRoutes);
 
 // Legacy Telnyx phone numbers endpoint (for backwards compatibility)
-// This proxies to the business phone-numbers/search endpoint
 app.get("/api/telnyx-phone-numbers/search", async (req, res, next) => {
-  // Forward to business route
-  req.url = "/api/business/phone-numbers/search";
-  next();
-}, async (req, res, next) => {
-  // Need to authenticate first
+  // Import and use authenticate middleware
   const { authenticate } = await import("./middleware/auth.js");
   authenticate(req, res, next);
 }, async (req, res) => {
