@@ -97,7 +97,7 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
           };
           fallbackScript.onerror = () => {
             console.error('[HelcimPaymentForm] ❌ Fallback script also failed');
-            setError('Failed to load Helcim.js. The script URL may be incorrect or Helcim\'s CDN may be unavailable. Please contact support.');
+            setError('Unable to load Helcim.js payment library. Helcim\'s CDN appears to be unavailable (Error 522). Please try again in a few minutes, or contact Helcim support if the issue persists.');
             setScriptLoading(false);
           };
           document.head.appendChild(fallbackScript);
