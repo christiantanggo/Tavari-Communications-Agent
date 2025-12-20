@@ -126,10 +126,24 @@ async function testHelcimConnection() {
           break;
         } catch (error) {
           lastError = error;
-          if (error.response?.status === 401) {
+          const status = error.response?.status;
+          const errorData = error.response?.data;
+          
+          if (status === 401) {
             // Continue trying other methods
             continue;
-          } else if (error.response?.status === 404) {
+          } else if (status === 403) {
+            // Auth worked but permissions insufficient
+            console.log(`   ⚠️  403 Forbidden with ${authMethod.name} on ${baseUrl}`);
+            console.log(`   📊 Error details:`, JSON.stringify(errorData, null, 2));
+            console.log(`   💡 This means authentication worked but token lacks permissions`);
+            console.log(`   💡 Check token permissions in Helcim dashboard:`);
+            console.log(`      - General: Read & Write`);
+            console.log(`      - Settings: Read & Write`);
+            console.log(`      - Transaction Processing: Admin`);
+            // Continue trying other methods
+            continue;
+          } else if (status === 404) {
             // Wrong endpoint, but auth might be working
             console.log(`   ⚠️  404 with ${authMethod.name} - endpoint might be wrong but auth format may be correct`);
             continue;
@@ -147,8 +161,24 @@ async function testHelcimConnection() {
       console.log(`   ❌ All authentication methods failed`);
       console.log(`   📊 Last error status: ${lastError?.response?.status || 'No response'}`);
       console.log(`   📊 Last error: ${lastError?.response?.data?.message || lastError?.response?.data?.error || lastError?.message}`);
+      console.log(`   📊 Full error response:`, JSON.stringify(lastError?.response?.data, null, 2));
       
-      if (lastError?.response?.status === 401) {
+      if (lastError?.response?.status === 403) {
+        console.log(`\n   🔍 Troubleshooting 403 Forbidden:`);
+        console.log(`   ✅ Good news: Authentication is working!`);
+        console.log(`   ❌ Bad news: Token lacks required permissions`);
+        console.log(`\n   📋 Steps to fix:`);
+        console.log(`   1. Go to Helcim Dashboard → All Tools → Integrations → API Access Configurations`);
+        console.log(`   2. Find your API token configuration`);
+        console.log(`   3. Verify permissions are set to:`);
+        console.log(`      - General: Read & Write (NOT "No Access")`);
+        console.log(`      - Settings: Read & Write (NOT "No Access")`);
+        console.log(`      - Transaction Processing: Admin (NOT "auth" or "positive transaction")`);
+        console.log(`   4. If permissions are wrong, update them and save`);
+        console.log(`   5. If permissions are correct, the account may still be under review`);
+        console.log(`   6. Contact Helcim support if issue persists`);
+        throw new Error('API token authentication works but lacks required permissions (403 Forbidden)');
+      } else if (lastError?.response?.status === 401) {
         console.log(`\n   🔍 Troubleshooting 401 Unauthorized:`);
         console.log(`   1. Verify token is correct in Helcim dashboard`);
         console.log(`   2. Check token has "admin" permission for Transaction Processing`);
