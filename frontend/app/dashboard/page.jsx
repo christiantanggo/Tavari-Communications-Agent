@@ -280,6 +280,10 @@ function DashboardContent() {
               <p className="text-sm">{apiError}</p>
             </div>
           )}
+          {/* Debug info - remove after fixing */}
+          <div className="mt-2 text-xs text-gray-500 bg-gray-100 p-2 rounded">
+            Debug: Usage={JSON.stringify(usage)} | Calls={calls.length} | Messages={messages.length} | Loading={loading.toString()}
+          </div>
         </div>
 
         {/* SMS Activation Banner */}
