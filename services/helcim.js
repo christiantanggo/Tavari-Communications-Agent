@@ -22,21 +22,35 @@ const helcimApi = axios.create({
 export class HelcimService {
   // Create or get Helcim customer
   static async getOrCreateCustomer(businessId, email, name, phone = null) {
+    console.log('[HelcimService] ========== GET OR CREATE CUSTOMER START ==========');
+    console.log('[HelcimService] Business ID:', businessId);
+    console.log('[HelcimService] Email:', email);
+    console.log('[HelcimService] Name:', name);
+    
     const business = await Business.findById(businessId);
     
     if (business.helcim_customer_id) {
+      console.log('[HelcimService] Existing customer ID found:', business.helcim_customer_id);
       try {
         const response = await helcimApi.get(`/customers/${business.helcim_customer_id}`);
+        console.log('[HelcimService] ✅ Retrieved existing customer:', {
+          status: response.status,
+          dataKeys: Object.keys(response.data || {}),
+          customerId: response.data?.customerId,
+          id: response.data?.id,
+        });
         return response.data;
       } catch (error) {
-        console.error('Error retrieving Helcim customer:', error.response?.data || error.message);
+        console.error('[HelcimService] ❌ Error retrieving Helcim customer:', error.response?.data || error.message);
+        console.error('[HelcimService] Will create new customer instead');
         // If customer doesn't exist, create a new one
       }
     }
     
     // Create new customer
+    console.log('[HelcimService] Creating new customer...');
     try {
-      const response = await helcimApi.post('/customers', {
+      const customerData = {
         contactName: name,
         contactEmail: email,
         contactPhone: phone || business.phone || '',
@@ -45,18 +59,52 @@ export class HelcimService {
         billingProvince: business.province || '',
         billingPostalCode: business.postal_code || '',
         billingCountry: business.country || 'CA',
+      };
+      console.log('[HelcimService] Customer data to send:', customerData);
+      
+      const response = await helcimApi.post('/customers', customerData);
+      
+      console.log('[HelcimService] ✅ Customer created:', {
+        status: response.status,
+        dataKeys: Object.keys(response.data || {}),
+        fullResponse: JSON.stringify(response.data, null, 2),
       });
       
       const customer = response.data;
       
+      // Try to extract customer ID from various possible structures
+      const customerId = customer.customerId || customer.id || customer.data?.customerId || customer.data?.id;
+      
+      if (!customerId) {
+        console.error('[HelcimService] ❌ No customer ID found in response!');
+        console.error('[HelcimService] Full response:', JSON.stringify(customer, null, 2));
+        throw new Error('Helcim API did not return a customer ID');
+      }
+      
+      console.log('[HelcimService] Extracted customer ID:', customerId);
+      
       // Save customer ID
       await Business.update(businessId, {
-        helcim_customer_id: customer.customerId,
+        helcim_customer_id: customerId,
       });
       
-      return customer;
+      console.log('[HelcimService] ✅ Customer ID saved to business');
+      console.log('[HelcimService] ========== GET OR CREATE CUSTOMER COMPLETE ==========');
+      
+      // Return customer with consistent structure
+      return {
+        customerId: customerId,
+        ...customer
+      };
     } catch (error) {
-      console.error('Error creating Helcim customer:', error.response?.data || error.message);
+      console.error('[HelcimService] ========== GET OR CREATE CUSTOMER ERROR ==========');
+      console.error('[HelcimService] Error creating Helcim customer:', error.response?.data || error.message);
+      console.error('[HelcimService] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        stack: error.stack,
+      });
       throw error;
     }
   }

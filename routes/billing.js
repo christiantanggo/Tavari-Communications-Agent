@@ -154,11 +154,25 @@ router.post('/webhook', express.json(), async (req, res) => {
 // Get billing portal URL (Helcim customer portal)
 router.get('/portal', authenticate, async (req, res) => {
   try {
+    console.log('[Billing Portal] ========== GET PORTAL START ==========');
+    console.log('[Billing Portal] Business ID:', req.businessId);
+    
     const business = await Business.findById(req.businessId);
+    if (!business) {
+      console.error('[Billing Portal] Business not found');
+      return res.status(404).json({ error: 'Business not found' });
+    }
+    
+    console.log('[Billing Portal] Business found:', {
+      id: business.id,
+      email: business.email,
+      helcim_customer_id: business.helcim_customer_id,
+    });
     
     // Create customer if one doesn't exist
     let customerId = business.helcim_customer_id;
     if (!customerId) {
+      console.log('[Billing Portal] No Helcim customer ID, creating customer...');
       try {
         const customer = await HelcimService.getOrCreateCustomer(
           req.businessId,
@@ -166,9 +180,33 @@ router.get('/portal', authenticate, async (req, res) => {
           business.name,
           business.phone
         );
-        customerId = customer.customerId;
+        
+        console.log('[Billing Portal] Customer response:', {
+          hasCustomer: !!customer,
+          customerKeys: customer ? Object.keys(customer) : [],
+          customerId: customer?.customerId,
+          id: customer?.id,
+          fullResponse: JSON.stringify(customer, null, 2),
+        });
+        
+        // Try multiple possible field names
+        customerId = customer?.customerId || customer?.id || customer?.data?.customerId || customer?.data?.id;
+        
+        // If still no customerId, reload business to get the saved ID
+        if (!customerId) {
+          console.log('[Billing Portal] Customer ID not in response, reloading business...');
+          const updatedBusiness = await Business.findById(req.businessId);
+          customerId = updatedBusiness.helcim_customer_id;
+          console.log('[Billing Portal] Reloaded customer ID:', customerId);
+        }
       } catch (error) {
-        console.error('Error creating Helcim customer:', error);
+        console.error('[Billing Portal] Error creating Helcim customer:', error);
+        console.error('[Billing Portal] Error details:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          stack: error.stack,
+        });
         return res.status(500).json({ 
           error: 'Failed to create customer account',
           details: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -176,16 +214,36 @@ router.get('/portal', authenticate, async (req, res) => {
       }
     }
     
-    // Helcim may have a customer portal URL
-    // For now, return a message directing to Helcim dashboard
+    // Validate customerId before constructing URL
+    if (!customerId) {
+      console.error('[Billing Portal] ❌ Customer ID is still undefined!');
+      console.error('[Billing Portal] Business state:', {
+        helcim_customer_id: business.helcim_customer_id,
+      });
+      return res.status(500).json({ 
+        error: 'Failed to get customer ID. Please contact support.',
+        details: 'Customer account could not be created or retrieved'
+      });
+    }
+    
+    console.log('[Billing Portal] ✅ Customer ID found:', customerId);
+    
+    // Helcim customer portal URL
     const portalUrl = `https://secure.helcim.com/customer/${customerId}`;
+    console.log('[Billing Portal] Portal URL:', portalUrl);
+    console.log('[Billing Portal] ========== GET PORTAL COMPLETE ==========');
     
     res.json({ 
       url: portalUrl,
       message: 'Redirecting to Helcim customer portal...'
     });
   } catch (error) {
-    console.error('Get billing portal error:', error);
+    console.error('[Billing Portal] ========== GET PORTAL ERROR ==========');
+    console.error('[Billing Portal] Error:', error);
+    console.error('[Billing Portal] Error details:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to create billing portal session' });
   }
 });
