@@ -92,27 +92,27 @@ function BillingPage() {
   const handleManageBilling = async () => {
     setLoadingPortal(true);
     try {
-      console.log('[Billing] Getting customer ID for payment form...');
-      const res = await billingAPI.getPortal();
-      console.log('[Billing] Portal response:', res.data);
+      console.log('[Billing] Getting hosted payment page URL...');
+      const res = await billingAPI.getHostedPayment();
+      console.log('[Billing] Hosted payment response:', res.data);
       
-      // Get customer ID for Helcim.js
-      const customerId = res.data.customerId;
-      console.log('[Billing] Customer ID:', customerId);
-      
-      if (customerId) {
-        console.log('[Billing] Setting customer ID and showing payment form');
-        setHelcimCustomerId(customerId);
-        setShowPaymentForm(true);
-        console.log('[Billing] Payment form should now be visible');
+      if (res.data.url) {
+        // Redirect to Helcim's hosted payment page
+        window.location.href = res.data.url;
       } else {
-        console.error('[Billing] No customer ID in response:', res.data);
-        showError('Failed to get customer information. Please try again.');
+        showError(res.data.message || 'Payment page not configured. Please contact support.');
       }
     } catch (error) {
-      console.error('[Billing] Failed to get customer ID:', error);
-      console.error('[Billing] Error response:', error.response?.data);
-      showError('Failed to load payment form. Please try again or contact support.');
+      console.error('[Billing] Failed to get hosted payment page:', error);
+      const errorData = error.response?.data || {};
+      
+      if (error.response?.status === 503 && errorData.instructions) {
+        // Show instructions for setting up payment page
+        showError('Payment page needs to be configured. Please contact support at support@tavarios.com');
+        console.info('Setup instructions:', errorData.instructions);
+      } else {
+        showError(errorData.message || 'Failed to load payment page. Please try again or contact support.');
+      }
     } finally {
       setLoadingPortal(false);
     }
