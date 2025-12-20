@@ -15,22 +15,31 @@ const router = express.Router();
 // Admin login
 router.post("/login", async (req, res) => {
   try {
+    console.log('[Admin Login] ========== LOGIN ATTEMPT START ==========');
+    console.log('[Admin Login] Email:', req.body.email);
+    
     const { email, password } = req.body;
 
     if (!email || !password) {
+      console.log('[Admin Login] ❌ Missing email or password');
       return res.status(400).json({ error: "Email and password are required" });
     }
 
+    console.log('[Admin Login] Looking up admin user...');
     const admin = await AdminUser.findByEmail(email);
     if (!admin) {
+      console.log('[Admin Login] ❌ Admin not found for email:', email);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
+    console.log('[Admin Login] ✅ Admin found, verifying password...');
     const isValid = await AdminUser.verifyPassword(admin, password);
     if (!isValid) {
+      console.log('[Admin Login] ❌ Invalid password');
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
+    console.log('[Admin Login] ✅ Password valid, updating last login...');
     await AdminUser.updateLastLogin(admin.id);
 
     const token = generateToken({
@@ -38,6 +47,9 @@ router.post("/login", async (req, res) => {
       email: admin.email,
       role: admin.role,
     });
+
+    console.log('[Admin Login] ✅ Login successful, token generated');
+    console.log('[Admin Login] ========== LOGIN ATTEMPT COMPLETE ==========');
 
     res.json({
       token,
@@ -50,7 +62,9 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("[Admin Login] ========== LOGIN ERROR ==========");
     console.error("Admin login error:", error);
+    console.error("Error stack:", error.stack);
     res.status(500).json({ error: "Failed to login" });
   }
 });

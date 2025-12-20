@@ -126,6 +126,7 @@ import phoneNumbersRoutes from "./routes/phone-numbers.js";
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/signup", authLimiter);
+app.use("/api/admin/login", authLimiter); // Use auth limiter for admin login
 app.use("/api/admin", adminLimiter);
 app.use("/api/vapi/webhook", webhookLimiter);
 
