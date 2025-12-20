@@ -76,8 +76,34 @@ async function testHelcimConnection() {
             testApi.defaults.headers.common[authMethod.header] = HELCIM_API_TOKEN;
           }
           
-          // Try a simple endpoint
-          const response = await testApi.get('/customers', { params: { limit: 1 } });
+          // Try different endpoints to find what works
+          let response;
+          const endpointsToTry = [
+            '/customers',
+            '/customer',
+            '/api/customers',
+            '/v2/customers',
+            '/',
+            '/health',
+            '/status',
+          ];
+          
+          let endpointWorked = false;
+          for (const endpoint of endpointsToTry) {
+            try {
+              response = await testApi.get(endpoint, { params: { limit: 1 } });
+              console.log(`   ✅ Endpoint ${endpoint} worked!`);
+              endpointWorked = true;
+              break;
+            } catch (epError) {
+              // Try next endpoint
+              continue;
+            }
+          }
+          
+          if (!endpointWorked) {
+            throw new Error('No endpoint worked');
+          }
           console.log(`   ✅ SUCCESS! Using: ${baseUrl} with ${authMethod.name}`);
           console.log(`   📧 API is responding correctly`);
           console.log(`   📊 Response status: ${response.status}`);
