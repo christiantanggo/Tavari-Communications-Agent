@@ -5,19 +5,59 @@ import { useState, useEffect, useRef } from 'react';
 export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [scriptLoading, setScriptLoading] = useState(true);
   const helcimJsLoaded = useRef(false);
 
   useEffect(() => {
+    // Check if Helcim.js is already loaded
+    if (typeof window !== 'undefined' && window.HelcimPay) {
+      helcimJsLoaded.current = true;
+      setScriptLoading(false);
+      return;
+    }
+
+    // Check if script is already being loaded
+    const existingScript = document.querySelector('script[src*="helcim.js"]');
+    if (existingScript) {
+      // Wait for existing script to load
+      existingScript.addEventListener('load', () => {
+        helcimJsLoaded.current = true;
+        setScriptLoading(false);
+      });
+      existingScript.addEventListener('error', () => {
+        setError('Failed to load Helcim.js. Please refresh the page.');
+        setScriptLoading(false);
+      });
+      return;
+    }
+
     // Load Helcim.js script
-    if (!helcimJsLoaded.current && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !helcimJsLoaded.current) {
       const script = document.createElement('script');
       script.src = 'https://secure.helcim.com/js/version/2.1.0/helcim.js';
       script.async = true;
       script.onload = () => {
-        helcimJsLoaded.current = true;
+        // Wait a bit for HelcimPay to be available
+        const checkHelcim = setInterval(() => {
+          if (window.HelcimPay) {
+            helcimJsLoaded.current = true;
+            setScriptLoading(false);
+            clearInterval(checkHelcim);
+          }
+        }, 100);
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          if (!helcimJsLoaded.current) {
+            clearInterval(checkHelcim);
+            setError('Helcim.js loaded but HelcimPay object is not available. Please refresh the page.');
+            setScriptLoading(false);
+          }
+        }, 5000);
       };
       script.onerror = () => {
         setError('Failed to load Helcim.js. Please refresh the page.');
+        setScriptLoading(false);
       };
       document.body.appendChild(script);
     }
@@ -30,6 +70,10 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
 
     try {
       // Check if Helcim.js is loaded
+      if (scriptLoading) {
+        throw new Error('Helcim.js is still loading. Please wait a moment and try again.');
+      }
+      
       if (typeof window === 'undefined' || !window.HelcimPay) {
         throw new Error('Helcim.js is not loaded. Please refresh the page.');
       }
@@ -95,6 +139,12 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
         <h2 className="text-xl font-bold mb-4 text-gray-900">Add Payment Method</h2>
+        
+        {scriptLoading && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded mb-4">
+            Loading payment form...
+          </div>
+        )}
         
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
@@ -190,10 +240,10 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || scriptLoading}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
             >
-              {loading ? 'Processing...' : 'Add Payment Method'}
+              {loading ? 'Processing...' : scriptLoading ? 'Loading...' : 'Add Payment Method'}
             </button>
           </div>
         </form>
