@@ -228,14 +228,33 @@ router.get('/portal', authenticate, async (req, res) => {
     
     console.log('[Billing Portal] ✅ Customer ID found:', customerId);
     
-    // Helcim customer portal URL
-    const portalUrl = `https://secure.helcim.com/customer/${customerId}`;
-    console.log('[Billing Portal] Portal URL:', portalUrl);
+    // IMPORTANT: Helcim does NOT provide a customer-facing portal URL like Stripe
+    // The URL https://secure.helcim.com/customer/{customerId} does NOT exist
+    // This is why we're getting 522 errors (connection timeout)
+    // 
+    // To add payment methods with Helcim, you must use:
+    // 1. Helcim.js - Frontend JavaScript SDK (recommended)
+    // 2. Helcim API - Server-side API calls
+    // 3. Helcim Dashboard - Merchant-side only (not customer-facing)
+    //
+    // See: https://www.helcim.com/helcim-js/ for integration guide
+    
+    console.log('[Billing Portal] ⚠️ Helcim customer portal URL does not exist');
+    console.log('[Billing Portal] Customer ID:', customerId);
     console.log('[Billing Portal] ========== GET PORTAL COMPLETE ==========');
     
-    res.json({ 
-      url: portalUrl,
-      message: 'Redirecting to Helcim customer portal...'
+    res.status(501).json({ 
+      error: 'Payment method management requires Helcim.js integration',
+      message: 'Helcim does not provide a customer-facing portal URL. Payment methods must be added using Helcim.js on the frontend.',
+      customerId: customerId,
+      solution: 'Implement Helcim.js integration to collect payment methods. See: https://www.helcim.com/helcim-js/',
+      // TODO: Implement Helcim.js integration
+      // This requires:
+      // 1. Get Helcim.js token from Helcim Dashboard
+      // 2. Add Helcim.js script to frontend
+      // 3. Create payment method collection form
+      // 4. Use Helcim.js to tokenize payment method
+      // 5. Send token to backend to save to customer
     });
   } catch (error) {
     console.error('[Billing Portal] ========== GET PORTAL ERROR ==========');
