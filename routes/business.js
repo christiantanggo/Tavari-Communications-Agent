@@ -172,19 +172,46 @@ router.put("/settings", authenticate, async (req, res) => {
 });
 
 // Search for available phone numbers
+// Search phone numbers (used by TelnyxPhoneNumberSelector)
 router.get("/phone-numbers/search", authenticate, async (req, res) => {
   try {
-    const { countryCode = 'US', phoneType = 'local', limit = 20, areaCode } = req.query;
+    const { 
+      countryCode = 'US', 
+      phoneType = 'local', 
+      limit = 20, 
+      areaCode,
+      locality,
+      administrativeArea,
+      phoneNumber 
+    } = req.query;
+    
     const { searchAvailablePhoneNumbers } = await import("../services/vapi.js");
+    
+    // If searching by specific phone number, we need to handle that differently
+    // For now, use area code if phoneNumber looks like an area code
+    let searchAreaCode = areaCode;
+    if (phoneNumber && /^\d{3}$/.test(phoneNumber.replace(/[\s\-\(\)\+]/g, ''))) {
+      searchAreaCode = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+    }
     
     const numbers = await searchAvailablePhoneNumbers(
       countryCode,
       phoneType,
       parseInt(limit),
-      areaCode || null
+      searchAreaCode || null
     );
     
-    res.json({ numbers });
+    // If searching by specific phone number, filter results client-side
+    let filteredNumbers = numbers;
+    if (phoneNumber && phoneNumber.length > 3) {
+      const cleanSearch = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+      filteredNumbers = numbers.filter(num => {
+        const cleanNum = (num.phone_number || num.number || '').replace(/[\s\-\(\)\+]/g, '');
+        return cleanNum.includes(cleanSearch);
+      });
+    }
+    
+    res.json({ numbers: filteredNumbers });
   } catch (error) {
     console.error("Search phone numbers error:", error);
     res.status(500).json({ error: error.message || "Failed to search phone numbers" });

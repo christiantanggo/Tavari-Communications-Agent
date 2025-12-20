@@ -146,6 +146,58 @@ app.use("/api/calls", callsRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/phone-numbers", phoneNumbersRoutes);
 
+// Legacy Telnyx phone numbers endpoint (for backwards compatibility)
+// This proxies to the business phone-numbers/search endpoint
+app.get("/api/telnyx-phone-numbers/search", async (req, res, next) => {
+  // Forward to business route
+  req.url = "/api/business/phone-numbers/search";
+  next();
+}, async (req, res, next) => {
+  // Need to authenticate first
+  const { authenticate } = await import("./middleware/auth.js");
+  authenticate(req, res, next);
+}, async (req, res) => {
+  try {
+    const { 
+      countryCode = 'US', 
+      phoneType = 'local', 
+      limit = 20, 
+      areaCode,
+      locality,
+      administrativeArea,
+      phoneNumber 
+    } = req.query;
+    
+    const { searchAvailablePhoneNumbers } = await import("./services/vapi.js");
+    
+    let searchAreaCode = areaCode;
+    if (phoneNumber && /^\d{3}$/.test(phoneNumber.replace(/[\s\-\(\)\+]/g, ''))) {
+      searchAreaCode = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+    }
+    
+    const numbers = await searchAvailablePhoneNumbers(
+      countryCode,
+      phoneType,
+      parseInt(limit),
+      searchAreaCode || null
+    );
+    
+    let filteredNumbers = numbers;
+    if (phoneNumber && phoneNumber.length > 3) {
+      const cleanSearch = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+      filteredNumbers = numbers.filter(num => {
+        const cleanNum = (num.phone_number || num.number || '').replace(/[\s\-\(\)\+]/g, '');
+        return cleanNum.includes(cleanSearch);
+      });
+    }
+    
+    res.json({ numbers: filteredNumbers });
+  } catch (error) {
+    console.error("Telnyx phone numbers search error:", error);
+    res.status(500).json({ error: error.message || "Failed to search phone numbers" });
+  }
+});
+
 // Error handler
 import { errorHandler } from "./middleware/errorHandler.js";
 app.use(errorHandler);
