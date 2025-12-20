@@ -105,7 +105,7 @@ function AdminLoginPage() {
       </div>
       
       {/* Deployment date indicator */}
-      <div className="absolute bottom-4 left-4 text-xs text-gray-400">
+      <div className="fixed bottom-4 left-4 text-xs text-gray-500 z-50 bg-white bg-opacity-80 px-2 py-1 rounded">
         Deployed December 19 2025 v1
       </div>
     </div>
