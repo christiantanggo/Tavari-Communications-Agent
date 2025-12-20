@@ -118,18 +118,6 @@ function BillingPage() {
     }
   };
 
-  const handlePaymentSuccess = async (result) => {
-    setShowPaymentForm(false);
-    setHelcimCustomerId(null);
-    success('Payment method added successfully!');
-    // Reload billing data
-    await loadData();
-  };
-
-  const handlePaymentCancel = () => {
-    setShowPaymentForm(false);
-    setHelcimCustomerId(null);
-  };
 
   const formatCardNumber = (last4) => {
     return `•••• •••• •••• ${last4}`;
