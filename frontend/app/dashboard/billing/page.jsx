@@ -274,21 +274,13 @@ function BillingPage() {
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <p className="text-sm text-gray-600 mb-2">No payment method on file</p>
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
-                    <p className="text-sm text-yellow-800">
-                      Payment method management is currently being set up. Please contact support at{' '}
-                      <a href="mailto:support@tavarios.com" className="underline">support@tavarios.com</a>
-                      {' '}to add a payment method.
-                    </p>
-                  </div>
+                  <p className="text-sm text-gray-600 mb-4">No payment method on file</p>
                   <button
                     onClick={handleManageBilling}
-                    disabled={true}
-                    className="w-full px-4 py-2 text-sm bg-gray-400 text-white rounded-md cursor-not-allowed opacity-50"
-                    title="Payment method management coming soon"
+                    disabled={loadingPortal}
+                    className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Add Payment Method (Coming Soon)
+                    {loadingPortal ? 'Loading...' : 'Add Payment Method'}
                   </button>
                 </div>
               )}
