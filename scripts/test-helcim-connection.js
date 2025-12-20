@@ -39,45 +39,94 @@ async function testHelcimConnection() {
     console.log(`   ✅ API Token found`);
     console.log(`   📊 Token preview: ${HELCIM_API_TOKEN.substring(0, 10)}...`);
 
-    // Test API call - try connection test endpoint first, then customers
+    // Test API call - try different authentication methods and endpoints
     let connectionSuccessful = false;
+    let lastError = null;
     
-    // Try 1: Connection test endpoint (if available)
-    try {
-      const testResponse = await helcimApi.get('/connection-test');
-      console.log(`   ✅ Connection test successful`);
-      console.log(`   📧 API is responding correctly`);
-      connectionSuccessful = true;
-    } catch (testError) {
-      // Connection test endpoint might not exist, try customers endpoint
-      try {
-        const response = await helcimApi.get('/customers', { params: { limit: 1 } });
-        console.log(`   ✅ API connection successful`);
-        console.log(`   📧 API is responding correctly`);
-        connectionSuccessful = true;
-      } catch (error) {
-        // Show detailed error information
-        console.log(`   ❌ API call failed`);
-        console.log(`   📊 Status: ${error.response?.status || 'No response'}`);
-        console.log(`   📊 Error: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
-        
-        if (error.response?.status === 401) {
-          console.log(`\n   🔍 Troubleshooting 401 Unauthorized:`);
-          console.log(`   1. Verify token is correct in Helcim dashboard`);
-          console.log(`   2. Check token has "admin" permission for Transaction Processing`);
-          console.log(`   3. Check General permission is set (not "No Access")`);
-          console.log(`   4. Ensure token is active (not revoked)`);
-          console.log(`   5. Try regenerating the token in Helcim dashboard`);
-          console.log(`   6. Verify token format - should start with letters/numbers`);
-          console.log(`\n   📋 Current token preview: ${HELCIM_API_TOKEN.substring(0, 15)}...`);
-          console.log(`   📋 Token length: ${HELCIM_API_TOKEN.length} characters`);
-          throw new Error('Invalid API token - check your HELCIM_API_TOKEN and permissions');
-        } else if (error.response?.status === 404) {
-          console.log(`   ⚠️  API endpoint may differ - check Helcim API documentation`);
-          console.log(`   💡 Try checking: https://devdocs.helcim.com for correct endpoints`);
-        } else {
-          console.log(`   💡 Check Helcim API documentation for correct endpoint structure`);
+    // Try different authentication header formats
+    const authMethods = [
+      { name: 'api-token header', header: 'api-token' },
+      { name: 'Authorization Bearer', header: 'Authorization', value: `Bearer ${HELCIM_API_TOKEN}` },
+      { name: 'X-API-Token header', header: 'X-API-Token' },
+    ];
+    
+    // Try different base URLs
+    const baseUrls = [
+      'https://api.helcim.com/v2',
+      'https://api.helcim.com',
+      'https://secure.helcim.com/api/v2',
+    ];
+    
+    for (const baseUrl of baseUrls) {
+      for (const authMethod of authMethods) {
+        try {
+          console.log(`   🔄 Trying: ${baseUrl} with ${authMethod.name}...`);
+          
+          const testApi = axios.create({
+            baseURL: baseUrl,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          // Add auth header
+          if (authMethod.value) {
+            testApi.defaults.headers.common[authMethod.header] = authMethod.value;
+          } else {
+            testApi.defaults.headers.common[authMethod.header] = HELCIM_API_TOKEN;
+          }
+          
+          // Try a simple endpoint
+          const response = await testApi.get('/customers', { params: { limit: 1 } });
+          console.log(`   ✅ SUCCESS! Using: ${baseUrl} with ${authMethod.name}`);
+          console.log(`   📧 API is responding correctly`);
+          console.log(`   📊 Response status: ${response.status}`);
+          console.log(`   💡 Update HELCIM_API_BASE_URL to: ${baseUrl}`);
+          console.log(`   💡 Use authentication method: ${authMethod.name}`);
+          connectionSuccessful = true;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (error.response?.status === 401) {
+            // Continue trying other methods
+            continue;
+          } else if (error.response?.status === 404) {
+            // Wrong endpoint, but auth might be working
+            console.log(`   ⚠️  404 with ${authMethod.name} - endpoint might be wrong but auth format may be correct`);
+            continue;
+          } else {
+            // Network or other error
+            continue;
+          }
         }
+      }
+      if (connectionSuccessful) break;
+    }
+    
+    if (!connectionSuccessful) {
+      // Show detailed error information
+      console.log(`   ❌ All authentication methods failed`);
+      console.log(`   📊 Last error status: ${lastError?.response?.status || 'No response'}`);
+      console.log(`   📊 Last error: ${lastError?.response?.data?.message || lastError?.response?.data?.error || lastError?.message}`);
+      
+      if (lastError?.response?.status === 401) {
+        console.log(`\n   🔍 Troubleshooting 401 Unauthorized:`);
+        console.log(`   1. Verify token is correct in Helcim dashboard`);
+        console.log(`   2. Check token has "admin" permission for Transaction Processing`);
+        console.log(`   3. Check General permission is set to "Read and Write" (not "No Access")`);
+        console.log(`   4. Ensure token is active (not revoked)`);
+        console.log(`   5. Try regenerating the token in Helcim dashboard`);
+        console.log(`   6. Verify token format - should start with letters/numbers`);
+        console.log(`   7. Check if token is for test vs live environment`);
+        console.log(`\n   📋 Current token preview: ${HELCIM_API_TOKEN.substring(0, 15)}...`);
+        console.log(`   📋 Token length: ${HELCIM_API_TOKEN.length} characters`);
+        console.log(`   📋 Current base URL: ${HELCIM_API_BASE_URL}`);
+        throw new Error('Invalid API token - check your HELCIM_API_TOKEN and permissions');
+      } else if (lastError?.response?.status === 404) {
+        console.log(`   ⚠️  API endpoint may differ - check Helcim API documentation`);
+        console.log(`   💡 Try checking: https://devdocs.helcim.com for correct endpoints`);
+      } else {
+        console.log(`   💡 Check Helcim API documentation for correct endpoint structure`);
       }
     }
   } catch (error) {
