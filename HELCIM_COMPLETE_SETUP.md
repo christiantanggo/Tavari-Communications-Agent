@@ -27,12 +27,11 @@ Follow these steps **in order** to set up Helcim payment processing from scratch
 3. Click **"New API Access"** button
 4. Fill in the form:
    - **Name**: `Tavari Communications App`
-   - **Description**: `Payment processing for Tavari AI phone service` (optional)
-   - **Permissions**: Select:
-     - ✅ **Transaction Processing** → Select **"admin"** (or the most comprehensive option)
-     - ✅ **General** → Select **"Read Access"**
-     - ✅ **Customers** → Select **"Full Access"** (or highest available)
-     - ✅ **Subscriptions** → Select **"Full Access"** (or highest available)
+   - **Access Restrictions**: Set:
+     - ✅ **General** → Select **"Read and Write"**
+     - ✅ **Settings** → Select **"Read and Write"**
+     - ✅ **Transaction Processing** → Select **"Admin"**
+   - **Note**: There are no separate "Customers" or "Subscriptions" options - these are covered by "Transaction Processing: Admin"
 5. Click **"Create"** or **"Save"**
 6. **IMPORTANT:** Copy the API Token immediately
    - It will look like: `aHzNEwIt81...` or similar
