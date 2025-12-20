@@ -315,21 +315,28 @@ router.get('/hosted-payment', authenticate, async (req, res) => {
       business.phone
     );
 
-    // Check for configured payment page URL
-    const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
+    // Use Customer Registration page URL (specifically for adding payment methods)
+    // Falls back to HELCIM_PAYMENT_PAGE_URL for backward compatibility
+    const customerRegistrationUrl = process.env.HELCIM_CUSTOMER_REGISTRATION_URL || process.env.HELCIM_PAYMENT_PAGE_URL;
     
-    if (!paymentPageUrl) {
+    if (!customerRegistrationUrl) {
       return res.status(503).json({
         error: 'Payment page not configured',
-        message: 'Please create a payment page in your Helcim dashboard',
+        message: 'Please create a Customer Registration payment page in your Helcim dashboard',
         customerId: customer.customerId,
-        instructions: 'Go to Helcim Dashboard → All Tools → Payment Pages → Create New Page'
+        instructions: [
+          '1. Go to Helcim Dashboard → All Tools → Payment Pages',
+          '2. Click "New Payment Page"',
+          '3. Choose "Customer Registration" page type',
+          '4. Configure and save',
+          '5. Copy the URL and add to Railway as HELCIM_CUSTOMER_REGISTRATION_URL'
+        ]
       });
     }
 
-    // Return payment page URL (no amount for adding payment methods)
+    // Return Customer Registration page URL (for adding payment methods)
     res.json({
-      url: paymentPageUrl,
+      url: customerRegistrationUrl,
       customerId: customer.customerId,
     });
   } catch (error) {
