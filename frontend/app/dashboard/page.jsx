@@ -47,9 +47,16 @@ function DashboardContent() {
       try {
         userRes = await authAPI.getMe();
         console.log('[Dashboard] ✅ User data loaded:', userRes.data);
+        console.log('[Dashboard] User structure:', {
+          hasUser: !!userRes.data?.user,
+          hasBusiness: !!userRes.data?.business,
+          userKeys: Object.keys(userRes.data?.user || {}),
+          businessKeys: Object.keys(userRes.data?.business || {}),
+        });
         setUser(userRes.data);
       } catch (error) {
         console.error('[Dashboard] ❌ Failed to load user data:', error);
+        console.error('[Dashboard] Error details:', error.response?.data || error.message);
         // User data is critical, so we should still show loading or error
         throw error;
       }
