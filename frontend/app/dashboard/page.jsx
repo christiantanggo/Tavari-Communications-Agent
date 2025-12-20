@@ -245,6 +245,16 @@ function DashboardContent() {
   const business = user?.business;
   const showChecklist = shouldShowChecklist();
 
+  console.log('[Dashboard Render] State:', {
+    hasUser: !!user,
+    hasBusiness: !!business,
+    usage,
+    callsCount: calls.length,
+    messagesCount: messages.length,
+    loading,
+    showChecklist,
+  });
+
   return (
     <div className="min-h-screen bg-gray-50">
       <DashboardHeader />
@@ -253,7 +263,7 @@ function DashboardContent() {
         <div className="mb-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome back!</h2>
           <p className="text-gray-600">
-            {business?.name || 'Business'} • {user?.user?.email}
+            {business?.name || user?.business?.name || 'Business'} • {user?.user?.email || user?.email || 'Loading...'}
           </p>
         </div>
 
@@ -360,10 +370,10 @@ function DashboardContent() {
           </div>
         )}
 
-        {/* Action Cards */}
+        {/* Action Cards - Always show this section */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
           {/* Your AI Agent Number */}
-          {business?.vapi_phone_number && (
+          {business?.vapi_phone_number ? (
             <button
               onClick={() => router.push('/dashboard/settings')}
               className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
@@ -554,15 +564,24 @@ function DashboardContent() {
   );
 }
 
+function DashboardWithSearchParams() {
+  return <DashboardContent />;
+}
+
 export default function DashboardPage() {
   return (
     <AuthGuard>
       <Suspense fallback={
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-lg">Loading...</div>
+        <div className="min-h-screen bg-gray-50">
+          <DashboardHeader />
+          <main className="container mx-auto px-4 py-8 max-w-7xl">
+            <div className="flex items-center justify-center min-h-[60vh]">
+              <div className="text-lg">Loading dashboard...</div>
+            </div>
+          </main>
         </div>
       }>
-        <DashboardContent />
+        <DashboardWithSearchParams />
       </Suspense>
     </AuthGuard>
   );
