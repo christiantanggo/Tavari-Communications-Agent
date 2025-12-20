@@ -126,9 +126,17 @@ import phoneNumbersRoutes from "./routes/phone-numbers.js";
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/signup", authLimiter);
-app.use("/api/admin/login", authLimiter); // Use auth limiter for admin login
-app.use("/api/admin", adminLimiter);
+app.use("/api/admin/login", authLimiter); // Use auth limiter for admin login (must be before general admin limiter)
 app.use("/api/vapi/webhook", webhookLimiter);
+
+// Apply admin limiter to all admin routes EXCEPT login (which is handled above)
+app.use("/api/admin", (req, res, next) => {
+  // Skip rate limiting for login route
+  if (req.path === '/login') {
+    return next();
+  }
+  adminLimiter(req, res, next);
+});
 
 // Mount all routes
 app.use("/api/auth", authRoutes);
