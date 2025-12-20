@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
@@ -107,6 +107,11 @@ function DashboardContent() {
       console.error('[Dashboard] ========== LOADING DATA ERROR ==========');
       console.error('[Dashboard] Critical error loading dashboard data:', error);
       // Set defaults to prevent UI from breaking
+      // Even if user data fails, try to show something
+      if (!user) {
+        // If user data failed, we can't show the dashboard
+        console.error('[Dashboard] Cannot show dashboard without user data');
+      }
       setUsage({ minutes_used: 0, minutes_total: 0, minutes_remaining: 0, usage_percent: 0 });
       setCalls([]);
       setMessages([]);
@@ -218,6 +223,21 @@ function DashboardContent() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-lg">Loading...</div>
+      </div>
+    );
+  }
+
+  // If no user data, show error
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <DashboardHeader />
+        <main className="container mx-auto px-4 py-8 max-w-7xl">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+            <p className="font-semibold">Failed to load dashboard data</p>
+            <p className="text-sm mt-1">Please refresh the page or contact support if the problem persists.</p>
+          </div>
+        </main>
       </div>
     );
   }
@@ -537,7 +557,13 @@ function DashboardContent() {
 export default function DashboardPage() {
   return (
     <AuthGuard>
-      <DashboardContent />
+      <Suspense fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-lg">Loading...</div>
+        </div>
+      }>
+        <DashboardContent />
+      </Suspense>
     </AuthGuard>
   );
 }
