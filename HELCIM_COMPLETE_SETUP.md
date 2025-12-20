@@ -45,12 +45,24 @@ Follow these steps **in order** to set up Helcim payment processing from scratch
 ## ✅ Step 3: Get Helcim.js Token (Frontend)
 
 1. In Helcim Dashboard, go to **"All Tools"** → **"Integrations"** → **"Helcim.js Configurations"**
-2. Click **"New Helcim.js Configuration"** or **"Add Configuration"**
+2. Click **"New Configuration"** or **"Add Configuration"**
 3. Fill in the form:
-   - **Name**: `Tavari Frontend`
-   - **Description**: `Frontend payment form tokenization` (optional)
-4. Click **"Create"** or **"Save"**
-5. **IMPORTANT:** Copy the Helcim.js Token
+
+   **General Settings:**
+   - **Active**: Turn **ON** (toggle switch)
+   - **Name**: `Tavari Frontend` (fill in the Name field)
+
+   **Transaction Settings:**
+   - **Test Mode**: Turn **ON** (for testing, switch to OFF when going live)
+   - **Currency**: `CAD ($) - Canadian Dollar` (or your currency)
+   - **Transaction Type**: Select **"Card Verify (Tokenize Only)"** ⚠️ IMPORTANT: This is for tokenizing cards, not processing payments
+   - **Terminal**: Select your terminal (e.g., "Tavari OS - 749 (CAD)")
+
+   **Security Settings:**
+   - Leave defaults for now (can configure later)
+
+4. Click **"Save"**
+5. **IMPORTANT:** After saving, copy the **Helcim.js Token** that appears
    - This is different from the API token
    - This is your `NEXT_PUBLIC_HELCIM_JS_TOKEN`
 
