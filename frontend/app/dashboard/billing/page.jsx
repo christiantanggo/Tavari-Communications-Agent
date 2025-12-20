@@ -107,14 +107,26 @@ function BillingPage() {
       }
     } catch (error) {
       console.error('Failed to open billing portal:', error);
-      const errorMessage = error.response?.data?.message || 
-                          error.response?.data?.error || 
-                          'Failed to open billing portal. Please try again.';
+      
+      // Extract error message from response
+      const errorData = error.response?.data || {};
+      let errorMessage = errorData.message || errorData.error;
+      
+      // If it's the 501 error about Helcim.js, show a more user-friendly message
+      if (error.response?.status === 501 && errorData.error?.includes('Helcim.js')) {
+        errorMessage = 'Payment method management is currently being set up. Please contact support at support@tavarios.com to add a payment method, or check back soon.';
+      } else if (!errorMessage) {
+        errorMessage = 'Failed to open billing portal. Please try again or contact support.';
+      }
+      
       showError(errorMessage);
       
-      // Log additional details if available
-      if (error.response?.data?.solution) {
-        console.info('Solution:', error.response.data.solution);
+      // Log additional details for debugging
+      if (errorData.solution) {
+        console.info('Solution:', errorData.solution);
+      }
+      if (errorData.customerId) {
+        console.info('Customer ID:', errorData.customerId);
       }
     } finally {
       setLoadingPortal(false);
