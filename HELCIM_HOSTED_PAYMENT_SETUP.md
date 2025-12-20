@@ -11,15 +11,35 @@ This guide explains how to set up Helcim's hosted payment pages to avoid PCI com
 
 ## 📋 Step-by-Step Setup
 
-### Step 1: Create Payment Page in Helcim Dashboard
+### Step 1: Create Payment Pages in Helcim Dashboard
+
+You'll need **TWO** payment pages:
+
+#### Page 1: Customer Registration (For Adding Payment Methods) ⭐
 
 1. Log into [Helcim Dashboard](https://secure.helcim.com)
 2. Navigate to **"All Tools"** → **"Payment Pages"**
 3. Click **"New Payment Page"**
-4. Choose page type:
-   - **"Fixed Amount"** ⭐ **RECOMMENDED FOR SECURITY** - Amount is locked and cannot be changed by customers. However, this requires creating a new page for each price point OR using Helcim API to create checkout links dynamically.
-   - **"Editable Amount"** ⚠️ **NOT RECOMMENDED** - Allows customers to change the amount, which is a security risk. Only use if Helcim API checkout link creation is not available.
-   - **"Product Purchase"** - Requires creating products in Helcim for each package (not recommended for dynamic pricing)
+4. Choose **"Customer Registration"** page type
+   - This is specifically designed to collect and store payment information
+   - Perfect for adding payment methods without processing a payment
+5. Configure the page:
+   - **Name**: `Tavari Customer Registration` (or any name)
+   - **Payment Methods**: Enable Credit Card
+   - **Transaction Type**: `Verify` (for $0 verification) or `Purchase` with $0 amount
+   - **Customer Information**: Collect email, name, phone
+6. Click **"Save"**
+7. **Copy the payment page URL** - This is your `HELCIM_CUSTOMER_REGISTRATION_URL`
+   - Example: `https://off-the-wall-kids.myhelcim.com/hosted/?token=27537a0d314a8231028b07`
+
+#### Page 2: Editable Amount (For Package Purchases - Fallback Only) ⚠️
+
+**Note:** This is only used as a fallback if API payment processing fails. The preferred method is using saved payment methods via API.
+
+1. Create another payment page
+2. Choose **"Editable Amount"** page type
+3. Configure for package purchases
+4. **Copy the payment page URL** - This is your `HELCIM_PAYMENT_PAGE_URL`
 5. Configure the page:
    - **Name**: `Tavari Payment Page` (or any name)
    - **Payment Methods**: Enable Credit Card
