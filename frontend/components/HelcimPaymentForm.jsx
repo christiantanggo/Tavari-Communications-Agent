@@ -213,7 +213,18 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
         
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
+            <p className="font-medium">{error}</p>
+            {(error.includes('522') || error.includes('CDN') || error.includes('unavailable')) && (
+              <div className="mt-2 text-sm">
+                <p className="mb-1">This appears to be a temporary issue with Helcim's servers.</p>
+                <p className="mb-1"><strong>What you can do:</strong></p>
+                <ul className="list-disc list-inside ml-2 space-y-1">
+                  <li>Wait a few minutes and try again</li>
+                  <li>Contact Helcim support at support@helcim.com</li>
+                  <li>Check Helcim's status page for service updates</li>
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
