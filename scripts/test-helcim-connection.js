@@ -66,6 +66,7 @@ async function testHelcimConnection() {
             baseURL: baseUrl,
             headers: {
               'Content-Type': 'application/json',
+              'Accept': 'application/json',
             },
           });
           
@@ -76,28 +77,40 @@ async function testHelcimConnection() {
             testApi.defaults.headers.common[authMethod.header] = HELCIM_API_TOKEN;
           }
           
-          // Try different endpoints to find what works
+          // Try Helcim's Connection Test endpoint first (recommended by Helcim docs)
           let response;
+          let endpointWorked = false;
+          
           const endpointsToTry = [
+            '/connection-test',  // Helcim's recommended test endpoint
             '/customers',
             '/customer',
             '/api/customers',
             '/v2/customers',
             '/',
-            '/health',
-            '/status',
           ];
           
-          let endpointWorked = false;
           for (const endpoint of endpointsToTry) {
             try {
-              response = await testApi.get(endpoint, { params: { limit: 1 } });
+              if (endpoint === '/connection-test') {
+                // Connection test doesn't need params
+                response = await testApi.get(endpoint);
+              } else {
+                response = await testApi.get(endpoint, { params: { limit: 1 } });
+              }
               console.log(`   ✅ Endpoint ${endpoint} worked!`);
+              console.log(`   📊 Response:`, JSON.stringify(response.data, null, 2).substring(0, 200));
               endpointWorked = true;
               break;
             } catch (epError) {
-              // Try next endpoint
-              continue;
+              // Log the error for debugging
+              if (epError.response?.status === 404) {
+                // 404 is expected for wrong endpoints, continue trying
+                continue;
+              } else {
+                // Other errors might indicate auth issues
+                throw epError;
+              }
             }
           }
           
