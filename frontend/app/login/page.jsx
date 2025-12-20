@@ -28,7 +28,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 relative">
       <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
         <h1 className="text-3xl font-bold text-center mb-6 text-gray-900">Login</h1>
         
@@ -82,6 +82,11 @@ export default function LoginPage() {
             Sign up
           </Link>
         </p>
+      </div>
+      
+      {/* Deployment date indicator */}
+      <div className="absolute bottom-4 left-4 text-xs text-gray-400">
+        Deployed December 19 2025 v1
       </div>
     </div>
   );

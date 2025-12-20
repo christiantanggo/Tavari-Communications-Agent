@@ -44,7 +44,7 @@ function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 relative">
       <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-blue-600 mb-2">Tavari Admin</h1>
@@ -102,6 +102,11 @@ function AdminLoginPage() {
             Back to main site
           </Link>
         </div>
+      </div>
+      
+      {/* Deployment date indicator */}
+      <div className="absolute bottom-4 left-4 text-xs text-gray-400">
+        Deployed December 19 2025 v1
       </div>
     </div>
   );
