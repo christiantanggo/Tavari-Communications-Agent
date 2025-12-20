@@ -17,6 +17,8 @@ function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadingPortal, setLoadingPortal] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [helcimCustomerId, setHelcimCustomerId] = useState(null);
   const [settings, setSettings] = useState({
     minutes_exhausted_behavior: 'disable_ai',
     overage_billing_enabled: false,
