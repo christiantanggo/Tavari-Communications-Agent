@@ -537,7 +537,14 @@ router.get('/status', authenticate, async (req, res) => {
     
     if (business.helcim_customer_id) {
       try {
-        paymentMethod = await HelcimService.getCustomerPaymentMethods(business.helcim_customer_id);
+        const paymentMethods = await HelcimService.getCustomerPaymentMethods(business.helcim_customer_id);
+        // Get the first payment method (most recent/default)
+        if (paymentMethods && Array.isArray(paymentMethods) && paymentMethods.length > 0) {
+          paymentMethod = paymentMethods[0];
+        } else if (paymentMethods && !Array.isArray(paymentMethods)) {
+          // If it's not an array, use it directly
+          paymentMethod = paymentMethods;
+        }
       } catch (error) {
         console.error('Error retrieving payment methods:', error);
       }
@@ -570,8 +577,19 @@ router.get('/status', authenticate, async (req, res) => {
         nextPaymentDate: subscription.nextPaymentDate,
       } : null,
       payment_method: paymentMethod ? {
-        type: paymentMethod.type || 'card',
-        last4: paymentMethod.last4,
+        type: paymentMethod.type || paymentMethod.paymentType || 'card',
+        last4: paymentMethod.last4 || paymentMethod.cardNumber?.slice(-4) || paymentMethod.card?.last4,
+        card: paymentMethod.card ? {
+          brand: paymentMethod.card.brand || paymentMethod.card.type,
+          last4: paymentMethod.card.last4 || paymentMethod.card.number?.slice(-4),
+          exp_month: paymentMethod.card.exp_month || paymentMethod.card.expMonth,
+          exp_year: paymentMethod.card.exp_year || paymentMethod.card.expYear,
+        } : paymentMethod.last4 ? {
+          brand: paymentMethod.brand || 'card',
+          last4: paymentMethod.last4 || paymentMethod.cardNumber?.slice(-4),
+          exp_month: paymentMethod.exp_month || paymentMethod.expMonth,
+          exp_year: paymentMethod.exp_year || paymentMethod.expYear,
+        } : null,
       } : null,
       customer_id: business.helcim_customer_id,
     });

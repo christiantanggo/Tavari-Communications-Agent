@@ -125,8 +125,10 @@ function BillingPage() {
       console.log('[Billing] Hosted payment response:', res.data);
       
       if (res.data.url) {
-        // Redirect to Helcim's hosted payment page
-        window.location.href = res.data.url;
+        // Open Helcim's hosted payment page in a new tab
+        // This allows users to stay in the app and come back easily
+        window.open(res.data.url, '_blank', 'noopener,noreferrer');
+        success('Payment page opened in a new tab. Complete the form there, then refresh this page.');
       } else {
         showError(res.data.message || 'Payment page not configured. Please contact support.');
       }
