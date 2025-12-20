@@ -88,6 +88,7 @@ export const billingAPI = {
   getPackages: () => api.get('/billing/packages'),
   createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
   getHostedPayment: () => api.get('/billing/hosted-payment'),
+  getHostedPaymentCheckout: (packageId) => api.get(`/billing/hosted-payment/checkout?packageId=${packageId}`),
 };
 
 // Invoices API

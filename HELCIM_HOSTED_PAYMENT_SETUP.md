@@ -17,12 +17,15 @@ This guide explains how to set up Helcim's hosted payment pages to avoid PCI com
 2. Navigate to **"All Tools"** → **"Payment Pages"**
 3. Click **"New Payment Page"**
 4. Choose page type:
-   - **"Editable Amount"** - For adding payment methods (customers can enter $0 or any amount)
-   - **"Product Purchase"** - For specific package purchases
+   - **"Editable Amount"** ⭐ **RECOMMENDED** - Allows dynamic pricing via URL parameters. Customers can pay any amount, and you can pre-fill the amount based on the selected package.
+   - **"Product Purchase"** - Requires creating products in Helcim for each package (not recommended for dynamic pricing)
 5. Configure the page:
    - **Name**: `Tavari Payment Page` (or any name)
    - **Payment Methods**: Enable Credit Card
-   - **Transaction Type**: `Purchase` or `Verify` (for $0 verification)
+   - **Transaction Type**: `Purchase` (for package purchases)
+   - **Amount Settings**: 
+     - Set **Default Amount** to `0.00` (will be overridden by URL parameter)
+     - Leave **Minimum** and **Maximum** empty or set reasonable limits
    - **Customer Information**: Collect email, name, phone (optional)
 6. **Customize Theme** (optional):
    - Upload your logo
@@ -61,13 +64,27 @@ HELCIM_PAYMENT_PAGE_URL=https://secure.helcim.com/pay/your-page-id
 
 ## 🔄 How It Works
 
+### For Adding Payment Methods:
 1. User clicks "Add Payment Method" in your app
 2. Your backend calls `/api/billing/hosted-payment`
 3. Backend returns the Helcim payment page URL
 4. User is redirected to Helcim's secure payment page
 5. User enters payment details on Helcim's page (you never see card data)
 6. Helcim processes the payment
-7. User is redirected back to your app (configure return URL in Helcim dashboard)
+7. User is redirected back to your app
+
+### For Package Purchases (Dynamic Pricing):
+1. User selects a package and clicks "Upgrade" or "Select"
+2. Your backend calls `/api/billing/checkout` with the `packageId`
+3. Backend:
+   - Fetches package details (including price)
+   - Appends `?amount=XX.XX&package_id=...` to the payment page URL
+   - Returns the URL with the dynamic amount
+4. User is redirected to Helcim's payment page with the amount pre-filled
+5. User completes payment on Helcim's secure page
+6. User is redirected back to your app
+
+**No need to create products in Helcim!** The amount is passed dynamically via URL parameter.
 
 ## ⚙️ Configuration Options
 

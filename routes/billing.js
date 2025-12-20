@@ -66,13 +66,41 @@ router.post('/checkout', authenticate, async (req, res) => {
     const cancelUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing`;
     
     // Check if Helcim is configured
-    if (!process.env.HELCIM_API_TOKEN) {
+    if (!process.env.HELCIM_API_TOKEN && !process.env.HELCIM_PAYMENT_PAGE_URL) {
       return res.status(503).json({ 
         error: 'Payment processing is not configured. Please contact support.',
-        details: 'Helcim API token is not set'
+        details: 'Helcim API token or payment page URL is not set'
       });
     }
     
+    // Use hosted payment page if configured (preferred - no PCI compliance, dynamic pricing)
+    if (process.env.HELCIM_PAYMENT_PAGE_URL) {
+      const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
+      const amount = pkg.monthly_price.toFixed(2);
+      const separator = paymentPageUrl.includes('?') ? '&' : '?';
+      
+      // Create payment URL with dynamic amount
+      // Try common parameter names: amount, total, amt, price
+      const paymentUrl = `${paymentPageUrl}${separator}amount=${amount}&package_id=${packageId}`;
+      
+      // Update business with package (payment will be processed on Helcim's page)
+      await Business.update(req.businessId, {
+        package_id: packageId,
+        plan_tier: pkg.name.toLowerCase(),
+        usage_limit_minutes: pkg.minutes_included,
+      });
+      
+      res.json({ 
+        url: paymentUrl,
+        amount: amount,
+        packageId: packageId,
+        packageName: pkg.name,
+        message: 'Redirecting to secure payment page...'
+      });
+      return;
+    }
+    
+    // Fallback to API-based subscription (if payment page not configured)
     try {
       // Create subscription with Helcim
       const subscription = await HelcimService.createSubscription(
@@ -264,7 +292,7 @@ router.get('/hosted-payment', authenticate, async (req, res) => {
       });
     }
 
-    // Return payment page URL
+    // Return payment page URL (no amount for adding payment methods)
     res.json({
       url: paymentPageUrl,
       customerId: customer.customerId,
@@ -273,6 +301,69 @@ router.get('/hosted-payment', authenticate, async (req, res) => {
     console.error('Get hosted payment page error:', error);
     res.status(500).json({ 
       error: 'Failed to get payment page',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get hosted payment page for checkout with dynamic amount
+router.get('/hosted-payment/checkout', authenticate, async (req, res) => {
+  try {
+    const { packageId } = req.query;
+    
+    if (!packageId) {
+      return res.status(400).json({ error: 'Package ID is required' });
+    }
+
+    // Get package details
+    const pkg = await PricingPackage.findById(packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: 'Package not found' });
+    }
+
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    // Get or create customer
+    const customer = await HelcimService.getOrCreateCustomer(
+      req.businessId,
+      business.email,
+      business.name,
+      business.phone
+    );
+
+    // Check for configured payment page URL
+    const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
+    
+    if (!paymentPageUrl) {
+      return res.status(503).json({
+        error: 'Payment page not configured',
+        message: 'Please create a payment page in your Helcim dashboard',
+        instructions: 'Go to Helcim Dashboard → All Tools → Payment Pages → Create New Page (choose "Editable Amount")'
+      });
+    }
+
+    // Append amount as URL parameter (Helcim may support various parameter names)
+    // Try common parameter names: amount, total, amt, price
+    const amount = pkg.monthly_price.toFixed(2);
+    const separator = paymentPageUrl.includes('?') ? '&' : '?';
+    
+    // Try multiple parameter formats that Helcim might support
+    const paymentUrlWithAmount = `${paymentPageUrl}${separator}amount=${amount}&package_id=${packageId}&customer_id=${customer.customerId}`;
+
+    res.json({
+      url: paymentUrlWithAmount,
+      amount: amount,
+      packageId: packageId,
+      packageName: pkg.name,
+      customerId: customer.customerId,
+    });
+  } catch (error) {
+    console.error('Get hosted payment checkout error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get payment checkout URL',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
