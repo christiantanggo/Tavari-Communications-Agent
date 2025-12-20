@@ -135,8 +135,21 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
     }
   };
 
+  // Debug logging
+  useEffect(() => {
+    console.log('[HelcimPaymentForm] Component mounted');
+    console.log('[HelcimPaymentForm] customerId:', customerId);
+    console.log('[HelcimPaymentForm] scriptLoading:', scriptLoading);
+    console.log('[HelcimPaymentForm] error:', error);
+  }, [customerId, scriptLoading, error]);
+
+  if (!customerId) {
+    console.warn('[HelcimPaymentForm] No customerId provided');
+    return null;
+  }
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ zIndex: 9999 }}>
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
         <h2 className="text-xl font-bold mb-4 text-gray-900">Add Payment Method</h2>
         

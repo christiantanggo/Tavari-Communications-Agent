@@ -94,17 +94,26 @@ function BillingPage() {
   const handleManageBilling = async () => {
     setLoadingPortal(true);
     try {
+      console.log('[Billing] Getting customer ID for payment form...');
       const res = await billingAPI.getPortal();
+      console.log('[Billing] Portal response:', res.data);
       
       // Get customer ID for Helcim.js
-      if (res.data.customerId) {
-        setHelcimCustomerId(res.data.customerId);
+      const customerId = res.data.customerId;
+      console.log('[Billing] Customer ID:', customerId);
+      
+      if (customerId) {
+        console.log('[Billing] Setting customer ID and showing payment form');
+        setHelcimCustomerId(customerId);
         setShowPaymentForm(true);
+        console.log('[Billing] Payment form should now be visible');
       } else {
+        console.error('[Billing] No customer ID in response:', res.data);
         showError('Failed to get customer information. Please try again.');
       }
     } catch (error) {
-      console.error('Failed to get customer ID:', error);
+      console.error('[Billing] Failed to get customer ID:', error);
+      console.error('[Billing] Error response:', error.response?.data);
       showError('Failed to load payment form. Please try again or contact support.');
     } finally {
       setLoadingPortal(false);
