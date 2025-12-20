@@ -408,7 +408,7 @@ function DashboardContent() {
           {/* Minutes Used */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
             <h3 className="text-sm font-semibold text-gray-600 mb-2">Minutes Used</h3>
-            <p className="text-3xl font-bold text-gray-900 mb-2">
+            <p className="text-3xl font-bold text-gray-900 mb-2" style={{ color: '#000000' }}>
               {Math.round(usage?.minutes_used || 0)} / {usage?.minutes_total || 0}
             </p>
             <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
@@ -431,14 +431,14 @@ function DashboardContent() {
           {/* AI Handled Calls */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500">
             <h3 className="text-sm font-semibold text-gray-600 mb-2">AI Handled Calls</h3>
-            <p className="text-3xl font-bold text-gray-900 mb-1">{aiHandledCalls}</p>
+            <p className="text-3xl font-bold text-gray-900 mb-1" style={{ color: '#000000' }}>{aiHandledCalls}</p>
             <p className="text-xs text-gray-500">Calls handled completely by AI</p>
           </div>
 
           {/* Recent Calls */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
             <h3 className="text-sm font-semibold text-gray-600 mb-2">Recent Calls</h3>
-            <p className="text-3xl font-bold text-gray-900 mb-1">{calls.length}</p>
+            <p className="text-3xl font-bold text-gray-900 mb-1" style={{ color: '#000000' }}>{calls.length}</p>
             <p className="text-xs text-gray-500">Total calls received</p>
           </div>
         </div>
