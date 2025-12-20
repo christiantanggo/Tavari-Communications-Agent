@@ -130,57 +130,50 @@ router.post('/checkout', authenticate, async (req, res) => {
   }
 });
 
-// Add payment method directly (server-side, no Helcim.js needed)
-router.post('/payment-method-direct', authenticate, async (req, res) => {
+// Get hosted payment page URL for adding payment method
+router.get('/hosted-payment-page', authenticate, async (req, res) => {
   try {
-    const { customerId, cardNumber, cardExpiry, cardCVV, cardHolderName } = req.body;
-
-    if (!customerId || !cardNumber || !cardExpiry || !cardCVV || !cardHolderName) {
-      return res.status(400).json({ error: 'All payment fields are required' });
-    }
-
     const business = await Business.findById(req.businessId);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
 
-    // Verify customer ID matches business
-    if (business.helcim_customer_id !== customerId) {
-      return res.status(403).json({ error: 'Customer ID does not match your account' });
-    }
+    // Get or create customer
+    const customer = await HelcimService.getOrCreateCustomer(
+      req.businessId,
+      business.email,
+      business.name,
+      business.phone
+    );
 
-    // Process payment directly via Helcim API (verify card with $0 or tokenize)
-    try {
-      // Parse expiry
-      const [month, year] = cardExpiry.split('/');
-      const expiryYear = '20' + year; // Convert YY to YYYY
-
-      // Create a $0 verification transaction
-      const verifyResponse = await HelcimService.verifyPaymentMethod(
-        customerId,
-        cardNumber,
-        month,
-        expiryYear,
-        cardCVV,
-        cardHolderName
-      );
-
-      res.json({
-        success: true,
-        paymentMethod: verifyResponse,
-        message: 'Payment method verified and saved successfully'
-      });
-    } catch (error) {
-      console.error('Payment method verification error:', error);
-      res.status(500).json({ 
-        error: 'Failed to verify payment method',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    // Check if we have a configured payment page URL
+    // If not, return instructions to create one in Helcim dashboard
+    const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
+    
+    if (!paymentPageUrl) {
+      return res.status(503).json({
+        error: 'Payment page not configured',
+        message: 'Please create a payment page in your Helcim dashboard and set HELCIM_PAYMENT_PAGE_URL environment variable',
+        instructions: [
+          '1. Go to Helcim Dashboard → All Tools → Payment Pages',
+          '2. Create a new payment page (type: "Editable Amount" or "Product Purchase")',
+          '3. Copy the payment page URL',
+          '4. Add it to your backend environment variables as HELCIM_PAYMENT_PAGE_URL'
+        ]
       });
     }
+
+    // Return the payment page URL with customer info as query params (if supported)
+    // Or just return the base URL and let Helcim handle customer matching
+    res.json({
+      url: paymentPageUrl,
+      customerId: customer.customerId,
+      message: 'Redirect to this URL to add payment method'
+    });
   } catch (error) {
-    console.error('Add payment method error:', error);
+    console.error('Get hosted payment page error:', error);
     res.status(500).json({ 
-      error: 'Failed to add payment method',
+      error: 'Failed to get payment page URL',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -240,6 +233,48 @@ router.post('/webhook', express.json(), async (req, res) => {
   } catch (error) {
     console.error('Webhook handler error:', error);
     res.status(500).json({ error: 'Webhook handler failed' });
+  }
+});
+
+// Get hosted payment page for adding payment method (alternative to Helcim.js)
+router.get('/hosted-payment', authenticate, async (req, res) => {
+  try {
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    // Get or create customer
+    const customer = await HelcimService.getOrCreateCustomer(
+      req.businessId,
+      business.email,
+      business.name,
+      business.phone
+    );
+
+    // Check for configured payment page URL
+    const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
+    
+    if (!paymentPageUrl) {
+      return res.status(503).json({
+        error: 'Payment page not configured',
+        message: 'Please create a payment page in your Helcim dashboard',
+        customerId: customer.customerId,
+        instructions: 'Go to Helcim Dashboard → All Tools → Payment Pages → Create New Page'
+      });
+    }
+
+    // Return payment page URL
+    res.json({
+      url: paymentPageUrl,
+      customerId: customer.customerId,
+    });
+  } catch (error) {
+    console.error('Get hosted payment page error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get payment page',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

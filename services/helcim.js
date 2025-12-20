@@ -413,30 +413,5 @@ export class HelcimService {
     }
   }
 
-  // Verify payment method with $0 transaction (server-side, no Helcim.js needed)
-  static async verifyPaymentMethod(customerId, cardNumber, cardExpiryMonth, cardExpiryYear, cardCVV, cardHolderName) {
-    try {
-      console.log('[HelcimService] Verifying payment method for customer:', customerId);
-      
-      // Use Helcim API to process a $0 verification transaction
-      // This validates the card and saves it to the customer
-      const response = await helcimApi.post('/payment/cc', {
-        customerId: customerId,
-        amount: '0.00', // $0 verification
-        currency: 'CAD',
-        paymentType: 'verify', // Verify card without charging
-        cardNumber: cardNumber,
-        cardExpiry: `${cardExpiryMonth}${cardExpiryYear.substring(2)}`, // MMYY format
-        cardCVV: cardCVV,
-        cardHolderName: cardHolderName,
-      });
-      
-      console.log('[HelcimService] ✅ Payment method verified:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('[HelcimService] ❌ Error verifying payment method:', error.response?.data || error.message);
-      throw error;
-    }
-  }
 }
 

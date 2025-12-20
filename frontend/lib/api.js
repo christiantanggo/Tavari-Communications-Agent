@@ -87,7 +87,7 @@ export const billingAPI = {
   getPortal: () => api.get('/billing/portal'),
   getPackages: () => api.get('/billing/packages'),
   createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
-  addPaymentMethodDirect: (data) => api.post('/billing/payment-method-direct', data),
+  getHostedPayment: () => api.get('/billing/hosted-payment'),
 };
 
 // Invoices API

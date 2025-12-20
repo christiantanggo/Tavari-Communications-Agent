@@ -5,8 +5,7 @@ import AuthGuard from '@/components/AuthGuard';
 import { authAPI, billingAPI, usageAPI, invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
-import HelcimPaymentForm from '@/components/HelcimPaymentForm';
-import ServerSidePaymentForm from '@/components/ServerSidePaymentForm';
+// Removed Helcim.js form - using hosted payment pages instead
 
 function BillingPage() {
   const { success, error: showError } = useToast();
@@ -18,8 +17,6 @@ function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadingPortal, setLoadingPortal] = useState(false);
-  const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [helcimCustomerId, setHelcimCustomerId] = useState(null);
   const [settings, setSettings] = useState({
     minutes_exhausted_behavior: 'disable_ai',
     overage_billing_enabled: false,
@@ -539,14 +536,7 @@ function BillingPage() {
         </main>
       </div>
       
-      {/* Payment Form Modal - Using server-side form (no Helcim.js needed) */}
-      {showPaymentForm && helcimCustomerId && (
-        <ServerSidePaymentForm
-          customerId={helcimCustomerId}
-          onSuccess={handlePaymentSuccess}
-          onCancel={handlePaymentCancel}
-        />
-      )}
+      {/* Payment form removed - using Helcim hosted payment pages instead */}
     </AuthGuard>
   );
 }
