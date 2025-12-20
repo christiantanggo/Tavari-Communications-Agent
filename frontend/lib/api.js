@@ -182,3 +182,12 @@ export const adminSupportAPI = {
   addResponse: (id, responseText) => adminApi.post(`/support/tickets/${id}/response`, { response_text: responseText }),
 };
 
+// Admin Packages API
+export const adminPackagesAPI = {
+  getPackages: (includeInactive = false) => adminApi.get('/packages', { params: { includeInactive } }),
+  getPackage: (id) => adminApi.get(`/packages/${id}`),
+  createPackage: (data) => adminApi.post('/packages', data),
+  updatePackage: (id, data) => adminApi.put(`/packages/${id}`, data),
+  deletePackage: (id) => adminApi.delete(`/packages/${id}`),
+};
+

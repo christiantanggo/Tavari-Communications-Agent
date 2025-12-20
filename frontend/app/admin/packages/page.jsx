@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import { adminPackagesAPI } from '@/lib/api';
 
 function PackagesPage() {
   const router = useRouter();
@@ -34,27 +35,11 @@ function PackagesPage() {
     loadPackages();
   }, []);
 
-  const getAdminToken = () => {
-    const cookies = document.cookie.split(';');
-    const tokenCookie = cookies.find(c => c.trim().startsWith('admin_token='));
-    return tokenCookie ? tokenCookie.split('=')[1] : null;
-  };
-
   const loadPackages = async () => {
     try {
       setLoading(true);
-      const token = getAdminToken();
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
-      const response = await fetch(`${API_URL}/api/admin/packages?includeInactive=true`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) throw new Error('Failed to load packages');
-      const data = await response.json();
-      setPackages(data.packages || []);
+      const response = await adminPackagesAPI.getPackages(true);
+      setPackages(response.data.packages || []);
     } catch (error) {
       console.error('Failed to load packages:', error);
       showError('Failed to load packages');
@@ -66,35 +51,22 @@ function PackagesPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const token = getAdminToken();
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
-      const url = editingPackage
-        ? `${API_URL}/api/admin/packages/${editingPackage.id}`
-        : `${API_URL}/api/admin/packages`;
-      const method = editingPackage ? 'PUT' : 'POST';
+      const packageData = {
+        ...formData,
+        monthly_price: parseFloat(formData.monthly_price),
+        minutes_included: parseInt(formData.minutes_included) || 0,
+        overage_price_per_minute: parseFloat(formData.overage_price_per_minute) || 0,
+        sms_included: parseInt(formData.sms_included) || 0,
+        sms_overage_price: parseFloat(formData.sms_overage_price) || 0,
+        emails_included: parseInt(formData.emails_included) || 0,
+        emails_overage_price: parseFloat(formData.emails_overage_price) || 0,
+        max_faqs: parseInt(formData.max_faqs) || 5,
+      };
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...formData,
-          monthly_price: parseFloat(formData.monthly_price),
-          minutes_included: parseInt(formData.minutes_included) || 0,
-          overage_price_per_minute: parseFloat(formData.overage_price_per_minute) || 0,
-          sms_included: parseInt(formData.sms_included) || 0,
-          sms_overage_price: parseFloat(formData.sms_overage_price) || 0,
-          emails_included: parseInt(formData.emails_included) || 0,
-          emails_overage_price: parseFloat(formData.emails_overage_price) || 0,
-          max_faqs: parseInt(formData.max_faqs) || 5,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to save package');
+      if (editingPackage) {
+        await adminPackagesAPI.updatePackage(editingPackage.id, packageData);
+      } else {
+        await adminPackagesAPI.createPackage(packageData);
       }
 
       success(editingPackage ? 'Package updated successfully!' : 'Package created successfully!');
@@ -104,7 +76,7 @@ function PackagesPage() {
       await loadPackages();
     } catch (error) {
       console.error('Failed to save package:', error);
-      showError(error.message || 'Failed to save package');
+      showError(error.response?.data?.error || error.message || 'Failed to save package');
     }
   };
 
@@ -135,26 +107,12 @@ function PackagesPage() {
     }
 
     try {
-      const token = getAdminToken();
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
-      const response = await fetch(`${API_URL}/api/admin/packages/${pkg.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to delete package');
-      }
-
+      await adminPackagesAPI.deletePackage(pkg.id);
       success('Package deleted successfully!');
       await loadPackages();
     } catch (error) {
       console.error('Failed to delete package:', error);
-      showError(error.message || 'Failed to delete package');
+      showError(error.response?.data?.error || error.message || 'Failed to delete package');
     }
   };
 
