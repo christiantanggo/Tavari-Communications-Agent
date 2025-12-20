@@ -268,7 +268,17 @@ function BillingPage() {
 
             {/* Payment Method */}
             <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-bold mb-4 text-gray-900">Payment Method</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Payment Method</h2>
+                <button
+                  onClick={loadData}
+                  disabled={loading}
+                  className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50"
+                  title="Refresh payment method status"
+                >
+                  🔄 Refresh
+                </button>
+              </div>
               {billing?.payment_method ? (
                 <div className="space-y-4">
                   {billing.payment_method.card ? (
