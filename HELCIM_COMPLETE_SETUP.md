@@ -62,9 +62,10 @@ Follow these steps **in order** to set up Helcim payment processing from scratch
    - Leave defaults for now (can configure later)
 
 4. Click **"Save"**
-5. **IMPORTANT:** After saving, copy the **Helcim.js Token** that appears
-   - This is different from the API token
-   - This is your `NEXT_PUBLIC_HELCIM_JS_TOKEN`
+5. **IMPORTANT:** After saving, you'll see two values:
+   - **Token** → Copy THIS one (this is what you need for the frontend)
+   - **Secret Key** → Ignore this (only needed for server-side verification)
+   - The **Token** is your `NEXT_PUBLIC_HELCIM_JS_TOKEN`
 
 **Status Check:** Do you have a Helcim.js token copied?
 
