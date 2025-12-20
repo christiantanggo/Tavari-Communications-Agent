@@ -33,9 +33,12 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
 
     // Load Helcim.js script
     if (typeof window !== 'undefined' && !helcimJsLoaded.current) {
+      console.log('[HelcimPaymentForm] Loading Helcim.js script...');
       const script = document.createElement('script');
-      script.src = 'https://secure.helcim.com/js/version/2.1.0/helcim.js';
+      // Try the correct Helcim.js URL - it might be different
+      script.src = 'https://secure.helcim.com/helcim.js';
       script.async = true;
+      console.log('[HelcimPaymentForm] Script src:', script.src);
       script.onload = () => {
         // Wait a bit for HelcimPay to be available
         const checkHelcim = setInterval(() => {
