@@ -6,14 +6,18 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const HELCIM_API_TOKEN = process.env.HELCIM_API_TOKEN;
+const HELCIM_API_TOKEN = process.env.HELCIM_API_TOKEN?.trim();
 
 if (!HELCIM_API_TOKEN) {
   console.error('❌ HELCIM_API_TOKEN not found in environment variables');
+  console.error('💡 Make sure it\'s set in your .env file or environment');
   process.exit(1);
 }
 
-console.log('🔍 Testing Helcim API Token...\n');
+console.log('🔍 Testing Helcim API Token...');
+console.log(`📊 Token length: ${HELCIM_API_TOKEN.length} characters`);
+console.log(`📊 Token preview: ${HELCIM_API_TOKEN.substring(0, 10)}...${HELCIM_API_TOKEN.substring(HELCIM_API_TOKEN.length - 5)}`);
+console.log(`📊 Token has whitespace: ${HELCIM_API_TOKEN !== HELCIM_API_TOKEN.trim() ? 'YES (will be trimmed)' : 'NO'}\n`);
 
 // Test with the most common configuration
 const testApi = axios.create({
