@@ -85,7 +85,7 @@ export default function LoginPage() {
       </div>
       
       {/* Deployment date indicator */}
-      <div className="fixed bottom-4 left-4 text-xs text-gray-500 z-50 bg-white bg-opacity-80 px-2 py-1 rounded">
+      <div style={{ position: 'fixed', bottom: '16px', left: '16px', fontSize: '12px', color: '#6b7280', backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: '4px 8px', borderRadius: '4px', zIndex: 9999 }}>
         Deployed December 19 2025 v1
       </div>
     </div>
