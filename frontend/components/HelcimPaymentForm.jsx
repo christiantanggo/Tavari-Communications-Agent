@@ -35,10 +35,11 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
     if (typeof window !== 'undefined' && !helcimJsLoaded.current) {
       console.log('[HelcimPaymentForm] Loading Helcim.js script...');
       const script = document.createElement('script');
-      // Helcim.js CDN URL - based on Helcim documentation
-      script.src = 'https://secure.helcim.com/js/version/2.1.0/helcim.js';
+      // Try different Helcim.js URLs - the versioned one might not work
+      // Try without version first, then fallback to versioned
+      script.src = 'https://secure.helcim.com/helcim.js';
       script.async = true;
-      script.crossOrigin = 'anonymous';
+      // Don't set crossOrigin - let browser handle it naturally
       console.log('[HelcimPaymentForm] Script src:', script.src);
       
       script.onload = () => {
@@ -67,14 +68,48 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
       };
       
       script.onerror = (error) => {
-        console.error('[HelcimPaymentForm] ❌ Script load error:', error);
-        console.error('[HelcimPaymentForm] Script src was:', script.src);
-        setError('Failed to load Helcim.js script. Please check your internet connection and try again.');
-        setScriptLoading(false);
+        console.error('[HelcimPaymentForm] ❌ Script load error for:', script.src);
+        console.error('[HelcimPaymentForm] Error details:', error);
+        
+        // Try fallback URL with version
+        if (script.src.includes('/helcim.js') && !script.src.includes('/version/')) {
+          console.log('[HelcimPaymentForm] Trying fallback URL with version...');
+          const fallbackScript = document.createElement('script');
+          fallbackScript.src = 'https://secure.helcim.com/js/version/2.1.0/helcim.js';
+          fallbackScript.async = true;
+          fallbackScript.onload = () => {
+            console.log('[HelcimPaymentForm] ✅ Fallback script loaded');
+            // Check for HelcimPay
+            let attempts = 0;
+            const checkHelcim = setInterval(() => {
+              attempts++;
+              if (window.HelcimPay) {
+                console.log('[HelcimPaymentForm] ✅ HelcimPay found via fallback!');
+                helcimJsLoaded.current = true;
+                setScriptLoading(false);
+                clearInterval(checkHelcim);
+              } else if (attempts >= 50) {
+                clearInterval(checkHelcim);
+                setError('Helcim.js loaded but HelcimPay object is not available. Please check that NEXT_PUBLIC_HELCIM_JS_TOKEN is set correctly in Vercel.');
+                setScriptLoading(false);
+              }
+            }, 100);
+          };
+          fallbackScript.onerror = () => {
+            console.error('[HelcimPaymentForm] ❌ Fallback script also failed');
+            setError('Failed to load Helcim.js. The script URL may be incorrect or Helcim\'s CDN may be unavailable. Please contact support.');
+            setScriptLoading(false);
+          };
+          document.head.appendChild(fallbackScript);
+        } else {
+          setError('Failed to load Helcim.js script. Please check your internet connection and try again.');
+          setScriptLoading(false);
+        }
       };
       
-      document.body.appendChild(script);
-      console.log('[HelcimPaymentForm] Script tag added to document');
+      // Try loading in head first (better for external scripts)
+      document.head.appendChild(script);
+      console.log('[HelcimPaymentForm] Script tag added to document head');
     }
   }, []);
 
