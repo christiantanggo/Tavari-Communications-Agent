@@ -366,6 +366,34 @@ export class HelcimService {
     }
   }
   
+  // Process payment with saved payment method (fixed amount - user cannot change)
+  static async processPaymentWithSavedMethod(customerId, paymentMethodId, amount, description) {
+    try {
+      console.log('[HelcimService] Processing payment with saved method:', {
+        customerId,
+        paymentMethodId,
+        amount,
+      });
+      
+      // Process payment using saved payment method
+      const response = await helcimApi.post('/payment/cc', {
+        customerId: customerId,
+        paymentMethodId: paymentMethodId, // Use saved payment method
+        amount: amount.toFixed(2),
+        currency: 'CAD',
+        paymentType: 'purchase',
+        invoiceNumber: `Tavari-${customerId}-${Date.now()}`,
+        description: description,
+      });
+      
+      console.log('[HelcimService] ✅ Payment processed successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('[HelcimService] ❌ Error processing payment:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
   // Get customer payment methods
   static async getCustomerPaymentMethods(customerId) {
     try {
