@@ -12,11 +12,12 @@ function DashboardContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [user, setUser] = useState(null);
-  const [usage, setUsage] = useState(null);
+  const [usage, setUsage] = useState({ minutes_used: 0, minutes_total: 0, minutes_remaining: 0, usage_percent: 0 });
   const [calls, setCalls] = useState([]);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showSmsBanner, setShowSmsBanner] = useState(false);
+  const [apiError, setApiError] = useState(null);
   const prevPathnameRef = useRef(pathname);
   const isLoadingRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
@@ -63,10 +64,12 @@ function DashboardContent() {
       // Handle usage
       if (usageRes.status === 'fulfilled') {
         console.log('[Dashboard] ✅ Usage data loaded:', usageRes.value.data);
-        setUsage(usageRes.value.data);
+        setUsage(usageRes.value.data || { minutes_used: 0, minutes_total: 0, minutes_remaining: 0, usage_percent: 0 });
+        setApiError(null);
       } else {
         console.error('[Dashboard] ❌ Failed to load usage:', usageRes.reason);
         setUsage({ minutes_used: 0, minutes_total: 0, minutes_remaining: 0, usage_percent: 0 });
+        setApiError('Some data failed to load. Please refresh the page.');
       }
 
       // Handle calls
@@ -265,6 +268,11 @@ function DashboardContent() {
           <p className="text-gray-600">
             {business?.name || user?.business?.name || 'Business'} • {user?.user?.email || user?.email || 'Loading...'}
           </p>
+          {apiError && (
+            <div className="mt-4 bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
+              <p className="text-sm">{apiError}</p>
+            </div>
+          )}
         </div>
 
         {/* SMS Activation Banner */}
@@ -373,7 +381,7 @@ function DashboardContent() {
         {/* Action Cards - Always show this section */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
           {/* Your AI Agent Number */}
-          {business?.vapi_phone_number ? (
+          {business?.vapi_phone_number && (
             <button
               onClick={() => router.push('/dashboard/settings')}
               className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
@@ -393,36 +401,24 @@ function DashboardContent() {
           {/* Minutes Used */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
             <h3 className="text-sm font-semibold text-gray-600 mb-2">Minutes Used</h3>
-            {usage ? (
-              <>
-                <p className="text-3xl font-bold text-gray-900 mb-2">
-                  {Math.round(usage.minutes_used || 0)} / {usage.minutes_total || 0}
-                </p>
-                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
-                  <div
-                    className={`h-2.5 rounded-full transition-all ${
-                      (usage.usage_percent || 0) >= 100
-                        ? 'bg-red-500'
-                        : (usage.usage_percent || 0) >= 80
-                        ? 'bg-yellow-500'
-                        : 'bg-blue-500'
-                    }`}
-                    style={{ width: `${Math.min(usage.usage_percent || 0, 100)}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-500">
-                  {usage.minutes_remaining || 0} minutes remaining
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-3xl font-bold text-gray-900 mb-2">0 / 0</p>
-                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
-                  <div className="h-2.5 rounded-full bg-gray-300" style={{ width: '0%' }} />
-                </div>
-                <p className="text-xs text-gray-500">Loading usage data...</p>
-              </>
-            )}
+            <p className="text-3xl font-bold text-gray-900 mb-2">
+              {Math.round(usage?.minutes_used || 0)} / {usage?.minutes_total || 0}
+            </p>
+            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+              <div
+                className={`h-2.5 rounded-full transition-all ${
+                  (usage?.usage_percent || 0) >= 100
+                    ? 'bg-red-500'
+                    : (usage?.usage_percent || 0) >= 80
+                    ? 'bg-yellow-500'
+                    : 'bg-blue-500'
+                }`}
+                style={{ width: `${Math.min(usage?.usage_percent || 0, 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-500">
+              {usage?.minutes_remaining || 0} minutes remaining
+            </p>
           </div>
 
           {/* AI Handled Calls */}
