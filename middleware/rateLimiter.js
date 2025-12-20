@@ -10,6 +10,9 @@ export const apiLimiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  validate: {
+    trustProxy: false, // Disable trust proxy validation warning
+  },
 });
 
 // Strict rate limiter for auth endpoints
@@ -20,6 +23,9 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  validate: {
+    trustProxy: false, // Disable trust proxy validation warning
+  },
 });
 
 // Admin rate limiter
@@ -29,6 +35,9 @@ export const adminLimiter = rateLimit({
   message: "Too many admin requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  validate: {
+    trustProxy: false, // Disable trust proxy validation warning
+  },
 });
 
 // Webhook rate limiter (more lenient)
@@ -39,7 +48,8 @@ export const webhookLimiter = rateLimit({
   message: "Too many webhook requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => false, // Don't skip any requests, but this prevents validation warnings
-  // Note: The trust proxy warning is just a warning, not an error - it doesn't break functionality
+  validate: {
+    trustProxy: false, // Disable trust proxy validation warning
+  },
 });
 
