@@ -372,18 +372,43 @@ export class HelcimService {
   static async addPaymentMethod(customerId, paymentToken) {
     try {
       console.log('[HelcimService] Adding payment method for customer:', customerId);
+      console.log('[HelcimService] Payment token (preview):', paymentToken?.substring(0, 20) + '...');
       
       // Helcim API endpoint to save payment method from token
-      // This uses the payment token from Helcim.js
-      const response = await helcimApi.post('/customers/payment-methods', {
-        customerId: customerId,
-        paymentToken: paymentToken,
-      });
+      // Try different endpoint structures based on Helcim API v2 documentation
+      // Option 1: /customers/{customerId}/payment-methods (most likely)
+      let response;
+      try {
+        response = await helcimApi.post(`/customers/${customerId}/payment-methods`, {
+          paymentToken: paymentToken,
+        });
+        console.log('[HelcimService] ✅ Payment method added via /customers/{id}/payment-methods');
+      } catch (error1) {
+        // Option 2: /customers/payment-methods with customerId in body
+        console.log('[HelcimService] Trying alternative endpoint structure...');
+        try {
+          response = await helcimApi.post('/customers/payment-methods', {
+            customerId: customerId,
+            paymentToken: paymentToken,
+          });
+          console.log('[HelcimService] ✅ Payment method added via /customers/payment-methods');
+        } catch (error2) {
+          // Option 3: /payment-methods endpoint
+          console.log('[HelcimService] Trying /payment-methods endpoint...');
+          response = await helcimApi.post('/payment-methods', {
+            customerId: customerId,
+            paymentToken: paymentToken,
+          });
+          console.log('[HelcimService] ✅ Payment method added via /payment-methods');
+        }
+      }
       
       console.log('[HelcimService] ✅ Payment method added:', response.data);
       return response.data;
     } catch (error) {
       console.error('[HelcimService] ❌ Error adding payment method:', error.response?.data || error.message);
+      console.error('[HelcimService] Error status:', error.response?.status);
+      console.error('[HelcimService] Error headers:', error.response?.headers);
       throw error;
     }
   }
