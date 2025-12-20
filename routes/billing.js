@@ -130,6 +130,62 @@ router.post('/checkout', authenticate, async (req, res) => {
   }
 });
 
+// Add payment method directly (server-side, no Helcim.js needed)
+router.post('/payment-method-direct', authenticate, async (req, res) => {
+  try {
+    const { customerId, cardNumber, cardExpiry, cardCVV, cardHolderName } = req.body;
+
+    if (!customerId || !cardNumber || !cardExpiry || !cardCVV || !cardHolderName) {
+      return res.status(400).json({ error: 'All payment fields are required' });
+    }
+
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    // Verify customer ID matches business
+    if (business.helcim_customer_id !== customerId) {
+      return res.status(403).json({ error: 'Customer ID does not match your account' });
+    }
+
+    // Process payment directly via Helcim API (verify card with $0 or tokenize)
+    try {
+      // Parse expiry
+      const [month, year] = cardExpiry.split('/');
+      const expiryYear = '20' + year; // Convert YY to YYYY
+
+      // Create a $0 verification transaction
+      const verifyResponse = await HelcimService.verifyPaymentMethod(
+        customerId,
+        cardNumber,
+        month,
+        expiryYear,
+        cardCVV,
+        cardHolderName
+      );
+
+      res.json({
+        success: true,
+        paymentMethod: verifyResponse,
+        message: 'Payment method verified and saved successfully'
+      });
+    } catch (error) {
+      console.error('Payment method verification error:', error);
+      res.status(500).json({ 
+        error: 'Failed to verify payment method',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  } catch (error) {
+    console.error('Add payment method error:', error);
+    res.status(500).json({ 
+      error: 'Failed to add payment method',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // Add payment method (using Helcim.js token)
 router.post('/payment-method', authenticate, async (req, res) => {
   try {

@@ -6,6 +6,7 @@ import { authAPI, billingAPI, usageAPI, invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
 import HelcimPaymentForm from '@/components/HelcimPaymentForm';
+import ServerSidePaymentForm from '@/components/ServerSidePaymentForm';
 
 function BillingPage() {
   const { success, error: showError } = useToast();
@@ -538,9 +539,9 @@ function BillingPage() {
         </main>
       </div>
       
-      {/* Payment Form Modal */}
+      {/* Payment Form Modal - Using server-side form (no Helcim.js needed) */}
       {showPaymentForm && helcimCustomerId && (
-        <HelcimPaymentForm
+        <ServerSidePaymentForm
           customerId={helcimCustomerId}
           onSuccess={handlePaymentSuccess}
           onCancel={handlePaymentCancel}
