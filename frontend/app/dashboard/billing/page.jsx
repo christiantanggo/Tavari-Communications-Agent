@@ -5,6 +5,7 @@ import AuthGuard from '@/components/AuthGuard';
 import { authAPI, billingAPI, usageAPI, invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import HelcimPaymentForm from '@/components/HelcimPaymentForm';
 
 function BillingPage() {
   const { success, error: showError } = useToast();
@@ -93,59 +94,32 @@ function BillingPage() {
     try {
       const res = await billingAPI.getPortal();
       
-      // Check if response has a URL (for future Helcim.js implementation)
-      if (res.data.url) {
-        window.location.href = res.data.url;
+      // Get customer ID for Helcim.js
+      if (res.data.customerId) {
+        setHelcimCustomerId(res.data.customerId);
+        setShowPaymentForm(true);
       } else {
-        // Helcim doesn't provide a customer portal URL
-        // Show user-friendly error message
-        showError(
-          res.data.message || 
-          'Payment method management is not yet available. Please contact support to add a payment method.'
-        );
-        console.error('Helcim portal error:', res.data);
+        showError('Failed to get customer information. Please try again.');
       }
     } catch (error) {
-      console.error('Failed to open billing portal:', error);
-      
-      // Extract error message from response
-      const errorData = error.response?.data || {};
-      let errorMessage = errorData.message || errorData.error;
-      
-      // If it's the 501 error (Not Implemented), show a user-friendly message
-      if (error.response?.status === 501) {
-        // Check if it's the Helcim.js integration error
-        const isHelcimError = errorData.error?.includes('Helcim.js') || 
-                             errorData.error?.includes('Helcim') ||
-                             errorData.message?.includes('Helcim');
-        
-        if (isHelcimError) {
-          errorMessage = 'Payment method management is currently being set up. Please contact support at support@tavarios.com to add a payment method, or check back soon.';
-        } else {
-          errorMessage = errorMessage || 'This feature is not yet available. Please contact support for assistance.';
-        }
-      } else if (!errorMessage) {
-        errorMessage = 'Failed to open billing portal. Please try again or contact support.';
-      }
-      
-      // Always show error to user
-      if (errorMessage) {
-        showError(errorMessage);
-      } else {
-        showError('An unexpected error occurred. Please try again or contact support.');
-      }
-      
-      // Log additional details for debugging
-      if (errorData.solution) {
-        console.info('Solution:', errorData.solution);
-      }
-      if (errorData.customerId) {
-        console.info('Customer ID:', errorData.customerId);
-      }
-      console.info('Full error response:', errorData);
+      console.error('Failed to get customer ID:', error);
+      showError('Failed to load payment form. Please try again or contact support.');
     } finally {
       setLoadingPortal(false);
     }
+  };
+
+  const handlePaymentSuccess = async (result) => {
+    setShowPaymentForm(false);
+    setHelcimCustomerId(null);
+    success('Payment method added successfully!');
+    // Reload billing data
+    await loadData();
+  };
+
+  const handlePaymentCancel = () => {
+    setShowPaymentForm(false);
+    setHelcimCustomerId(null);
   };
 
   const formatCardNumber = (last4) => {
@@ -300,13 +274,21 @@ function BillingPage() {
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <p className="text-sm text-gray-600 mb-4">No payment method on file</p>
+                  <p className="text-sm text-gray-600 mb-2">No payment method on file</p>
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
+                    <p className="text-sm text-yellow-800">
+                      Payment method management is currently being set up. Please contact support at{' '}
+                      <a href="mailto:support@tavarios.com" className="underline">support@tavarios.com</a>
+                      {' '}to add a payment method.
+                    </p>
+                  </div>
                   <button
                     onClick={handleManageBilling}
-                    disabled={loadingPortal}
-                    className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={true}
+                    className="w-full px-4 py-2 text-sm bg-gray-400 text-white rounded-md cursor-not-allowed opacity-50"
+                    title="Payment method management coming soon"
                   >
-                    {loadingPortal ? 'Loading...' : 'Add Payment Method'}
+                    Add Payment Method (Coming Soon)
                   </button>
                 </div>
               )}
@@ -552,6 +534,15 @@ function BillingPage() {
           </div>
         </main>
       </div>
+      
+      {/* Payment Form Modal */}
+      {showPaymentForm && helcimCustomerId && (
+        <HelcimPaymentForm
+          customerId={helcimCustomerId}
+          onSuccess={handlePaymentSuccess}
+          onCancel={handlePaymentCancel}
+        />
+      )}
     </AuthGuard>
   );
 }

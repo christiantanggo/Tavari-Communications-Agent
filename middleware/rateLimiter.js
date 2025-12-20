@@ -3,6 +3,18 @@
 
 import rateLimit from "express-rate-limit";
 
+// Custom key generator that works with trust proxy
+// Uses the first IP from X-Forwarded-For header if available, otherwise falls back to connection IP
+const keyGenerator = (req) => {
+  // If behind a proxy, use the first IP from X-Forwarded-For
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const ips = forwarded.split(',').map(ip => ip.trim());
+    return ips[0] || req.ip || req.connection.remoteAddress;
+  }
+  return req.ip || req.connection.remoteAddress || 'unknown';
+};
+
 // General API rate limiter
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -10,8 +22,10 @@ export const apiLimiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  validate: {
-    trustProxy: false, // Disable trust proxy validation warning
+  keyGenerator, // Use custom key generator
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/health' || req.path === '/ready';
   },
 });
 
@@ -23,9 +37,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  validate: {
-    trustProxy: false, // Disable trust proxy validation warning
-  },
+  keyGenerator, // Use custom key generator
 });
 
 // Admin rate limiter
@@ -35,21 +47,16 @@ export const adminLimiter = rateLimit({
   message: "Too many admin requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  validate: {
-    trustProxy: false, // Disable trust proxy validation warning
-  },
+  keyGenerator, // Use custom key generator
 });
 
 // Webhook rate limiter (more lenient)
-// Skip validation warnings for trust proxy (we're behind Railway's proxy)
 export const webhookLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 100, // Limit each IP to 100 webhook requests per minute
   message: "Too many webhook requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  validate: {
-    trustProxy: false, // Disable trust proxy validation warning
-  },
+  keyGenerator, // Use custom key generator
 });
 

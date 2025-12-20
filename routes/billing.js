@@ -130,6 +130,42 @@ router.post('/checkout', authenticate, async (req, res) => {
   }
 });
 
+// Add payment method (using Helcim.js token)
+router.post('/payment-method', authenticate, async (req, res) => {
+  try {
+    const { customerId, paymentToken } = req.body;
+    
+    if (!customerId || !paymentToken) {
+      return res.status(400).json({ error: 'Customer ID and payment token are required' });
+    }
+
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    // Verify customer ID matches business
+    if (business.helcim_customer_id !== customerId) {
+      return res.status(403).json({ error: 'Customer ID does not match your account' });
+    }
+
+    // Add payment method using Helcim service
+    const paymentMethod = await HelcimService.addPaymentMethod(customerId, paymentToken);
+    
+    res.json({
+      success: true,
+      paymentMethod: paymentMethod,
+      message: 'Payment method added successfully'
+    });
+  } catch (error) {
+    console.error('Add payment method error:', error);
+    res.status(500).json({ 
+      error: 'Failed to add payment method',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // Helcim webhook
 router.post('/webhook', express.json(), async (req, res) => {
   try {
@@ -243,18 +279,10 @@ router.get('/portal', authenticate, async (req, res) => {
     console.log('[Billing Portal] Customer ID:', customerId);
     console.log('[Billing Portal] ========== GET PORTAL COMPLETE ==========');
     
-    res.status(501).json({ 
-      error: 'Payment method management requires Helcim.js integration',
-      message: 'Helcim does not provide a customer-facing portal URL. Payment methods must be added using Helcim.js on the frontend.',
+    // Return customer ID for frontend to use with Helcim.js
+    res.json({ 
       customerId: customerId,
-      solution: 'Implement Helcim.js integration to collect payment methods. See: https://www.helcim.com/helcim-js/',
-      // TODO: Implement Helcim.js integration
-      // This requires:
-      // 1. Get Helcim.js token from Helcim Dashboard
-      // 2. Add Helcim.js script to frontend
-      // 3. Create payment method collection form
-      // 4. Use Helcim.js to tokenize payment method
-      // 5. Send token to backend to save to customer
+      message: 'Use customer ID with Helcim.js to add payment method'
     });
   } catch (error) {
     console.error('[Billing Portal] ========== GET PORTAL ERROR ==========');

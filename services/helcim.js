@@ -367,5 +367,25 @@ export class HelcimService {
       return null;
     }
   }
+
+  // Add payment method to customer using Helcim.js token
+  static async addPaymentMethod(customerId, paymentToken) {
+    try {
+      console.log('[HelcimService] Adding payment method for customer:', customerId);
+      
+      // Helcim API endpoint to save payment method from token
+      // This uses the payment token from Helcim.js
+      const response = await helcimApi.post('/customers/payment-methods', {
+        customerId: customerId,
+        paymentToken: paymentToken,
+      });
+      
+      console.log('[HelcimService] ✅ Payment method added:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('[HelcimService] ❌ Error adding payment method:', error.response?.data || error.message);
+      throw error;
+    }
+  }
 }
 
