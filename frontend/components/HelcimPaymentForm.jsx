@@ -35,34 +35,46 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
     if (typeof window !== 'undefined' && !helcimJsLoaded.current) {
       console.log('[HelcimPaymentForm] Loading Helcim.js script...');
       const script = document.createElement('script');
-      // Try the correct Helcim.js URL - it might be different
-      script.src = 'https://secure.helcim.com/helcim.js';
+      // Helcim.js CDN URL - based on Helcim documentation
+      script.src = 'https://secure.helcim.com/js/version/2.1.0/helcim.js';
       script.async = true;
+      script.crossOrigin = 'anonymous';
       console.log('[HelcimPaymentForm] Script src:', script.src);
+      
       script.onload = () => {
+        console.log('[HelcimPaymentForm] Script onload fired');
         // Wait a bit for HelcimPay to be available
+        let attempts = 0;
+        const maxAttempts = 50; // 5 seconds
         const checkHelcim = setInterval(() => {
+          attempts++;
+          console.log(`[HelcimPaymentForm] Checking for HelcimPay (attempt ${attempts}/${maxAttempts})...`);
+          console.log('[HelcimPaymentForm] window.HelcimPay:', typeof window.HelcimPay);
+          console.log('[HelcimPaymentForm] window keys:', Object.keys(window).filter(k => k.toLowerCase().includes('helcim')));
+          
           if (window.HelcimPay) {
+            console.log('[HelcimPaymentForm] ✅ HelcimPay found!');
             helcimJsLoaded.current = true;
             setScriptLoading(false);
             clearInterval(checkHelcim);
-          }
-        }, 100);
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          if (!helcimJsLoaded.current) {
+          } else if (attempts >= maxAttempts) {
+            console.error('[HelcimPaymentForm] ❌ HelcimPay not found after 5 seconds');
             clearInterval(checkHelcim);
-            setError('Helcim.js loaded but HelcimPay object is not available. Please refresh the page.');
+            setError('Helcim.js loaded but HelcimPay object is not available. Please check that NEXT_PUBLIC_HELCIM_JS_TOKEN is set correctly in Vercel.');
             setScriptLoading(false);
           }
-        }, 5000);
+        }, 100);
       };
-      script.onerror = () => {
-        setError('Failed to load Helcim.js. Please refresh the page.');
+      
+      script.onerror = (error) => {
+        console.error('[HelcimPaymentForm] ❌ Script load error:', error);
+        console.error('[HelcimPaymentForm] Script src was:', script.src);
+        setError('Failed to load Helcim.js script. Please check your internet connection and try again.');
         setScriptLoading(false);
       };
+      
       document.body.appendChild(script);
+      console.log('[HelcimPaymentForm] Script tag added to document');
     }
   }, []);
 
@@ -158,7 +170,9 @@ export default function HelcimPaymentForm({ customerId, onSuccess, onCancel }) {
         
         {scriptLoading && (
           <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded mb-4">
-            Loading payment form...
+            <p className="font-medium">Loading Helcim.js payment library...</p>
+            <p className="text-xs mt-1">This may take a few seconds. Please wait.</p>
+            <p className="text-xs mt-1 text-blue-600">If this takes too long, check the browser console for errors.</p>
           </div>
         )}
         
