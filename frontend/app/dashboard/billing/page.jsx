@@ -112,14 +112,28 @@ function BillingPage() {
       const errorData = error.response?.data || {};
       let errorMessage = errorData.message || errorData.error;
       
-      // If it's the 501 error about Helcim.js, show a more user-friendly message
-      if (error.response?.status === 501 && errorData.error?.includes('Helcim.js')) {
-        errorMessage = 'Payment method management is currently being set up. Please contact support at support@tavarios.com to add a payment method, or check back soon.';
+      // If it's the 501 error (Not Implemented), show a user-friendly message
+      if (error.response?.status === 501) {
+        // Check if it's the Helcim.js integration error
+        const isHelcimError = errorData.error?.includes('Helcim.js') || 
+                             errorData.error?.includes('Helcim') ||
+                             errorData.message?.includes('Helcim');
+        
+        if (isHelcimError) {
+          errorMessage = 'Payment method management is currently being set up. Please contact support at support@tavarios.com to add a payment method, or check back soon.';
+        } else {
+          errorMessage = errorMessage || 'This feature is not yet available. Please contact support for assistance.';
+        }
       } else if (!errorMessage) {
         errorMessage = 'Failed to open billing portal. Please try again or contact support.';
       }
       
-      showError(errorMessage);
+      // Always show error to user
+      if (errorMessage) {
+        showError(errorMessage);
+      } else {
+        showError('An unexpected error occurred. Please try again or contact support.');
+      }
       
       // Log additional details for debugging
       if (errorData.solution) {
@@ -128,6 +142,7 @@ function BillingPage() {
       if (errorData.customerId) {
         console.info('Customer ID:', errorData.customerId);
       }
+      console.info('Full error response:', errorData);
     } finally {
       setLoadingPortal(false);
     }
