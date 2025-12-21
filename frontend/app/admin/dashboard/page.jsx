@@ -71,6 +71,9 @@ function AdminDashboardPage() {
               <Link href="/admin/support" className="text-gray-700 hover:text-blue-600">
                 Support Tickets
               </Link>
+              <Link href="/admin/phone-numbers" className="text-gray-700 hover:text-blue-600">
+                Phone Numbers
+              </Link>
               <button
                 onClick={handleLogout}
                 className="text-gray-700 hover:text-blue-600"
@@ -149,6 +152,12 @@ function AdminDashboardPage() {
               className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium"
             >
               Test VAPI Connection
+            </Link>
+            <Link
+              href="/admin/phone-numbers"
+              className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
+            >
+              Manage SMS Phone Numbers
             </Link>
           </div>
         </main>

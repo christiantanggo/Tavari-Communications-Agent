@@ -193,6 +193,12 @@ export const adminPackagesAPI = {
   deletePackage: (id) => adminApi.delete(`/packages/${id}`),
 };
 
+// Admin SMS Phone Numbers API
+export const adminSMSNumbersAPI = {
+  getUnassigned: () => adminApi.get('/phone-numbers/unassigned'),
+  assignSMS: (businessId, phoneNumber) => adminApi.post(`/phone-numbers/assign-sms/${businessId}`, { phone_number: phoneNumber }),
+};
+
 // Bulk SMS API
 export const bulkSMSAPI = {
   createCampaign: (data) => api.post('/bulk-sms/campaigns', data),
@@ -209,6 +215,8 @@ export const bulkSMSAPI = {
   }),
   getNumbers: () => api.get('/bulk-sms/numbers'),
   getOptOuts: () => api.get('/bulk-sms/opt-outs'),
+  diagnose: () => api.get('/bulk-sms/diagnose'),
+  debugOptOuts: () => api.get('/bulk-sms/debug-opt-outs'),
 };
 
 // Contacts API

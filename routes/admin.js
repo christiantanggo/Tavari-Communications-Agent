@@ -982,5 +982,178 @@ router.post("/support/tickets/:id/response", authenticateAdmin, async (req, res)
   }
 });
 
+// ============================================
+// SMS PHONE NUMBER MANAGEMENT
+// ============================================
+
+// Get all unassigned SMS phone numbers
+router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
+  try {
+    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+    if (!TELNYX_API_KEY) {
+      return res.status(500).json({ error: "TELNYX_API_KEY not configured" });
+    }
+
+    const axios = (await import("axios")).default;
+    const { supabaseClient } = await import("../config/database.js");
+    
+    // Get all phone numbers from Telnyx
+    const telnyxResponse = await axios.get("https://api.telnyx.com/v2/phone_numbers", {
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+      },
+      params: {
+        'page[size]': 100, // Get up to 100 numbers per page
+      },
+    });
+    
+    const allTelnyxNumbers = telnyxResponse.data?.data || [];
+    console.log(`[Admin] Found ${allTelnyxNumbers.length} phone numbers in Telnyx account`);
+    
+    // Get all phone numbers assigned to businesses for SMS (telnyx_number field)
+    const { data: businesses, error } = await supabaseClient
+      .from('businesses')
+      .select('telnyx_number, vapi_phone_number')
+      .or('telnyx_number.not.is.null,vapi_phone_number.not.is.null');
+    
+    if (error) {
+      console.error('[Admin] Error fetching assigned numbers:', error);
+      return res.status(500).json({ error: "Failed to fetch assigned numbers" });
+    }
+    
+    // Create sets of assigned numbers (normalized to E.164)
+    const assignedSMSNumbers = new Set();
+    const assignedCallNumbers = new Set();
+    
+    (businesses || []).forEach(b => {
+      if (b.telnyx_number) {
+        let normalized = b.telnyx_number.replace(/[^0-9+]/g, '');
+        if (!normalized.startsWith('+')) normalized = '+' + normalized;
+        assignedSMSNumbers.add(normalized);
+      }
+      if (b.vapi_phone_number) {
+        let normalized = b.vapi_phone_number.replace(/[^0-9+]/g, '');
+        if (!normalized.startsWith('+')) normalized = '+' + normalized;
+        assignedCallNumbers.add(normalized);
+      }
+    });
+    
+    // Filter out assigned numbers
+    const unassignedNumbers = allTelnyxNumbers.filter(telnyxNum => {
+      const phoneNumber = telnyxNum.phone_number;
+      let normalized = phoneNumber.replace(/[^0-9+]/g, '');
+      if (!normalized.startsWith('+')) normalized = '+' + normalized;
+      
+      // Number is unassigned if it's not in either assigned set
+      return !assignedSMSNumbers.has(normalized) && !assignedCallNumbers.has(normalized);
+    });
+    
+    console.log(`[Admin] Found ${unassignedNumbers.length} unassigned phone numbers`);
+    
+    res.json({
+      total: allTelnyxNumbers.length,
+      unassigned: unassignedNumbers.length,
+      numbers: unassignedNumbers.map(num => ({
+        phone_number: num.phone_number,
+        id: num.id,
+        status: num.status,
+        messaging_profile_id: num.messaging_profile_id,
+        connection_id: num.connection_id,
+        region_information: num.region_information,
+      })),
+    });
+  } catch (error) {
+    console.error("Get unassigned phone numbers error:", error);
+    res.status(500).json({ error: error.message || "Failed to get unassigned phone numbers" });
+  }
+});
+
+// Assign SMS number to business
+router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { phone_number } = req.body;
+    
+    if (!phone_number) {
+      return res.status(400).json({ error: "Phone number is required" });
+    }
+
+    const business = await Business.findById(businessId);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    // Normalize phone number
+    let phoneNumberE164 = phone_number.replace(/[^0-9+]/g, '');
+    if (!phoneNumberE164.startsWith('+')) {
+      phoneNumberE164 = '+' + phoneNumberE164;
+    }
+
+    // Verify number exists in Telnyx
+    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+    if (!TELNYX_API_KEY) {
+      return res.status(500).json({ error: "TELNYX_API_KEY not configured" });
+    }
+
+    const axios = (await import("axios")).default;
+    const telnyxResponse = await axios.get("https://api.telnyx.com/v2/phone_numbers", {
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+      },
+      params: {
+        'filter[phone_number]': phoneNumberE164,
+      },
+    });
+
+    const telnyxNumbers = telnyxResponse.data?.data || [];
+    if (telnyxNumbers.length === 0) {
+      return res.status(404).json({ error: "Phone number not found in Telnyx account" });
+    }
+
+    // Check if number is already assigned to another business
+    const { supabaseClient } = await import("../config/database.js");
+    const { data: existingBusiness } = await supabaseClient
+      .from('businesses')
+      .select('id, name, telnyx_number')
+      .eq('telnyx_number', phoneNumberE164)
+      .is('deleted_at', null)
+      .single();
+
+    if (existingBusiness && existingBusiness.id !== businessId) {
+      return res.status(409).json({ 
+        error: `Phone number is already assigned to business: ${existingBusiness.name}` 
+      });
+    }
+
+    // Update business with SMS number
+    await Business.update(businessId, {
+      telnyx_number: phoneNumberE164,
+    });
+
+    // Log admin activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: businessId,
+      action: "assign_sms_number",
+      details: { 
+        phone_number: phoneNumberE164,
+        business_name: business.name,
+      },
+    });
+
+    res.json({
+      success: true,
+      phone_number: phoneNumberE164,
+      business: {
+        id: business.id,
+        name: business.name,
+      },
+    });
+  } catch (error) {
+    console.error("Assign SMS number error:", error);
+    res.status(500).json({ error: error.message || "Failed to assign SMS number" });
+  }
+});
+
 export default router;
 
