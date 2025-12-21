@@ -1100,11 +1100,17 @@ export async function rebuildAssistant(businessId) {
       },
       firstMessage: openingGreeting,
       serverUrl: (() => {
-        const backendUrl = process.env.BACKEND_URL || 
+        let backendUrl = process.env.BACKEND_URL || 
                           process.env.RAILWAY_PUBLIC_DOMAIN || 
                           process.env.VERCEL_URL || 
                           process.env.SERVER_URL ||
                           "https://api.tavarios.com";
+        
+        // Ensure URL has https:// protocol
+        if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
+          backendUrl = `https://${backendUrl}`;
+        }
+        
         const webhookUrl = `${backendUrl}/api/vapi/webhook`;
         console.log(`[VAPI Rebuild] Setting webhook URL: ${webhookUrl}`);
         return webhookUrl;
