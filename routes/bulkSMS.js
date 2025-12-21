@@ -796,7 +796,17 @@ router.post('/webhook', express.json(), async (req, res) => {
       // Try multiple message formats - Telnyx webhook structure can vary
       const message = data?.payload || data?.data || data;
       const fromNumber = message?.from?.phone_number || message?.from?.number || message?.from || message?.origin_phone_number;
-      const toNumber = message?.to?.phone_number || message?.to?.number || message?.to || message?.destination_phone_number;
+      
+      // Handle toNumber - it can be an array of objects or a single value
+      let toNumber = message?.to?.phone_number || message?.to?.number || message?.to || message?.destination_phone_number;
+      if (Array.isArray(toNumber) && toNumber.length > 0) {
+        // If it's an array, get the phone_number from the first object
+        toNumber = toNumber[0]?.phone_number || toNumber[0]?.number || toNumber[0];
+      } else if (typeof toNumber === 'object' && toNumber !== null) {
+        // If it's an object, extract the phone_number property
+        toNumber = toNumber.phone_number || toNumber.number || toNumber;
+      }
+      
       const text = (message?.text || message?.body || message?.message || '').toLowerCase().trim();
       
       console.log('[BulkSMS Webhook] Extracted message data:', {
