@@ -6,7 +6,7 @@ This guide explains how to configure Telnyx webhooks to handle STOP/START opt-ou
 
 Your webhook endpoint is:
 ```
-https://www.tavarios.com/api/bulk-sms/webhook
+https://api.tavarios.com/api/bulk-sms/webhook
 ```
 
 ## Configuration Steps
@@ -47,7 +47,7 @@ On the profile edit page:
 
 3. **Enter your webhook URL:**
    ```
-   https://www.tavarios.com/api/bulk-sms/webhook
+   https://api.tavarios.com/api/bulk-sms/webhook
    ```
 
 4. **Optional: Set Failover URL** (if you have a backup webhook endpoint)
@@ -119,7 +119,7 @@ If you want to verify webhook authenticity:
 2. **Check Your Server:**
    - Ensure server is running: `npm run dev`
    - Check server logs for webhook requests
-   - Verify the endpoint is accessible: `https://www.tavarios.com/api/bulk-sms/webhook`
+   - Verify the endpoint is accessible: `https://api.tavarios.com/api/bulk-sms/webhook`
 
 3. **Check Firewall/Security:**
    - Ensure Telnyx IPs are whitelisted (if using firewall)
