@@ -1021,9 +1021,8 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
       return res.status(500).json({ error: "Failed to fetch assigned numbers" });
     }
     
-    // Create sets of assigned numbers (normalized to E.164)
+    // Create set of assigned SMS numbers (telnyx_number field only)
     const assignedSMSNumbers = new Set();
-    const assignedCallNumbers = new Set();
     
     (businesses || []).forEach(b => {
       if (b.telnyx_number) {
@@ -1031,21 +1030,18 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
         if (!normalized.startsWith('+')) normalized = '+' + normalized;
         assignedSMSNumbers.add(normalized);
       }
-      if (b.vapi_phone_number) {
-        let normalized = b.vapi_phone_number.replace(/[^0-9+]/g, '');
-        if (!normalized.startsWith('+')) normalized = '+' + normalized;
-        assignedCallNumbers.add(normalized);
-      }
     });
     
-    // Filter out assigned numbers
+    // Filter out numbers assigned for SMS (telnyx_number)
+    // Note: A number can be used for both calls (vapi_phone_number) and SMS (telnyx_number)
+    // We only filter out numbers that are specifically assigned for SMS
     const unassignedNumbers = allTelnyxNumbers.filter(telnyxNum => {
       const phoneNumber = telnyxNum.phone_number;
       let normalized = phoneNumber.replace(/[^0-9+]/g, '');
       if (!normalized.startsWith('+')) normalized = '+' + normalized;
       
-      // Number is unassigned if it's not in either assigned set
-      return !assignedSMSNumbers.has(normalized) && !assignedCallNumbers.has(normalized);
+      // Number is unassigned for SMS if it's not in the assignedSMSNumbers set
+      return !assignedSMSNumbers.has(normalized);
     });
     
     console.log(`[Admin] Found ${unassignedNumbers.length} unassigned phone numbers`);
