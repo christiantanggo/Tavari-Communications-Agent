@@ -61,3 +61,4 @@ ADD COLUMN IF NOT EXISTS voice_id VARCHAR(100) DEFAULT '21m00Tcm4TlvDq8ikWAM';
 CREATE INDEX IF NOT EXISTS idx_businesses_vapi_assistant_id ON businesses(vapi_assistant_id);
 CREATE INDEX IF NOT EXISTS idx_call_sessions_vapi_call_id ON call_sessions(vapi_call_id);
 
+

@@ -85,6 +85,10 @@ function SettingsPage() {
     email_missed_calls: false,
     sms_enabled: false,
     sms_notification_number: '',
+    sms_business_hours_enabled: false,
+    sms_timezone: 'America/New_York',
+    sms_allowed_start_time: '09:00:00',
+    sms_allowed_end_time: '21:00:00',
   });
 
   useEffect(() => {
@@ -155,6 +159,10 @@ function SettingsPage() {
           email_missed_calls: business.email_missed_calls ?? false,
           sms_enabled: business.sms_enabled ?? false,
           sms_notification_number: business.sms_notification_number || '',
+          sms_business_hours_enabled: business.sms_business_hours_enabled ?? false,
+          sms_timezone: business.sms_timezone || business.timezone || 'America/New_York',
+          sms_allowed_start_time: business.sms_allowed_start_time || '09:00:00',
+          sms_allowed_end_time: business.sms_allowed_end_time || '21:00:00',
         };
         console.log('[Settings Load] Setting notifications:', loadedNotifications);
         setNotifications(loadedNotifications);

@@ -193,3 +193,42 @@ export const adminPackagesAPI = {
   deletePackage: (id) => adminApi.delete(`/packages/${id}`),
 };
 
+// Bulk SMS API
+export const bulkSMSAPI = {
+  createCampaign: (data) => api.post('/bulk-sms/campaigns', data),
+  getCampaigns: () => api.get('/bulk-sms/campaigns'),
+  getCampaign: (id) => api.get(`/bulk-sms/campaigns/${id}`),
+  cancelCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/cancel`),
+  deleteCampaign: (id) => api.delete(`/bulk-sms/campaigns/${id}`),
+  pauseCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/pause`),
+  restartCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/restart`),
+  resendCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/resend`),
+  testSMS: (data) => api.post('/bulk-sms/test', data),
+  getRecipients: (id, status) => api.get(`/bulk-sms/campaigns/${id}/recipients`, { 
+    params: status ? { status } : {} 
+  }),
+  getNumbers: () => api.get('/bulk-sms/numbers'),
+  getOptOuts: () => api.get('/bulk-sms/opt-outs'),
+};
+
+// Contacts API
+export const contactsAPI = {
+  getContacts: (params) => api.get('/contacts', { params }),
+  getContact: (id) => api.get(`/contacts/${id}`),
+  createContact: (data) => api.post('/contacts', data),
+  updateContact: (id, data) => api.put(`/contacts/${id}`, data),
+  deleteContact: (id) => api.delete(`/contacts/${id}`),
+  uploadContacts: (formData) => api.post('/contacts/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  getLists: () => api.get('/contacts/lists/all'),
+  createList: (data) => api.post('/contacts/lists', data),
+  getList: (id) => api.get(`/contacts/lists/${id}`),
+  updateList: (id, data) => api.put(`/contacts/lists/${id}`, data),
+  deleteList: (id) => api.delete(`/contacts/lists/${id}`),
+  addContactToList: (listId, contactId) => api.post(`/contacts/lists/${listId}/contacts`, { contact_id: contactId }),
+  removeContactFromList: (listId, contactId) => api.delete(`/contacts/lists/${listId}/contacts/${contactId}`),
+  toggleOptOut: (contactId, optedOut) => api.post(`/contacts/${contactId}/opt-out`, { opted_out: optedOut }),
+  syncOptOuts: () => api.post('/contacts/sync-opt-outs'),
+};
+

@@ -179,3 +179,4 @@ Once `tavarios.com` is working:
 
 Once you add the domain in Vercel and update your DNS records, `tavarios.com` will automatically point to your deployed app.
 
+

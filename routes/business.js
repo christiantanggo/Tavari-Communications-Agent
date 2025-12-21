@@ -23,6 +23,10 @@ router.put("/settings", authenticate, async (req, res) => {
       email_missed_calls,
       sms_enabled,
       sms_notification_number,
+      sms_business_hours_enabled,
+      sms_timezone,
+      sms_allowed_start_time,
+      sms_allowed_end_time,
       minutes_exhausted_behavior,
       overage_billing_enabled,
       overage_cap_minutes,
@@ -55,6 +59,10 @@ router.put("/settings", authenticate, async (req, res) => {
     if (email_missed_calls !== undefined) updateData.email_missed_calls = email_missed_calls;
     if (sms_enabled !== undefined) updateData.sms_enabled = sms_enabled;
     if (sms_notification_number !== undefined) updateData.sms_notification_number = sms_notification_number;
+    if (sms_business_hours_enabled !== undefined) updateData.sms_business_hours_enabled = sms_business_hours_enabled;
+    if (sms_timezone !== undefined) updateData.sms_timezone = sms_timezone;
+    if (sms_allowed_start_time !== undefined) updateData.sms_allowed_start_time = sms_allowed_start_time;
+    if (sms_allowed_end_time !== undefined) updateData.sms_allowed_end_time = sms_allowed_end_time;
     if (minutes_exhausted_behavior !== undefined) updateData.minutes_exhausted_behavior = minutes_exhausted_behavior;
     if (overage_billing_enabled !== undefined) updateData.overage_billing_enabled = overage_billing_enabled;
     if (overage_cap_minutes !== undefined) updateData.overage_cap_minutes = overage_cap_minutes;

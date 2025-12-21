@@ -76,3 +76,4 @@ If it still doesn't work:
 2. Share **server logs** from the signup attempt
 3. Share **browser console errors** (if any)
 
+

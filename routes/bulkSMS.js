@@ -1,0 +1,1046 @@
+// routes/bulkSMS.js
+// Bulk SMS campaign API routes
+
+import express from 'express';
+import multer from 'multer';
+import { authenticate } from '../middleware/auth.js';
+import { Business } from '../models/Business.js';
+import { SMSCampaign } from '../models/SMSCampaign.js';
+import { SMSCampaignRecipient } from '../models/SMSCampaignRecipient.js';
+import { SMSOptOut } from '../models/SMSOptOut.js';
+import { Contact } from '../models/Contact.js';
+import { ContactList } from '../models/ContactList.js';
+import {
+  parseCSV,
+  getAvailableSMSNumbers,
+  calculateTotalThroughput,
+  sendBulkSMS,
+  getCampaignStatus,
+  cancelCampaign,
+} from '../services/bulkSMS.js';
+import { validatePhoneNumbersForBulk, formatPhoneNumberE164 } from '../utils/phoneFormatter.js';
+import { supabaseClient } from '../config/database.js';
+import { sendSMSDirect } from '../services/notifications.js';
+
+const router = express.Router();
+
+// Configure multer for CSV file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'), false);
+    }
+  },
+});
+
+/**
+ * Create a new SMS campaign from selected contacts/lists
+ * POST /api/bulk-sms/campaigns
+ */
+router.post('/campaigns', authenticate, async (req, res) => {
+  try {
+    const { name, message_text, contact_ids = [], list_ids = [] } = req.body;
+    
+    if (!name || !message_text) {
+      return res.status(400).json({ 
+        error: 'Campaign name and message text are required' 
+      });
+    }
+    
+    if (contact_ids.length === 0 && list_ids.length === 0) {
+      return res.status(400).json({ 
+        error: 'Please select at least one contact or list' 
+      });
+    }
+    
+    if (message_text.length > 1600) {
+      return res.status(400).json({ 
+        error: 'Message text cannot exceed 1600 characters (10 SMS messages)' 
+      });
+    }
+    
+    // Contact and ContactList are already imported at the top of the file
+    
+    // Collect all contacts from selected contact IDs and list IDs
+    const allContacts = [];
+    const contactIdSet = new Set();
+    
+    // Get contacts from selected contact IDs
+    if (contact_ids.length > 0) {
+      console.log(`[BulkSMS] Loading ${contact_ids.length} individual contacts...`);
+      for (const contactId of contact_ids) {
+        try {
+          const contact = await Contact.findById(contactId);
+          if (contact && contact.business_id === req.businessId && !contact.opted_out && contact.phone_number) {
+            if (!contactIdSet.has(contact.id)) {
+              allContacts.push(contact);
+              contactIdSet.add(contact.id);
+            }
+          }
+        } catch (contactError) {
+          console.error(`[BulkSMS] Error loading contact ${contactId}:`, contactError);
+          // Continue with other contacts
+        }
+      }
+      console.log(`[BulkSMS] Loaded ${allContacts.length} valid contacts from individual selection`);
+    }
+    
+    // Get contacts from selected lists
+    if (list_ids.length > 0) {
+      for (const listId of list_ids) {
+        try {
+          const list = await ContactList.findById(listId);
+          if (!list || list.business_id !== req.businessId) {
+            console.log(`[BulkSMS] List ${listId} not found or access denied`);
+            continue;
+          }
+          
+          const listContacts = await ContactList.getContacts(listId);
+          console.log(`[BulkSMS] Found ${listContacts.length} contacts in list ${listId}`);
+          
+          for (const contact of listContacts) {
+            // Filter out null contacts (deleted contacts that are still in list)
+            if (!contact || !contact.id) {
+              continue;
+            }
+            
+            // Verify contact belongs to this business
+            if (contact.business_id !== req.businessId) {
+              continue;
+            }
+            
+            if (!contactIdSet.has(contact.id) && !contact.opted_out && contact.phone_number) {
+              allContacts.push(contact);
+              contactIdSet.add(contact.id);
+            }
+          }
+        } catch (listError) {
+          console.error(`[BulkSMS] Error loading list ${listId}:`, listError);
+          // Continue with other lists
+        }
+      }
+    }
+    
+    if (allContacts.length === 0) {
+      return res.status(400).json({ 
+        error: 'No valid contacts found. Make sure contacts have phone numbers and are not opted out.' 
+      });
+    }
+    
+    // Extract and validate phone numbers
+    const phoneNumbers = allContacts.map(c => c.phone_number).filter(Boolean);
+    const { valid, invalid, duplicates } = validatePhoneNumbersForBulk(phoneNumbers);
+    
+    if (valid.length === 0) {
+      return res.status(400).json({ 
+        error: 'No valid phone numbers found',
+        invalid,
+        duplicates,
+      });
+    }
+    
+    // Create a map of valid phone numbers to their contact info
+    const validPhoneSet = new Set(valid);
+    const contactsMap = new Map();
+    allContacts.forEach(contact => {
+      const formattedPhone = formatPhoneNumberE164(contact.phone_number);
+      if (validPhoneSet.has(formattedPhone)) {
+        contactsMap.set(formattedPhone, contact);
+      }
+    });
+    
+    // Check opt-outs
+    const optOuts = await SMSOptOut.findByBusinessId(req.businessId);
+    const optOutSet = new Set(optOuts.map(o => o.phone_number));
+    const filteredNumbers = valid.filter(num => !optOutSet.has(num));
+    const optedOutCount = valid.length - filteredNumbers.length;
+    
+    if (filteredNumbers.length === 0) {
+      return res.status(400).json({ 
+        error: 'All phone numbers are opted out',
+        optedOutCount,
+      });
+    }
+    
+    // Create campaign
+    const campaign = await SMSCampaign.create({
+      business_id: req.businessId,
+      name,
+      message_text,
+      total_recipients: filteredNumbers.length,
+    });
+    
+    // Create recipient records with contact information
+    const recipients = filteredNumbers.map(phoneNumber => {
+      const contact = contactsMap.get(phoneNumber) || {};
+      return {
+        campaign_id: campaign.id,
+        phone_number: phoneNumber,
+        email: contact.email || null,
+        first_name: contact.first_name || null,
+        last_name: contact.last_name || null,
+        status: 'pending',
+      };
+    });
+    
+    await SMSCampaignRecipient.createBatch(recipients);
+    
+    console.log(`[BulkSMS Route] ========== STARTING BACKGROUND SEND ==========`);
+    console.log(`[BulkSMS Route] Campaign ID: ${campaign.id}`);
+    console.log(`[BulkSMS Route] Business ID: ${req.businessId}`);
+    console.log(`[BulkSMS Route] Message: ${message_text.substring(0, 50)}...`);
+    console.log(`[BulkSMS Route] Recipients: ${filteredNumbers.length}`);
+    console.log(`[BulkSMS Route] Checking if sendBulkSMS is imported...`);
+    console.log(`[BulkSMS Route] sendBulkSMS type:`, typeof sendBulkSMS);
+    console.log(`[BulkSMS Route] Calling sendBulkSMS function...`);
+    
+    // Start sending in background (don't await)
+    // IMPORTANT: Wrap in try-catch and log immediately to ensure it's being called
+    // Use process.nextTick to ensure it runs in the next event loop cycle
+    process.nextTick(async () => {
+      try {
+        console.log(`[BulkSMS Route] ✅ Inside async wrapper, about to call sendBulkSMS...`);
+        console.log(`[BulkSMS Route] Parameters:`, {
+          campaignId: campaign.id,
+          businessId: req.businessId,
+          messageTextLength: message_text.length,
+          phoneNumbersCount: filteredNumbers.length,
+        });
+        
+        if (typeof sendBulkSMS !== 'function') {
+          throw new Error(`sendBulkSMS is not a function! Type: ${typeof sendBulkSMS}`);
+        }
+        
+        await sendBulkSMS(campaign.id, req.businessId, message_text, filteredNumbers);
+        console.log(`[BulkSMS Route] ✅ sendBulkSMS completed successfully for campaign ${campaign.id}`);
+      } catch (error) {
+        console.error(`[BulkSMS Route] ❌ CRITICAL ERROR in sendBulkSMS for campaign ${campaign.id}:`, error);
+        console.error(`[BulkSMS Route] Error message:`, error.message);
+        console.error(`[BulkSMS Route] Error stack:`, error.stack);
+        
+        // Update campaign status to failed
+        try {
+          await SMSCampaign.updateStatus(campaign.id, 'failed', {
+            error_summary: {
+              message: error.message,
+              stack: error.stack?.substring(0, 1000), // Limit stack trace length
+            },
+          });
+          console.log(`[BulkSMS Route] ✅ Campaign ${campaign.id} marked as failed`);
+        } catch (updateError) {
+          console.error(`[BulkSMS Route] ❌ Failed to update campaign status:`, updateError);
+        }
+        console.error(`[BulkSMS Route] Error stack:`, error.stack);
+        console.error(`[BulkSMS Route] Error name:`, error.name);
+        console.error(`[BulkSMS Route] Error code:`, error.code);
+        if (error.response) {
+          console.error(`[BulkSMS Route] Error response:`, JSON.stringify(error.response.data, null, 2));
+        }
+        
+        // Update campaign status to failed
+        try {
+          await SMSCampaign.updateStatus(campaign.id, 'failed', {
+            error_summary: { 
+              message: error.message, 
+              stack: error.stack,
+              name: error.name,
+              code: error.code,
+            },
+          });
+        } catch (updateError) {
+          console.error(`[BulkSMS Route] Failed to update campaign status:`, updateError);
+        }
+      }
+    });
+    
+    console.log(`[BulkSMS Route] Background send process initiated (non-blocking)`);
+    
+    res.status(201).json({
+      success: true,
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        total_recipients: campaign.total_recipients,
+        status: campaign.status,
+      },
+      stats: {
+        valid: filteredNumbers.length,
+        invalid: invalid.length,
+        duplicates: duplicates.length,
+        optedOut: optedOutCount,
+      },
+      message: 'Campaign created and sending started',
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Create campaign error:', error);
+    console.error('[BulkSMS Route] Error details:', JSON.stringify(error, null, 2));
+    
+    // Check if it's a missing column error
+    if (error.message && (
+      error.message.includes('column') || 
+      error.message.includes('does not exist') ||
+      error.code === '42703' || // PostgreSQL undefined_column
+      error.message.includes('email') ||
+      error.message.includes('first_name') ||
+      error.message.includes('last_name')
+    )) {
+      return res.status(500).json({ 
+        error: 'Database schema error: Missing columns in sms_campaign_recipients table',
+        message: 'Please run the migration: MIGRATION_RUN_NOW.sql in Supabase SQL Editor',
+        details: error.message,
+        fix: 'Run: ALTER TABLE sms_campaign_recipients ADD COLUMN IF NOT EXISTS email VARCHAR(255), ADD COLUMN IF NOT EXISTS first_name VARCHAR(100), ADD COLUMN IF NOT EXISTS last_name VARCHAR(100);'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: error.message || 'Failed to create campaign',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+/**
+ * Get all campaigns for business
+ * GET /api/bulk-sms/campaigns
+ */
+router.get('/campaigns', authenticate, async (req, res) => {
+  try {
+    const campaigns = await SMSCampaign.findByBusinessId(req.businessId);
+    
+    // Get stats for each campaign
+    const campaignsWithStats = await Promise.all(
+      campaigns.map(async (campaign) => {
+        try {
+          const stats = await SMSCampaignRecipient.getCampaignStats(campaign.id);
+          return {
+            ...campaign,
+            stats,
+            progress: campaign.total_recipients > 0 
+              ? Math.round((stats.sent / campaign.total_recipients) * 100) 
+              : 0,
+          };
+        } catch (statsError) {
+          // If stats fail (table might not exist), return campaign without stats
+          console.warn('[BulkSMS Route] Failed to get stats for campaign:', campaign.id, statsError.message);
+          return {
+            ...campaign,
+            stats: { total: 0, pending: 0, sent: 0, failed: 0 },
+            progress: 0,
+          };
+        }
+      })
+    );
+    
+    res.json({ campaigns: campaignsWithStats });
+  } catch (error) {
+    console.error('[BulkSMS Route] Get campaigns error:', error);
+    console.error('[BulkSMS Route] Error details:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    // If table doesn't exist or any database error, return empty array
+    if (error.message && (
+      error.message.includes('does not exist') || 
+      error.message.includes('relation') ||
+      error.code === '42P01' || // PostgreSQL: relation does not exist
+      error.code === 'PGRST116' // Supabase: no rows returned (but also used for missing table)
+    )) {
+      console.log('[BulkSMS Route] Table does not exist, returning empty campaigns array');
+      return res.json({ campaigns: [] });
+    }
+    res.status(500).json({ 
+      error: error.message || 'Failed to get campaigns' 
+    });
+  }
+});
+
+/**
+ * Get campaign details
+ * GET /api/bulk-sms/campaigns/:id
+ */
+router.get('/campaigns/:id', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const status = await getCampaignStatus(req.params.id);
+    res.json({ campaign: status });
+  } catch (error) {
+    console.error('[BulkSMS Route] Get campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to get campaign' 
+    });
+  }
+});
+
+/**
+ * Cancel a campaign
+ * POST /api/bulk-sms/campaigns/:id/cancel
+ */
+router.post('/campaigns/:id/cancel', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    await cancelCampaign(req.params.id);
+    res.json({ success: true, message: 'Campaign cancelled' });
+  } catch (error) {
+    console.error('[BulkSMS Route] Cancel campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to cancel campaign' 
+    });
+  }
+});
+
+/**
+ * Delete a campaign
+ * DELETE /api/bulk-sms/campaigns/:id
+ */
+router.delete('/campaigns/:id', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Delete campaign (recipients will be deleted via CASCADE)
+    const { error } = await supabaseClient
+      .from('sms_campaigns')
+      .delete()
+      .eq('id', req.params.id);
+    
+    if (error) throw error;
+    
+    res.json({ success: true, message: 'Campaign deleted' });
+  } catch (error) {
+    console.error('[BulkSMS Route] Delete campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to delete campaign' 
+    });
+  }
+});
+
+/**
+ * Pause a campaign
+ * POST /api/bulk-sms/campaigns/:id/pause
+ */
+router.post('/campaigns/:id/pause', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (campaign.status !== 'pending' && campaign.status !== 'processing') {
+      return res.status(400).json({ 
+        error: `Cannot pause campaign with status: ${campaign.status}` 
+      });
+    }
+    
+    await SMSCampaign.updateStatus(req.params.id, 'paused');
+    res.json({ success: true, message: 'Campaign paused' });
+  } catch (error) {
+    console.error('[BulkSMS Route] Pause campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to pause campaign' 
+    });
+  }
+});
+
+/**
+ * Restart a paused campaign
+ * POST /api/bulk-sms/campaigns/:id/restart
+ */
+router.post('/campaigns/:id/restart', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (campaign.status !== 'paused') {
+      return res.status(400).json({ 
+        error: `Can only restart paused campaigns. Current status: ${campaign.status}` 
+      });
+    }
+    
+    // Reset campaign status and counts
+    await SMSCampaign.update(req.params.id, {
+      status: 'pending',
+      sent_count: 0,
+      failed_count: 0,
+      started_at: null,
+      completed_at: null,
+    });
+    
+    // Reset all recipient statuses to pending
+    const { error: recipientError } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .update({ 
+        status: 'pending',
+        sent_at: null,
+        telnyx_message_id: null,
+        error_message: null,
+      })
+      .eq('campaign_id', req.params.id);
+    
+    if (recipientError) {
+      console.error('[BulkSMS Route] Error resetting recipients:', recipientError);
+    }
+    
+    // Start sending again
+    sendBulkSMS(req.params.id, req.businessId, campaign.message_text)
+      .catch(error => {
+        console.error(`[BulkSMS Route] Background send error for restarted campaign ${req.params.id}:`, error);
+      });
+    
+    res.json({ success: true, message: 'Campaign restarted' });
+  } catch (error) {
+    console.error('[BulkSMS Route] Restart campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to restart campaign' 
+    });
+  }
+});
+
+/**
+ * Resend a campaign (create new campaign with same message/recipients)
+ * POST /api/bulk-sms/campaigns/:id/resend
+ */
+router.post('/campaigns/:id/resend', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Get all recipients from the original campaign
+    const recipients = await SMSCampaignRecipient.findByCampaignId(req.params.id);
+    const phoneNumbers = recipients.map(r => r.phone_number).filter(Boolean);
+    
+    if (phoneNumbers.length === 0) {
+      return res.status(400).json({ 
+        error: 'No recipients found in original campaign' 
+      });
+    }
+    
+    // Create new campaign
+    const newCampaign = await SMSCampaign.create({
+      business_id: req.businessId,
+      name: `${campaign.name} (Resent)`,
+      message_text: campaign.message_text,
+      total_recipients: phoneNumbers.length,
+    });
+    
+    // Create recipient records
+    const newRecipients = recipients.map(recipient => ({
+      campaign_id: newCampaign.id,
+      phone_number: recipient.phone_number,
+      email: recipient.email || null,
+      first_name: recipient.first_name || null,
+      last_name: recipient.last_name || null,
+      status: 'pending',
+    }));
+    
+    await SMSCampaignRecipient.createBatch(newRecipients);
+    
+    // Start sending
+    sendBulkSMS(newCampaign.id, req.businessId, campaign.message_text, phoneNumbers)
+      .catch(error => {
+        console.error(`[BulkSMS Route] Background send error for resent campaign ${newCampaign.id}:`, error);
+      });
+    
+    res.json({ 
+      success: true, 
+      message: 'New campaign created and sending started',
+      campaign: newCampaign,
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Resend campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to resend campaign' 
+    });
+  }
+});
+
+/**
+ * Get campaign recipients
+ * GET /api/bulk-sms/campaigns/:id/recipients
+ */
+router.get('/campaigns/:id/recipients', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const { status } = req.query;
+    const recipients = status
+      ? await SMSCampaignRecipient.findByCampaignIdAndStatus(req.params.id, status)
+      : await SMSCampaignRecipient.findByCampaignId(req.params.id);
+    
+    res.json({ recipients });
+  } catch (error) {
+    console.error('[BulkSMS Route] Get recipients error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to get recipients' 
+    });
+  }
+});
+
+/**
+ * Get all SMS-capable numbers for business
+ * GET /api/bulk-sms/numbers
+ */
+router.get('/numbers', authenticate, async (req, res) => {
+  try {
+    const numbers = await getAvailableSMSNumbers(req.businessId);
+    const throughput = calculateTotalThroughput(numbers);
+    
+    res.json({
+      numbers,
+      total_throughput: throughput,
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Get numbers error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to get numbers' 
+    });
+  }
+});
+
+/**
+ * Get opt-out list
+ * GET /api/bulk-sms/opt-outs
+ */
+router.get('/opt-outs', authenticate, async (req, res) => {
+  try {
+    const optOuts = await SMSOptOut.findByBusinessId(req.businessId);
+    res.json({ optOuts });
+  } catch (error) {
+    console.error('[BulkSMS Route] Get opt-outs error:', error);
+    console.error('[BulkSMS Route] Error details:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    // If table doesn't exist or any database error, return empty array
+    if (error.message && (
+      error.message.includes('does not exist') || 
+      error.message.includes('relation') ||
+      error.code === '42P01' || // PostgreSQL: relation does not exist
+      error.code === 'PGRST116' // Supabase: no rows returned (but also used for missing table)
+    )) {
+      console.log('[BulkSMS Route] Table does not exist, returning empty opt-outs array');
+      return res.json({ optOuts: [] });
+    }
+    res.status(500).json({ 
+      error: error.message || 'Failed to get opt-outs' 
+    });
+  }
+});
+
+/**
+ * Test SMS sending (for debugging)
+ * POST /api/bulk-sms/test
+ */
+router.post('/test', authenticate, async (req, res) => {
+  try {
+    const { phone_number, message } = req.body;
+    
+    if (!phone_number || !message) {
+      return res.status(400).json({ 
+        error: 'phone_number and message are required' 
+      });
+    }
+    
+    console.log(`[BulkSMS Test] ========== TEST SMS SEND ==========`);
+    console.log(`[BulkSMS Test] To: ${phone_number}`);
+    console.log(`[BulkSMS Test] Message: ${message}`);
+    
+    // Get business phone number
+    const business = await Business.findById(req.businessId);
+    if (!business || !business.vapi_phone_number) {
+      return res.status(400).json({ 
+        error: 'Business phone number not configured' 
+      });
+    }
+    
+    console.log(`[BulkSMS Test] From: ${business.vapi_phone_number}`);
+    
+    // Import sendSMSDirect
+    const { sendSMSDirect } = await import('../services/notifications.js');
+    
+    console.log(`[BulkSMS Test] Calling sendSMSDirect...`);
+    const result = await sendSMSDirect(business.vapi_phone_number, phone_number, message);
+    
+    console.log(`[BulkSMS Test] ✅ SMS sent successfully!`);
+    console.log(`[BulkSMS Test] Telnyx Message ID: ${result.data?.id}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Test SMS sent successfully',
+      telnyx_message_id: result.data?.id,
+    });
+  } catch (error) {
+    console.error(`[BulkSMS Test] ❌ ERROR:`, error);
+    console.error(`[BulkSMS Test] Error message:`, error.message);
+    console.error(`[BulkSMS Test] Error stack:`, error.stack);
+    res.status(500).json({ 
+      error: error.message || 'Failed to send test SMS',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  }
+});
+
+/**
+ * Test endpoint to verify webhook is accessible
+ * GET /api/bulk-sms/webhook
+ */
+router.get('/webhook', (req, res) => {
+  res.status(200).json({
+    status: '✅ Webhook endpoint is accessible',
+    url: 'https://www.tavarios.com/api/bulk-sms/webhook',
+    message: 'This endpoint receives incoming SMS messages from Telnyx for STOP/START opt-out handling',
+    test: 'Send a POST request with Telnyx webhook format to test',
+  });
+});
+
+/**
+ * Handle incoming SMS webhook for opt-outs (STOP keyword)
+ * POST /api/bulk-sms/webhook
+ */
+router.post('/webhook', express.json(), async (req, res) => {
+  console.log('[BulkSMS Webhook] ========== WEBHOOK RECEIVED ==========');
+  console.log('[BulkSMS Webhook] Request method:', req.method);
+  console.log('[BulkSMS Webhook] Request URL:', req.url);
+  console.log('[BulkSMS Webhook] Request headers:', JSON.stringify(req.headers, null, 2));
+  console.log('[BulkSMS Webhook] Request body:', JSON.stringify(req.body, null, 2));
+  
+  try {
+    // Telnyx webhook format - can be different structures
+    // Try multiple possible formats
+    let data = req.body?.data;
+    let eventType = data?.event_type;
+    
+    // Alternative format: direct event_type in body
+    if (!eventType && req.body?.event_type) {
+      eventType = req.body.event_type;
+      data = req.body;
+    }
+    
+    // Alternative format: payload directly in body
+    if (!data && req.body?.payload) {
+      data = req.body;
+      eventType = req.body.event_type || 'message.received';
+    }
+    
+    console.log('[BulkSMS Webhook] Parsed event type:', eventType);
+    console.log('[BulkSMS Webhook] Parsed data:', JSON.stringify(data, null, 2));
+    
+    // Always respond 200 to Telnyx immediately (don't wait for processing)
+    res.status(200).json({ received: true });
+    console.log('[BulkSMS Webhook] ✅ Sent 200 response to Telnyx');
+    
+    // Handle incoming SMS (for opt-outs)
+    // Telnyx can send different event types, so check multiple
+    if (eventType === 'message.received' || eventType === 'sms.received' || !eventType) {
+      // Try multiple message formats - Telnyx webhook structure can vary
+      const message = data?.payload || data?.data || data;
+      const fromNumber = message?.from?.phone_number || message?.from?.number || message?.from || message?.origin_phone_number;
+      const toNumber = message?.to?.phone_number || message?.to?.number || message?.to || message?.destination_phone_number;
+      const text = (message?.text || message?.body || message?.message || '').toLowerCase().trim();
+      
+      console.log('[BulkSMS Webhook] Extracted message data:', {
+        fromNumber,
+        toNumber,
+        text: text.substring(0, 100),
+        messageKeys: Object.keys(message || {}),
+      });
+      
+      console.log('[BulkSMS Webhook] Incoming message:', {
+        from: fromNumber,
+        to: toNumber,
+        text: text.substring(0, 50),
+      });
+      
+      // Check for opt-out keywords
+      const optOutKeywords = ['stop', 'unsubscribe', 'optout', 'opt out', 'cancel', 'end', 'quit', 'remove'];
+      const optInKeywords = ['start', 'subscribe', 'optin', 'opt in', 'yes', 'resume'];
+      const isOptOut = optOutKeywords.some(keyword => text.includes(keyword));
+      const isOptIn = optInKeywords.some(keyword => text.includes(keyword));
+      
+      if (isOptOut && toNumber) {
+        console.log('[BulkSMS Webhook] Opt-out keyword detected, processing...');
+        
+        // Format phone numbers for consistent lookup
+        const formattedToNumber = formatPhoneNumberE164(toNumber);
+        const formattedFromNumber = formatPhoneNumberE164(fromNumber);
+        
+        // Find business by phone number (check both vapi_phone_number and telnyx_number)
+        const business = await Business.findByPhoneNumber(formattedToNumber);
+        
+        if (business) {
+          console.log(`[BulkSMS Webhook] Business found: ${business.id} (${business.name})`);
+          
+          try {
+            // Add to opt-out list (upsert to handle duplicates)
+            await SMSOptOut.create({
+              business_id: business.id,
+              phone_number: formattedFromNumber,
+              reason: 'STOP',
+            });
+            console.log(`[BulkSMS Webhook] ✅ Opt-out recorded in sms_opt_outs: ${formattedFromNumber}`);
+          } catch (optOutError) {
+            // If already exists, that's fine - just log it
+            if (optOutError.code === '23505' || optOutError.message?.includes('duplicate') || optOutError.message?.includes('unique')) {
+              console.log(`[BulkSMS Webhook] ⚠️ Opt-out already exists for ${formattedFromNumber}`);
+            } else {
+              console.error(`[BulkSMS Webhook] ❌ Error creating opt-out record:`, optOutError);
+            }
+          }
+          
+          // Update contact's opt-out status if they exist in contacts table
+          try {
+            const contact = await Contact.findByPhone(business.id, formattedFromNumber);
+            if (contact) {
+              await Contact.setOptOutStatus(contact.id, true);
+              console.log(`[BulkSMS Webhook] ✅ Contact ${contact.id} marked as opted out`);
+            } else {
+              console.log(`[BulkSMS Webhook] ℹ️ No contact found for ${formattedFromNumber}, skipping contact update`);
+            }
+          } catch (contactError) {
+            console.error(`[BulkSMS Webhook] ❌ Error updating contact opt-out status:`, contactError);
+            // Don't fail the whole process if contact update fails
+          }
+          
+          // Send confirmation SMS back to the user
+          // Note: Footer is automatically added by sendSMSDirect
+          try {
+            const confirmationMessage = 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.';
+            const senderNumber = business.vapi_phone_number || business.telnyx_number;
+            
+            if (senderNumber) {
+              await sendSMSDirect(senderNumber, formattedFromNumber, confirmationMessage);
+              console.log(`[BulkSMS Webhook] ✅ Confirmation SMS sent to ${formattedFromNumber}`);
+            } else {
+              console.warn(`[BulkSMS Webhook] ⚠️ No sender number configured for business ${business.id}, cannot send confirmation`);
+            }
+          } catch (smsError) {
+            console.error(`[BulkSMS Webhook] ❌ Error sending confirmation SMS:`, smsError);
+            // Don't fail the whole process if confirmation SMS fails
+          }
+          
+          console.log(`[BulkSMS Webhook] ✅ Opt-out process completed for ${formattedFromNumber}`);
+        } else {
+          console.warn(`[BulkSMS Webhook] ⚠️ No business found for phone number ${formattedToNumber}`);
+        }
+      } else if (isOptIn && toNumber) {
+        // Handle opt-in (START keyword)
+        console.log('[BulkSMS Webhook] Opt-in keyword detected, processing...');
+        
+        // Format phone numbers for consistent lookup
+        const formattedToNumber = formatPhoneNumberE164(toNumber);
+        const formattedFromNumber = formatPhoneNumberE164(fromNumber);
+        
+        // Find business by phone number
+        const business = await Business.findByPhoneNumber(formattedToNumber);
+        
+        if (business) {
+          console.log(`[BulkSMS Webhook] Business found: ${business.id} (${business.name})`);
+          
+          try {
+            // Remove from opt-out list (delete if exists)
+            const { error: deleteError } = await supabaseClient
+              .from('sms_opt_outs')
+              .delete()
+              .eq('business_id', business.id)
+              .eq('phone_number', formattedFromNumber);
+            
+            if (deleteError && deleteError.code !== 'PGRST116') {
+              console.error(`[BulkSMS Webhook] ❌ Error removing opt-out:`, deleteError);
+            } else {
+              console.log(`[BulkSMS Webhook] ✅ Opt-out removed from sms_opt_outs: ${formattedFromNumber}`);
+            }
+          } catch (optOutError) {
+            console.error(`[BulkSMS Webhook] ❌ Error removing opt-out record:`, optOutError);
+          }
+          
+          // Update contact's opt-out status if they exist in contacts table
+          try {
+            const contact = await Contact.findByPhone(business.id, formattedFromNumber);
+            if (contact) {
+              await Contact.setOptOutStatus(contact.id, false);
+              console.log(`[BulkSMS Webhook] ✅ Contact ${contact.id} marked as opted in`);
+            } else {
+              console.log(`[BulkSMS Webhook] ℹ️ No contact found for ${formattedFromNumber}, skipping contact update`);
+            }
+          } catch (contactError) {
+            console.error(`[BulkSMS Webhook] ❌ Error updating contact opt-in status:`, contactError);
+            // Don't fail the whole process if contact update fails
+          }
+          
+          // Send confirmation SMS back to the user
+          try {
+            const confirmationMessage = 'You have been subscribed to receive SMS messages. Reply STOP to opt out at any time.';
+            const senderNumber = business.vapi_phone_number || business.telnyx_number;
+            
+            if (senderNumber) {
+              await sendSMSDirect(senderNumber, formattedFromNumber, confirmationMessage);
+              console.log(`[BulkSMS Webhook] ✅ Opt-in confirmation SMS sent to ${formattedFromNumber}`);
+            } else {
+              console.warn(`[BulkSMS Webhook] ⚠️ No sender number configured for business ${business.id}, cannot send confirmation`);
+            }
+          } catch (smsError) {
+            console.error(`[BulkSMS Webhook] ❌ Error sending opt-in confirmation SMS:`, smsError);
+            // Don't fail the whole process if confirmation SMS fails
+          }
+          
+          console.log(`[BulkSMS Webhook] ✅ Opt-in process completed for ${formattedFromNumber}`);
+        } else {
+          console.warn(`[BulkSMS Webhook] ⚠️ No business found for phone number ${formattedToNumber}`);
+        }
+      } else {
+        console.log('[BulkSMS Webhook] Message received but no opt-out/opt-in keyword detected');
+      }
+    } else {
+      console.log(`[BulkSMS Webhook] Event type: ${eventType} (not message.received, ignoring)`);
+    }
+  } catch (error) {
+    console.error('[BulkSMS Webhook] ❌ CRITICAL ERROR:', error);
+    console.error('[BulkSMS Webhook] Error stack:', error.stack);
+    // Don't return error to Telnyx - we already sent 200
+  }
+});
+
+/**
+ * Debug endpoint to check opt-out records
+ * GET /api/bulk-sms/debug-opt-outs
+ */
+router.get('/debug-opt-outs', authenticate, async (req, res) => {
+  try {
+    // Get all opt-outs for this business
+    const optOuts = await SMSOptOut.findByBusinessId(req.businessId, 100);
+    
+    // Get a sample of contacts to compare phone number formats
+    const { data: contacts } = await supabaseClient
+      .from('contacts')
+      .select('id, phone_number, opted_out, opted_out_at')
+      .eq('business_id', req.businessId)
+      .limit(10);
+    
+    res.json({
+      businessId: req.businessId,
+      optOutsCount: optOuts.length,
+      optOuts: optOuts,
+      sampleContacts: contacts || [],
+      message: 'Check if opt-out phone numbers match contact phone numbers (format may differ)',
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Debug opt-outs error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to get debug info' 
+    });
+  }
+});
+
+/**
+ * Test endpoint to manually create an opt-out (for testing)
+ * POST /api/bulk-sms/test-opt-out
+ */
+router.post('/test-opt-out', authenticate, async (req, res) => {
+  try {
+    const { phone_number } = req.body;
+    
+    if (!phone_number) {
+      return res.status(400).json({ error: 'phone_number is required' });
+    }
+    
+    console.log(`[BulkSMS Test] Creating test opt-out for ${phone_number}...`);
+    
+    // Format phone number
+    const formattedPhone = formatPhoneNumberE164(phone_number);
+    
+    // Create opt-out record
+    const optOut = await SMSOptOut.create({
+      business_id: req.businessId,
+      phone_number: formattedPhone,
+      reason: 'TEST',
+    });
+    
+    console.log(`[BulkSMS Test] ✅ Opt-out created:`, optOut);
+    
+    // Update contact if exists
+    try {
+      const contact = await Contact.findByPhone(req.businessId, formattedPhone);
+      if (contact) {
+        await Contact.setOptOutStatus(contact.id, true);
+        console.log(`[BulkSMS Test] ✅ Contact ${contact.id} marked as opted out`);
+      }
+    } catch (contactError) {
+      console.warn(`[BulkSMS Test] Could not update contact:`, contactError.message);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Test opt-out created successfully',
+      optOut,
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Test opt-out error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to create test opt-out' 
+    });
+  }
+});
+
+export default router;
+

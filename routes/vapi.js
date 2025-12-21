@@ -1101,6 +1101,8 @@ async function handleCallEnd(event) {
       console.log(`[VAPI Webhook] Force Email: ${forceEmail}`);
       console.log(`[VAPI Webhook] Business Email: ${business.email}`);
       console.log(`[VAPI Webhook] Email AI Answered Setting: ${business.email_ai_answered}`);
+      console.log(`[VAPI Webhook] Summary length: ${summary?.length || 0}`);
+      console.log(`[VAPI Webhook] Transcript length: ${transcript?.length || 0}`);
       
       await sendCallSummaryEmail(
         business, 
@@ -1111,7 +1113,7 @@ async function handleCallEnd(event) {
         createdMessage, // Pass message if one was created
         forceEmail // Force email for callbacks/messages
       );
-      console.log(`[VAPI Webhook] ✅ Email notification sent successfully`);
+      console.log(`[VAPI Webhook] ✅ Email notification sent successfully (or skipped if summary not ready)`);
     } catch (emailError) {
       console.error(`[VAPI Webhook] ❌❌❌ CRITICAL ERROR sending email:`, emailError);
       console.error(`[VAPI Webhook] Email error details:`, {

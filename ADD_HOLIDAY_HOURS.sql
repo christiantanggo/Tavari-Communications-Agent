@@ -31,3 +31,4 @@ SELECT
     WHERE table_name = 'ai_agents' AND column_name = 'holiday_hours'
   ) THEN '✅ EXISTS' ELSE '❌ MISSING' END AS status;
 
+

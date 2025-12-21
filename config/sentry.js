@@ -41,3 +41,4 @@ export function captureMessage(message, level = "info", context = {}) {
   console.log(`[Sentry] Message captured (${level}):`, message);
 }
 
+

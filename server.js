@@ -122,6 +122,8 @@ import businessRoutes from "./routes/business.js";
 import callsRoutes from "./routes/calls.js";
 import analyticsRoutes from "./routes/analytics.js";
 import phoneNumbersRoutes from "./routes/phone-numbers.js";
+import bulkSMSRoutes from "./routes/bulkSMS.js";
+import contactsRoutes from "./routes/contacts.js";
 
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
@@ -154,6 +156,8 @@ app.use("/api/business", businessRoutes);
 app.use("/api/calls", callsRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/phone-numbers", phoneNumbersRoutes);
+app.use("/api/bulk-sms", bulkSMSRoutes);
+app.use("/api/contacts", contactsRoutes);
 
 // Legacy Telnyx phone numbers endpoint (for backwards compatibility)
 app.get("/api/telnyx-phone-numbers/search", async (req, res, next) => {

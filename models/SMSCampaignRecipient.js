@@ -1,0 +1,138 @@
+import { supabaseClient } from '../config/database.js';
+
+export class SMSCampaignRecipient {
+  static async create(data) {
+    const {
+      campaign_id,
+      phone_number,
+      email,
+      first_name,
+      last_name,
+      status = 'pending',
+    } = data;
+    
+    const { data: recipient, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .insert({
+        campaign_id,
+        phone_number,
+        email: email || null,
+        first_name: first_name || null,
+        last_name: last_name || null,
+        status,
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[SMSCampaignRecipient Model] ❌ Error creating recipient:', error);
+      throw error;
+    }
+    
+    return recipient;
+  }
+  
+  static async createBatch(recipients) {
+    if (!recipients || recipients.length === 0) {
+      return [];
+    }
+    
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .insert(recipients)
+      .select();
+    
+    if (error) {
+      console.error('[SMSCampaignRecipient Model] ❌ Error creating recipients batch:', error);
+      throw error;
+    }
+    
+    return data || [];
+  }
+  
+  static async findByCampaignId(campaign_id) {
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .order('created_at', { ascending: true });
+    
+    if (error) throw error;
+    return data || [];
+  }
+  
+  static async findByCampaignIdAndStatus(campaign_id, status) {
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .eq('status', status)
+      .order('created_at', { ascending: true });
+    
+    if (error) throw error;
+    return data || [];
+  }
+  
+  static async updateStatus(id, status, additionalData = {}) {
+    const updates = {
+      status,
+      ...additionalData,
+    };
+    
+    if (status === 'sent' && !additionalData.sent_at) {
+      updates.sent_at = new Date().toISOString();
+    }
+    
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+  
+  static async getCampaignStats(campaign_id) {
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('status')
+      .eq('campaign_id', campaign_id);
+    
+    // Handle missing table gracefully
+    if (error) {
+      if (error.message && (
+        error.message.includes('does not exist') || 
+        error.message.includes('relation') ||
+        error.code === '42P01' ||
+        error.code === 'PGRST116'
+      )) {
+        console.warn('[SMSCampaignRecipient Model] Table does not exist, returning empty stats');
+        return {
+          total: 0,
+          pending: 0,
+          sent: 0,
+          failed: 0,
+        };
+      }
+      throw error;
+    }
+    
+    const stats = {
+      total: data.length,
+      pending: 0,
+      sent: 0,
+      failed: 0,
+    };
+    
+    data.forEach(recipient => {
+      if (recipient.status === 'pending') stats.pending++;
+      else if (recipient.status === 'sent') stats.sent++;
+      else if (recipient.status === 'failed') stats.failed++;
+    });
+    
+    return stats;
+  }
+}
+

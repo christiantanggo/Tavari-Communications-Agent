@@ -47,6 +47,10 @@ export default function DashboardHeader() {
             FAQ's
           </Link>
           <span className="text-gray-300">|</span>
+          <Link href="/dashboard/sms" className="text-gray-700 hover:text-blue-600">
+            SMS
+          </Link>
+          <span className="text-gray-300">|</span>
           <Link href="/dashboard/settings" className="text-gray-700 hover:text-blue-600">
             Settings
           </Link>

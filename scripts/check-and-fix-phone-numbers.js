@@ -123,3 +123,4 @@ checkAndReportPhoneNumbers().then(() => {
   process.exit(0);
 });
 
+

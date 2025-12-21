@@ -130,4 +130,22 @@ export class Business {
       ai_enabled: true,
     });
   }
+
+  static async findByPhoneNumber(phoneNumber) {
+    // Normalize phone number for search
+    const normalized = phoneNumber.replace(/[^0-9+]/g, '');
+    const withPlus = normalized.startsWith('+') ? normalized : `+${normalized}`;
+    const withoutPlus = normalized.startsWith('+') ? normalized.substring(1) : normalized;
+    
+    // Try multiple formats
+    let { data, error } = await supabaseClient
+      .from('businesses')
+      .select('*')
+      .or(`vapi_phone_number.eq.${phoneNumber},vapi_phone_number.eq.${withPlus},vapi_phone_number.eq.${withoutPlus},telnyx_number.eq.${phoneNumber},telnyx_number.eq.${withPlus},telnyx_number.eq.${withoutPlus}`)
+      .is('deleted_at', null)
+      .limit(1);
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    return data && data.length > 0 ? data[0] : null;
+  }
 }

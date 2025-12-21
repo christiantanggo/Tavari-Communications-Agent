@@ -230,3 +230,4 @@ WHERE NOT EXISTS (
   WHERE table_name = 'ai_agents' AND column_name = 'voice_id'
 );
 
+

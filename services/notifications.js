@@ -13,6 +13,71 @@ const FROM_NAME = "Tavari";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
 /**
+ * SMS footer that must be appended to all messages (TCPA compliance)
+ */
+const SMS_FOOTER = "\n\nMSG & Data Rates Apply\nSTOP=stop, START=start";
+
+/**
+ * Add required footer to SMS message text
+ * @param {string} messageText - Original message text
+ * @returns {string} Message text with footer appended
+ */
+export function addSMSFooter(messageText) {
+  // Remove any existing footer if present (to avoid duplicates)
+  const footerPattern = /\n\nMSG & Data Rates Apply[\s\S]*STOP=stop, START=start$/;
+  const cleanedText = messageText.replace(footerPattern, '').trim();
+  
+  // Add footer
+  return cleanedText + SMS_FOOTER;
+}
+
+/**
+ * Send SMS directly via Telnyx API (reusable function)
+ * Automatically adds required footer to all messages
+ * @param {string} fromNumber - Sender phone number (E.164 format)
+ * @param {string} toNumber - Recipient phone number (E.164 format)
+ * @param {string} messageText - SMS message text (footer will be added automatically)
+ * @param {boolean} skipFooter - Optional: set to true to skip adding footer (for internal use only)
+ * @returns {Promise<Object>} Telnyx API response
+ */
+export async function sendSMSDirect(fromNumber, toNumber, messageText, skipFooter = false) {
+  if (!TELNYX_API_KEY) {
+    throw new Error("TELNYX_API_KEY not configured");
+  }
+  
+  // Format phone numbers for Telnyx (remove any formatting, ensure it starts with +)
+  let formattedFrom = fromNumber.replace(/[^0-9+]/g, "");
+  if (!formattedFrom.startsWith("+")) {
+    formattedFrom = "+" + formattedFrom;
+  }
+  
+  let formattedTo = toNumber.replace(/[^0-9+]/g, "");
+  if (!formattedTo.startsWith("+")) {
+    formattedTo = "+" + formattedTo;
+  }
+  
+  // Add required footer to all SMS messages (TCPA compliance)
+  const finalMessageText = skipFooter ? messageText : addSMSFooter(messageText);
+  
+  const response = await axios.post(
+    "https://api.telnyx.com/v2/messages",
+    {
+      from: formattedFrom,
+      to: formattedTo,
+      text: finalMessageText,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+  
+  return response.data;
+}
+
+/**
  * Send email using Supabase Edge Function (mail-send)
  */
 async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = null, businessId = null, attachments = null) {
@@ -122,6 +187,21 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
   
   if (forceEmail) {
     console.log("[Call Summary Email] 🔥 FORCING EMAIL - This is a callback/message, email will be sent regardless of email_ai_answered setting");
+  }
+
+  // CRITICAL: Don't send email if summary and transcript are both empty (summary not ready yet)
+  // This prevents duplicate emails - one with "No summary available" and one with actual summary
+  // Exception: Always send if there's a message (callback/message) even if summary is empty
+  const hasSummary = summary && summary.trim().length > 0 && summary !== "No summary available";
+  const hasTranscript = transcript && transcript.trim().length > 0 && transcript !== "No transcript available";
+  const hasMessage = message && message.message_text && message.message_text.trim().length > 0;
+  
+  if (!hasSummary && !hasTranscript && !hasMessage) {
+    console.log("[Call Summary Email] ⚠️ Skipping email - summary and transcript are empty (summary not ready yet). Will send when summary is available.");
+    console.log("[Call Summary Email] Summary:", summary || "(empty)");
+    console.log("[Call Summary Email] Transcript:", transcript ? `${transcript.substring(0, 50)}...` : "(empty)");
+    console.log("[Call Summary Email] Message:", hasMessage ? "present" : "none");
+    return; // Wait for next webhook event that has the actual summary
   }
 
   try {
@@ -240,24 +320,11 @@ export async function sendSMSNotification(business, callSession, summary, messag
     console.log("[SMS Notification] To (formatted):", toNumber);
 
     console.log("[SMS Notification] Step 3: Sending SMS via Telnyx API...");
-    const response = await axios.post(
-      "https://api.telnyx.com/v2/messages",
-      {
-        from: fromNumber,
-        to: toNumber,
-        text: messageText,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${TELNYX_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const response = await sendSMSDirect(fromNumber, toNumber, messageText);
 
     console.log(`[SMS Notification] ✅ SMS sent to ${business.sms_notification_number}`);
-    console.log("[SMS Notification] Response:", JSON.stringify(response.data, null, 2));
-    console.log("[SMS Notification] Message ID:", response.data.data.id);
+    console.log("[SMS Notification] Response:", JSON.stringify(response, null, 2));
+    console.log("[SMS Notification] Message ID:", response.data?.id);
     console.log("[SMS Notification] ========== SMS NOTIFICATION SUCCESS ==========");
     
     // Track SMS cost (3x Telnyx rate)

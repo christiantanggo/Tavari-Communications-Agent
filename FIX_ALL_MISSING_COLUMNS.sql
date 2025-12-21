@@ -283,3 +283,4 @@ SELECT
     WHERE table_name = 'businesses' AND column_name = 'email_missed_calls'
   ) THEN '✅ EXISTS' ELSE '❌ MISSING' END as status;
 
+
