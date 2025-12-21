@@ -862,42 +862,39 @@ router.post('/webhook', express.json(), async (req, res) => {
             // Don't return - continue to update contact and send confirmation
           }
         }
-          
-          // Update contact's opt-out status if they exist in contacts table
-          try {
-            const contact = await Contact.findByPhone(business.id, formattedFromNumber);
-            if (contact) {
-              await Contact.setOptOutStatus(contact.id, true);
-              console.log(`[BulkSMS Webhook] ✅ Contact ${contact.id} marked as opted out`);
-            } else {
-              console.log(`[BulkSMS Webhook] ℹ️ No contact found for ${formattedFromNumber}, skipping contact update`);
-            }
-          } catch (contactError) {
-            console.error(`[BulkSMS Webhook] ❌ Error updating contact opt-out status:`, contactError);
-            // Don't fail the whole process if contact update fails
+        
+        // Update contact's opt-out status if they exist in contacts table
+        try {
+          const contact = await Contact.findByPhone(business.id, formattedFromNumber);
+          if (contact) {
+            await Contact.setOptOutStatus(contact.id, true);
+            console.log(`[BulkSMS Webhook] ✅ Contact ${contact.id} marked as opted out`);
+          } else {
+            console.log(`[BulkSMS Webhook] ℹ️ No contact found for ${formattedFromNumber}, skipping contact update`);
           }
-          
-          // Send confirmation SMS back to the user
-          // Note: Footer is automatically added by sendSMSDirect
-          try {
-            const confirmationMessage = 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.';
-            const senderNumber = business.vapi_phone_number || business.telnyx_number;
-            
-            if (senderNumber) {
-              await sendSMSDirect(senderNumber, formattedFromNumber, confirmationMessage);
-              console.log(`[BulkSMS Webhook] ✅ Confirmation SMS sent to ${formattedFromNumber}`);
-            } else {
-              console.warn(`[BulkSMS Webhook] ⚠️ No sender number configured for business ${business.id}, cannot send confirmation`);
-            }
-          } catch (smsError) {
-            console.error(`[BulkSMS Webhook] ❌ Error sending confirmation SMS:`, smsError);
-            // Don't fail the whole process if confirmation SMS fails
-          }
-          
-          console.log(`[BulkSMS Webhook] ✅ Opt-out process completed for ${formattedFromNumber}`);
-        } else {
-          console.warn(`[BulkSMS Webhook] ⚠️ No business found for phone number ${formattedToNumber}`);
+        } catch (contactError) {
+          console.error(`[BulkSMS Webhook] ❌ Error updating contact opt-out status:`, contactError);
+          // Don't fail the whole process if contact update fails
         }
+        
+        // Send confirmation SMS back to the user
+        // Note: Footer is automatically added by sendSMSDirect
+        try {
+          const confirmationMessage = 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.';
+          const senderNumber = business.vapi_phone_number || business.telnyx_number;
+          
+          if (senderNumber) {
+            await sendSMSDirect(senderNumber, formattedFromNumber, confirmationMessage);
+            console.log(`[BulkSMS Webhook] ✅ Confirmation SMS sent to ${formattedFromNumber}`);
+          } else {
+            console.warn(`[BulkSMS Webhook] ⚠️ No sender number configured for business ${business.id}, cannot send confirmation`);
+          }
+        } catch (smsError) {
+          console.error(`[BulkSMS Webhook] ❌ Error sending confirmation SMS:`, smsError);
+          // Don't fail the whole process if confirmation SMS fails
+        }
+        
+        console.log(`[BulkSMS Webhook] ✅ Opt-out process completed for ${formattedFromNumber}`);
       } else if (isOptIn && toNumber) {
         // Handle opt-in (START keyword)
         console.log('[BulkSMS Webhook] Opt-in keyword detected, processing...');
