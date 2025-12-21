@@ -826,27 +826,42 @@ router.post('/webhook', express.json(), async (req, res) => {
         const formattedFromNumber = formatPhoneNumberE164(fromNumber);
         
         // Find business by phone number (check both vapi_phone_number and telnyx_number)
+        console.log(`[BulkSMS Webhook] Looking up business with phone number: ${formattedToNumber}`);
         const business = await Business.findByPhoneNumber(formattedToNumber);
         
-        if (business) {
-          console.log(`[BulkSMS Webhook] Business found: ${business.id} (${business.name})`);
-          
-          try {
-            // Add to opt-out list (upsert to handle duplicates)
-            await SMSOptOut.create({
-              business_id: business.id,
-              phone_number: formattedFromNumber,
-              reason: 'STOP',
-            });
-            console.log(`[BulkSMS Webhook] ✅ Opt-out recorded in sms_opt_outs: ${formattedFromNumber}`);
-          } catch (optOutError) {
-            // If already exists, that's fine - just log it
-            if (optOutError.code === '23505' || optOutError.message?.includes('duplicate') || optOutError.message?.includes('unique')) {
-              console.log(`[BulkSMS Webhook] ⚠️ Opt-out already exists for ${formattedFromNumber}`);
-            } else {
-              console.error(`[BulkSMS Webhook] ❌ Error creating opt-out record:`, optOutError);
-            }
+        if (!business) {
+          console.error(`[BulkSMS Webhook] ❌ BUSINESS NOT FOUND for phone number: ${formattedToNumber}`);
+          console.error(`[BulkSMS Webhook] Original toNumber: ${toNumber}`);
+          console.error(`[BulkSMS Webhook] Formatted toNumber: ${formattedToNumber}`);
+          console.error(`[BulkSMS Webhook] Cannot process opt-out - business lookup failed`);
+          return; // Exit early if business not found
+        }
+        
+        console.log(`[BulkSMS Webhook] ✅ Business found: ${business.id} (${business.name})`);
+        console.log(`[BulkSMS Webhook] Business vapi_phone_number: ${business.vapi_phone_number}`);
+        console.log(`[BulkSMS Webhook] Business telnyx_number: ${business.telnyx_number}`);
+        
+        try {
+          // Add to opt-out list (upsert to handle duplicates)
+          console.log(`[BulkSMS Webhook] Creating opt-out record for: ${formattedFromNumber}`);
+          const optOutRecord = await SMSOptOut.create({
+            business_id: business.id,
+            phone_number: formattedFromNumber,
+            reason: 'STOP',
+          });
+          console.log(`[BulkSMS Webhook] ✅ Opt-out recorded in sms_opt_outs:`, optOutRecord);
+        } catch (optOutError) {
+          // If already exists, that's fine - just log it
+          if (optOutError.code === '23505' || optOutError.message?.includes('duplicate') || optOutError.message?.includes('unique')) {
+            console.log(`[BulkSMS Webhook] ⚠️ Opt-out already exists for ${formattedFromNumber}`);
+          } else {
+            console.error(`[BulkSMS Webhook] ❌ Error creating opt-out record:`, optOutError);
+            console.error(`[BulkSMS Webhook] Error code:`, optOutError.code);
+            console.error(`[BulkSMS Webhook] Error message:`, optOutError.message);
+            console.error(`[BulkSMS Webhook] Error details:`, optOutError.details);
+            // Don't return - continue to update contact and send confirmation
           }
+        }
           
           // Update contact's opt-out status if they exist in contacts table
           try {
@@ -1008,6 +1023,7 @@ router.post('/test-opt-out', authenticate, async (req, res) => {
     
     // Format phone number
     const formattedPhone = formatPhoneNumberE164(phone_number);
+    console.log(`[BulkSMS Test] Formatted phone: ${formattedPhone}`);
     
     // Create opt-out record
     const optOut = await SMSOptOut.create({
@@ -1024,6 +1040,8 @@ router.post('/test-opt-out', authenticate, async (req, res) => {
       if (contact) {
         await Contact.setOptOutStatus(contact.id, true);
         console.log(`[BulkSMS Test] ✅ Contact ${contact.id} marked as opted out`);
+      } else {
+        console.log(`[BulkSMS Test] ℹ️ No contact found for ${formattedPhone}`);
       }
     } catch (contactError) {
       console.warn(`[BulkSMS Test] Could not update contact:`, contactError.message);
@@ -1033,11 +1051,65 @@ router.post('/test-opt-out', authenticate, async (req, res) => {
       success: true, 
       message: 'Test opt-out created successfully',
       optOut,
+      formattedPhone,
     });
   } catch (error) {
     console.error('[BulkSMS Route] Test opt-out error:', error);
     res.status(500).json({ 
-      error: error.message || 'Failed to create test opt-out' 
+      error: error.message || 'Failed to create test opt-out',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  }
+});
+
+/**
+ * Diagnostic endpoint to check webhook and business setup
+ * GET /api/bulk-sms/diagnose
+ */
+router.get('/diagnose', authenticate, async (req, res) => {
+  try {
+    const business = await Business.findById(req.businessId);
+    
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+    
+    // Check opt-outs
+    const optOuts = await SMSOptOut.findByBusinessId(req.businessId, 10);
+    
+    // Test business lookup by phone number
+    let businessLookupTest = null;
+    if (business.vapi_phone_number) {
+      try {
+        businessLookupTest = await Business.findByPhoneNumber(business.vapi_phone_number);
+      } catch (error) {
+        businessLookupTest = { error: error.message };
+      }
+    }
+    
+    res.json({
+      business: {
+        id: business.id,
+        name: business.name,
+        vapi_phone_number: business.vapi_phone_number,
+        telnyx_number: business.telnyx_number,
+      },
+      businessLookupTest: {
+        phoneNumber: business.vapi_phone_number,
+        found: businessLookupTest !== null && !businessLookupTest.error,
+        error: businessLookupTest?.error,
+      },
+      optOuts: {
+        count: optOuts.length,
+        recent: optOuts.slice(0, 5),
+      },
+      webhookUrl: `https://api.tavarios.com/api/bulk-sms/webhook`,
+      message: 'Use this to diagnose why opt-outs might not be working',
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Diagnose error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to get diagnostic info' 
     });
   }
 });
