@@ -373,9 +373,13 @@ router.post('/signup', async (req, res) => {
       // Don't fail signup if phone assignment fails - user can assign manually later
       console.error('[Signup] ⚠️  Error automatically assigning phone number (non-blocking):', phoneError.message);
       console.error('[Signup] Business can assign phone number manually via the setup wizard.');
-      // Release lock if we had one
-      if (phoneNumber) {
-        releasePhoneLock(phoneNumber);
+      // Release lock if we had one (phoneNumber might be undefined if error occurred early)
+      if (typeof phoneNumber !== 'undefined' && phoneNumber) {
+        try {
+          releasePhoneLock(phoneNumber);
+        } catch (lockError) {
+          console.warn('[Signup] Could not release phone lock:', lockError.message);
+        }
       }
     }
     

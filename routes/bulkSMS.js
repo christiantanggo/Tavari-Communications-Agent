@@ -889,6 +889,8 @@ router.post('/webhook', express.json(), async (req, res) => {
         
         // Send confirmation SMS back to the user
         // Note: Footer is automatically added by sendSMSDirect
+        // Note: Telnyx may return 409 Conflict if user just opted out (they block sending to opted-out numbers)
+        // This is expected behavior - we still record the opt-out successfully
         try {
           const confirmationMessage = 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.';
           const senderNumber = business.vapi_phone_number || business.telnyx_number;
@@ -900,8 +902,13 @@ router.post('/webhook', express.json(), async (req, res) => {
             console.warn(`[BulkSMS Webhook] ⚠️ No sender number configured for business ${business.id}, cannot send confirmation`);
           }
         } catch (smsError) {
-          console.error(`[BulkSMS Webhook] ❌ Error sending confirmation SMS:`, smsError);
-          // Don't fail the whole process if confirmation SMS fails
+          // Handle 409 Conflict gracefully - Telnyx blocks sending to numbers that just opted out
+          if (smsError.response?.status === 409) {
+            console.log(`[BulkSMS Webhook] ℹ️ Telnyx returned 409 Conflict - user is already opted out (expected behavior)`);
+          } else {
+            console.error(`[BulkSMS Webhook] ❌ Error sending confirmation SMS:`, smsError.message || smsError);
+          }
+          // Don't fail the whole process if confirmation SMS fails - opt-out is already recorded
         }
         
         console.log(`[BulkSMS Webhook] ✅ Opt-out process completed for ${formattedFromNumber}`);
