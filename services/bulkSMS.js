@@ -366,16 +366,44 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
     // Load balance messages
     const assignments = loadBalanceMessages(recipientPhoneNumbers, availableNumbers);
     
-    // Check opt-outs
+    // Check opt-outs - normalize phone numbers for comparison
     const optOuts = await SMSOptOut.findByBusinessId(businessId);
-    const optOutSet = new Set(optOuts.map(o => o.phone_number));
+    const optOutSet = new Set();
     
-    // Filter out opted-out numbers
-    const validAssignments = assignments.filter(a => !optOutSet.has(a.phoneNumber));
+    // Normalize opt-out phone numbers to E.164 format
+    for (const optOut of optOuts) {
+      try {
+        const normalized = formatPhoneNumberE164(optOut.phone_number);
+        if (normalized) {
+          optOutSet.add(normalized);
+          // Also add original format for robustness
+          optOutSet.add(optOut.phone_number);
+        } else {
+          optOutSet.add(optOut.phone_number); // Fallback to original if normalization fails
+        }
+      } catch (error) {
+        console.warn(`[BulkSMS] Could not normalize opt-out number ${optOut.phone_number}:`, error.message);
+        optOutSet.add(optOut.phone_number); // Fallback to original
+      }
+    }
+    
+    // Filter out opted-out numbers - normalize recipient numbers too
+    const validAssignments = assignments.filter(a => {
+      try {
+        const normalizedPhone = formatPhoneNumberE164(a.phoneNumber);
+        // Check both normalized and original format
+        const isOptedOut = optOutSet.has(a.phoneNumber) || (normalizedPhone && optOutSet.has(normalizedPhone));
+        return !isOptedOut;
+      } catch (error) {
+        // If normalization fails, just check original format
+        return !optOutSet.has(a.phoneNumber);
+      }
+    });
+    
     const optedOutCount = assignments.length - validAssignments.length;
     
     if (optedOutCount > 0) {
-      console.log(`[BulkSMS] Filtered out ${optedOutCount} opted-out numbers`);
+      console.log(`[BulkSMS] ✅ Filtered out ${optedOutCount} opted-out number(s) - they will NOT receive messages`);
     }
     
     // Track last send time per number to enforce rate limits
