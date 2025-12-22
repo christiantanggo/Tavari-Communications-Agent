@@ -136,15 +136,50 @@ function AdminAccountsPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {account.vapi_phone_number || 'N/A'}
+                      {account.telnyx_number || account.vapi_phone_number || 'N/A'}
+                      {account.vapi_phone_number && !account.telnyx_number && (
+                        <span className="ml-2 text-xs text-orange-600">(VAPI)</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <Link
                         href={`/admin/accounts/${account.id}`}
-                        className="text-blue-600 hover:text-blue-900"
+                        className="text-blue-600 hover:text-blue-900 mr-3"
                       >
                         View Details
                       </Link>
+                      {account.vapi_phone_number && !account.telnyx_number && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Migrate ${account.vapi_phone_number} from vapi_phone_number to telnyx_number for ${account.name}?`)) {
+                              return;
+                            }
+                            try {
+                              const token = getAdminToken();
+                              const response = await fetch(`${API_URL}/api/admin/phone-numbers/migrate-to-telnyx/${account.id}`, {
+                                method: 'POST',
+                                headers: {
+                                  'Authorization': `Bearer ${token}`,
+                                  'Content-Type': 'application/json',
+                                },
+                              });
+                              const data = await response.json();
+                              if (response.ok) {
+                                alert('Phone number migrated successfully!');
+                                loadAccounts();
+                              } else {
+                                alert('Error: ' + (data.error || 'Failed to migrate'));
+                              }
+                            } catch (error) {
+                              console.error('Migration error:', error);
+                              alert('Failed to migrate phone number');
+                            }
+                          }}
+                          className="text-orange-600 hover:text-orange-900 text-xs"
+                        >
+                          Migrate to Telnyx
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
