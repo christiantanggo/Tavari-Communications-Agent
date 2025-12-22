@@ -915,9 +915,10 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
 /**
  * Recover stuck campaigns by checking actual recipient statuses
  * @param {string} campaignId - Campaign ID
+ * @param {boolean} force - Force completion even if not all recipients processed
  * @returns {Promise<Object>} Recovery result with updated stats
  */
-export async function recoverStuckCampaign(campaignId) {
+export async function recoverStuckCampaign(campaignId, force = false) {
   console.log(`[BulkSMS] ========== RECOVERING STUCK CAMPAIGN ${campaignId} ==========`);
   
   try {
@@ -959,12 +960,17 @@ export async function recoverStuckCampaign(campaignId) {
     
     const totalProcessed = statusCounts.sent + statusCounts.failed;
     const totalRecipients = recipients.length;
+    const processedPercentage = totalRecipients > 0 ? (totalProcessed / totalRecipients) * 100 : 0;
     
     console.log(`[BulkSMS] Recipient status breakdown:`, statusCounts);
-    console.log(`[BulkSMS] Total processed: ${totalProcessed} / ${totalRecipients}`);
+    console.log(`[BulkSMS] Total processed: ${totalProcessed} / ${totalRecipients} (${processedPercentage.toFixed(1)}%)`);
+    console.log(`[BulkSMS] Campaign sent_count: ${campaign.sent_count}, failed_count: ${campaign.failed_count}`);
+    console.log(`[BulkSMS] Actual sent_count: ${statusCounts.sent}, failed_count: ${statusCounts.failed}`);
     
     // Determine final status
     let finalStatus = 'processing';
+    
+    // Check if all recipients are processed
     if (totalProcessed === totalRecipients) {
       // All recipients have been processed
       if (statusCounts.failed === totalRecipients) {
@@ -974,17 +980,50 @@ export async function recoverStuckCampaign(campaignId) {
       } else {
         finalStatus = 'failed';
       }
-    } else if (totalProcessed > 0 && campaign.sent_count === statusCounts.sent && campaign.failed_count === statusCounts.failed) {
-      // Campaign appears to be stuck - no new progress
-      // Check if it's been stuck for more than 5 minutes
+    } 
+    // If most recipients are processed (>95%), mark as complete
+    else if (processedPercentage >= 95 && statusCounts.sent > 0) {
+      console.log(`[BulkSMS] Campaign is ${processedPercentage.toFixed(1)}% complete - marking as completed`);
+      finalStatus = 'completed';
+    }
+    // Force completion if requested
+    else if (force && totalProcessed > 0) {
+      console.log(`[BulkSMS] Force recovery requested - marking as completed`);
+      finalStatus = statusCounts.sent > 0 ? 'completed' : 'failed';
+    }
+    // If campaign has been stuck for more than 2 minutes and has significant progress
+    else {
       const now = new Date();
       const startedAt = campaign.started_at ? new Date(campaign.started_at) : new Date(campaign.created_at);
       const stuckDuration = (now - startedAt) / 1000 / 60; // minutes
       
-      if (stuckDuration > 5) {
-        console.log(`[BulkSMS] Campaign has been stuck for ${stuckDuration.toFixed(1)} minutes`);
-        // Mark as completed if we have some sent, failed otherwise
-        finalStatus = statusCounts.sent > 0 ? 'completed' : 'failed';
+      console.log(`[BulkSMS] Campaign has been running for ${stuckDuration.toFixed(1)} minutes`);
+      
+      // If stuck for more than 2 minutes and no new progress, mark as complete
+      if (stuckDuration > 2 && totalProcessed > 0) {
+        // Check if campaign counts match actual counts (meaning no new progress)
+        const countsMatch = campaign.sent_count === statusCounts.sent && campaign.failed_count === statusCounts.failed;
+        
+        if (countsMatch) {
+          console.log(`[BulkSMS] Campaign has been stuck for ${stuckDuration.toFixed(1)} minutes with no new progress`);
+          // Mark as completed if we have some sent, failed otherwise
+          finalStatus = statusCounts.sent > 0 ? 'completed' : 'failed';
+        } else {
+          console.log(`[BulkSMS] Campaign counts don't match - updating counts but keeping as processing`);
+          // Update counts but don't change status yet
+          await SMSCampaign.update(campaignId, {
+            sent_count: statusCounts.sent,
+            failed_count: statusCounts.failed,
+          });
+          return {
+            recovered: false,
+            reason: 'Campaign is still processing - counts updated',
+            sentCount: statusCounts.sent,
+            failedCount: statusCounts.failed,
+            totalRecipients,
+            campaign: await SMSCampaign.findById(campaignId),
+          };
+        }
       }
     }
     

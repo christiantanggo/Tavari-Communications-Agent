@@ -786,6 +786,7 @@ router.get('/campaigns/:id/recipients', authenticate, async (req, res) => {
 /**
  * Recover stuck campaign by checking actual recipient statuses
  * POST /api/bulk-sms/campaigns/:id/recover
+ * Query param: force=true to force completion even if not all processed
  */
 router.post('/campaigns/:id/recover', authenticate, async (req, res) => {
   try {
@@ -799,12 +800,14 @@ router.post('/campaigns/:id/recover', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     
-    const result = await recoverStuckCampaign(req.params.id);
+    const force = req.query.force === 'true' || req.body.force === true;
+    
+    const result = await recoverStuckCampaign(req.params.id, force);
     
     res.json({
       success: result.recovered,
       message: result.recovered 
-        ? `Campaign recovered: ${result.previousStatus} → ${result.newStatus}`
+        ? `Campaign recovered: ${result.previousStatus} → ${result.newStatus} (${result.sentCount} sent, ${result.failedCount} failed)`
         : result.reason,
       result,
     });
