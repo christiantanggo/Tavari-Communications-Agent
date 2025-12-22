@@ -45,64 +45,101 @@ async function testVerificationAPI() {
       console.log('');
     }
 
-    // Step 2: Test the official Toll-Free Verification API endpoint
-    console.log('2️⃣  Testing official Toll-Free Verification API endpoint...\n');
-    console.log('   Endpoint: POST /v2/toll_free_verifications\n');
+    // Step 2: Test multiple possible Toll-Free Verification API endpoints
+    console.log('2️⃣  Testing Toll-Free Verification API endpoints...\n');
 
     if (tollFreeNumbers.length > 0) {
       const testNumber = tollFreeNumbers[0];
       console.log(`   Testing with number: ${testNumber.phone_number}\n`);
 
-      try {
-        const verifyResponse = await axios.post(
-          `${TELNYX_API_BASE_URL}/toll_free_verifications`,
-          {
-            phone_number: testNumber.phone_number,
-            use_case: 'Marketing and promotional messages',
-            business_name: 'Test Business',
-            website: 'https://example.com',
-            // Optional but recommended (mandatory after Jan 1, 2026)
-            business_registration_number: '12-3456789', // Example EIN
-            business_registration_type: 'PRIVATE_PROFIT',
-            business_registration_country: 'US',
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${TELNYX_API_KEY}`,
-              'Content-Type': 'application/json',
+      // Try multiple possible endpoint paths
+      const endpointsToTest = [
+        {
+          path: '/toll_free_verifications',
+          description: 'POST /v2/toll_free_verifications (official endpoint)',
+        },
+        {
+          path: `/phone_numbers/${testNumber.id}/toll_free_verification`,
+          description: `POST /v2/phone_numbers/{id}/toll_free_verification`,
+        },
+        {
+          path: `/phone_numbers/${testNumber.id}/verification`,
+          description: `POST /v2/phone_numbers/{id}/verification`,
+        },
+        {
+          path: `/toll_free_numbers/${testNumber.id}/verification`,
+          description: `POST /v2/toll_free_numbers/{id}/verification`,
+        },
+      ];
+
+      let foundWorkingEndpoint = false;
+
+      for (const endpoint of endpointsToTest) {
+        console.log(`   Testing: ${endpoint.description}`);
+        try {
+          const verifyResponse = await axios.post(
+            `${TELNYX_API_BASE_URL}${endpoint.path}`,
+            {
+              phone_number: testNumber.phone_number,
+              use_case: 'Marketing and promotional messages',
+              business_name: 'Test Business',
+              website: 'https://example.com',
+              // Optional but recommended (mandatory after Jan 1, 2026)
+              business_registration_number: '12-3456789', // Example EIN
+              business_registration_type: 'PRIVATE_PROFIT',
+              business_registration_country: 'US',
             },
-          }
-        );
-        
-        console.log(`   ✅ SUCCESS! Endpoint exists and accepts requests!`);
-        console.log(`   📋 Response:`, JSON.stringify(verifyResponse.data, null, 2));
-        console.log(`\n   💡 Automatic verification via API IS AVAILABLE!`);
-        console.log(`   💡 You can use POST /v2/toll_free_verifications to verify numbers programmatically\n`);
-      } catch (error) {
-        if (error.response?.status === 404) {
-          console.log(`   ❌ Endpoint does NOT exist (404 Not Found)`);
-          console.log(`   💡 Automatic verification via API is NOT available`);
-          console.log(`   💡 Manual verification required through Telnyx portal`);
-          console.log(`   💡 Portal: https://portal.telnyx.com/#/app/numbers\n`);
-        } else if (error.response?.status === 501) {
-          console.log(`   ❌ Endpoint not implemented (501 Not Implemented)`);
-          console.log(`   💡 Automatic verification via API is NOT available\n`);
-        } else if (error.response?.status === 400 || error.response?.status === 422) {
-          console.log(`   ✅ Endpoint EXISTS but returned validation error`);
-          console.log(`   💡 This means the API endpoint IS AVAILABLE!`);
-          console.log(`   📋 Error details:`, JSON.stringify(error.response.data, null, 2));
+            {
+              headers: {
+                Authorization: `Bearer ${TELNYX_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          
+          console.log(`      ✅ SUCCESS! Endpoint exists and accepts requests!`);
+          console.log(`      📋 Response:`, JSON.stringify(verifyResponse.data, null, 2));
           console.log(`\n   💡 Automatic verification via API IS AVAILABLE!`);
-          console.log(`   💡 Fix the validation errors above to use it successfully\n`);
-        } else if (error.response?.status === 409) {
-          console.log(`   ⚠️  Conflict (409) - Number may already be verified or verification in progress`);
-          console.log(`   💡 This means the API endpoint IS AVAILABLE!`);
-          console.log(`   📋 Response:`, JSON.stringify(error.response.data, null, 2));
-          console.log(`\n   💡 Automatic verification via API IS AVAILABLE!\n`);
-        } else {
-          console.log(`   ⚠️  Unexpected error: ${error.response?.status} ${error.response?.statusText || error.message}`);
-          console.log(`   📋 Response:`, error.response?.data || error.message);
-          console.log(`\n   💡 Check the error above to determine if API is available\n`);
+          console.log(`   💡 Use: POST ${endpoint.path}\n`);
+          foundWorkingEndpoint = true;
+          break;
+        } catch (error) {
+          if (error.response?.status === 404) {
+            console.log(`      ❌ Not found (404)`);
+          } else if (error.response?.status === 501) {
+            console.log(`      ❌ Not implemented (501)`);
+          } else if (error.response?.status === 400 || error.response?.status === 422) {
+            console.log(`      ✅ EXISTS! Validation error (endpoint is available)`);
+            console.log(`      📋 Error:`, JSON.stringify(error.response.data, null, 2));
+            console.log(`\n   💡 Automatic verification via API IS AVAILABLE!`);
+            console.log(`   💡 Use: POST ${endpoint.path}`);
+            console.log(`   💡 Fix validation errors to use it successfully\n`);
+            foundWorkingEndpoint = true;
+            break;
+          } else if (error.response?.status === 409) {
+            console.log(`      ✅ EXISTS! Conflict (409) - verification may already exist`);
+            console.log(`      📋 Response:`, JSON.stringify(error.response.data, null, 2));
+            console.log(`\n   💡 Automatic verification via API IS AVAILABLE!`);
+            console.log(`   💡 Use: POST ${endpoint.path}\n`);
+            foundWorkingEndpoint = true;
+            break;
+          } else {
+            console.log(`      ⚠️  Error ${error.response?.status}: ${error.response?.statusText || error.message}`);
+          }
         }
+      }
+
+      if (!foundWorkingEndpoint) {
+        console.log(`\n   ❌ No working API endpoint found`);
+        console.log(`   💡 Automatic verification via API is NOT available`);
+        console.log(`   💡 Manual verification required through Telnyx portal`);
+        console.log(`   💡 Portal: https://portal.telnyx.com/#/app/numbers`);
+        console.log(`\n   📝 Note: You have ${tollFreeNumbers.length} toll-free number(s), but the API endpoint is not available.`);
+        console.log(`   📝 This could mean:`);
+        console.log(`      - The API requires special account permissions`);
+        console.log(`      - The API is behind a feature flag`);
+        console.log(`      - Manual verification is the only option for your account`);
+        console.log(`   📝 Contact Telnyx support to enable API access if needed\n`);
       }
     } else {
       console.log(`   ⏭️  Skipped (no toll-free numbers to test)`);
@@ -124,19 +161,40 @@ async function testVerificationAPI() {
         
         // Check for verification-related fields
         const data = detailResponse.data.data || {};
+        console.log(`   📋 Full phone number data keys:`, Object.keys(data).join(', '));
+        
         const verificationFields = Object.keys(data).filter(key => 
           key.toLowerCase().includes('verif') || 
           key.toLowerCase().includes('verify') ||
-          key.toLowerCase().includes('status')
+          key.toLowerCase().includes('toll') ||
+          key.toLowerCase().includes('messaging')
         );
         
         if (verificationFields.length > 0) {
-          console.log(`   📊 Verification-related fields found:`);
+          console.log(`   📊 Verification/messaging-related fields found:`);
           verificationFields.forEach(field => {
-            console.log(`      - ${field}: ${data[field]}`);
+            console.log(`      - ${field}: ${JSON.stringify(data[field])}`);
           });
         } else {
           console.log(`   ⚠️  No verification-related fields found in response`);
+        }
+        
+        // Check messaging profile which might contain verification info
+        if (data.messaging_profile_id) {
+          console.log(`   📱 Messaging Profile ID: ${data.messaging_profile_id}`);
+          try {
+            const profileResponse = await axios.get(
+              `${TELNYX_API_BASE_URL}/messaging_profiles/${data.messaging_profile_id}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${TELNYX_API_KEY}`,
+                },
+              }
+            );
+            console.log(`   📋 Messaging Profile data:`, JSON.stringify(profileResponse.data.data, null, 2));
+          } catch (profileError) {
+            console.log(`   ⚠️  Could not fetch messaging profile: ${profileError.message}`);
+          }
         }
       } catch (error) {
         console.log(`   ❌ Error: ${error.response?.status} ${error.response?.statusText || error.message}`);
