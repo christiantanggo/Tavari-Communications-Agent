@@ -209,6 +209,7 @@ function SMSPage() {
       setMessageText('');
       setSelectedContactsForCampaign([]);
       setSelectedListsForCampaign([]);
+      setSendToAllContacts(false);
       
       // Switch to campaigns tab and reload
       setActiveTab('campaigns');
