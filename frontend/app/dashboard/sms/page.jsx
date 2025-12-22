@@ -1251,6 +1251,58 @@ function SMSPage() {
                             <>
                               <button
                                 onClick={async () => {
+                                  setLoading(true);
+                                  try {
+                                    const res = await bulkSMSAPI.diagnoseCampaign(selectedCampaign.id);
+                                    const diag = res.data;
+                                    const message = `Diagnostics:
+• Status: ${diag.campaign.status}
+• Running: ${diag.campaign.running_duration_minutes} minutes
+• Campaign shows: ${diag.campaign.sent_count} sent, ${diag.campaign.failed_count} failed
+• Actually: ${diag.actualCounts.sent} sent, ${diag.actualCounts.failed} failed, ${diag.actualCounts.pending} pending
+• Pending recipients: ${diag.pendingRecipientsCount}
+• Queued recipients: ${diag.queuedRecipientsCount}
+${diag.discrepancies.sentCountMismatch ? `⚠️ Sent count mismatch: ${diag.discrepancies.sentCountDiff > 0 ? '+' : ''}${diag.discrepancies.sentCountDiff}` : ''}
+${diag.discrepancies.failedCountMismatch ? `⚠️ Failed count mismatch: ${diag.discrepancies.failedCountDiff > 0 ? '+' : ''}${diag.discrepancies.failedCountDiff}` : ''}`;
+                                    alert(message);
+                                  } catch (error) {
+                                    console.error('Diagnose campaign error:', error);
+                                    showError(error.response?.data?.error || 'Failed to diagnose campaign');
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                              >
+                                Diagnose
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Resume sending to pending recipients? This will continue sending messages that haven\'t been sent yet.')) {
+                                    return;
+                                  }
+                                  setLoading(true);
+                                  try {
+                                    const res = await bulkSMSAPI.resumeCampaign(selectedCampaign.id);
+                                    success(res.data.message || 'Campaign resume started - messages will continue sending');
+                                    // Refresh after a delay to see progress
+                                    setTimeout(async () => {
+                                      await handleViewCampaign(selectedCampaign.id);
+                                      await loadData();
+                                    }, 2000);
+                                  } catch (error) {
+                                    console.error('Resume campaign error:', error);
+                                    showError(error.response?.data?.error || 'Failed to resume campaign');
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700"
+                              >
+                                Resume Sending
+                              </button>
+                              <button
+                                onClick={async () => {
                                   if (!confirm('Recover this stuck campaign? This will check actual recipient statuses and update the campaign status accordingly.')) {
                                     return;
                                   }
@@ -1273,7 +1325,7 @@ function SMSPage() {
                                 }}
                                 className="px-4 py-2 text-sm bg-orange-600 text-white rounded-md hover:bg-orange-700"
                               >
-                                Recover Campaign
+                                Recover
                               </button>
                               <button
                                 onClick={async () => {
