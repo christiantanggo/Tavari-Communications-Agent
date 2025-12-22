@@ -18,6 +18,8 @@ import {
   getCampaignStatus,
   cancelCampaign,
   recoverStuckCampaign,
+  diagnoseStuckCampaign,
+  resumeStuckCampaign,
 } from '../services/bulkSMS.js';
 import { validatePhoneNumbersForBulk, formatPhoneNumberE164 } from '../utils/phoneFormatter.js';
 import { supabaseClient } from '../config/database.js';
@@ -779,6 +781,70 @@ router.get('/campaigns/:id/recipients', authenticate, async (req, res) => {
     console.error('[BulkSMS Route] Get recipients error:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to get recipients' 
+    });
+  }
+});
+
+/**
+ * Diagnose why a campaign is stuck
+ * GET /api/bulk-sms/campaigns/:id/diagnose
+ */
+router.get('/campaigns/:id/diagnose', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const diagnostics = await diagnoseStuckCampaign(req.params.id);
+    
+    res.json(diagnostics);
+  } catch (error) {
+    console.error('[BulkSMS Route] Diagnose campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to diagnose campaign' 
+    });
+  }
+});
+
+/**
+ * Resume sending to pending recipients in a stuck campaign
+ * POST /api/bulk-sms/campaigns/:id/resume
+ */
+router.post('/campaigns/:id/resume', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Run resume in background
+    resumeStuckCampaign(req.params.id)
+      .then(result => {
+        console.log(`[BulkSMS Route] Resume completed for campaign ${req.params.id}:`, result);
+      })
+      .catch(error => {
+        console.error(`[BulkSMS Route] Resume error for campaign ${req.params.id}:`, error);
+      });
+    
+    res.json({
+      success: true,
+      message: 'Resume started - campaign will continue sending to pending recipients',
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Resume campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to resume campaign' 
     });
   }
 });
