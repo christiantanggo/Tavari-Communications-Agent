@@ -481,13 +481,45 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
   try {
     // Get available numbers
     console.log(`[BulkSMS] Getting available SMS numbers for business ${businessId}...`);
-    const availableNumbers = await getAvailableSMSNumbers(businessId);
-    console.log(`[BulkSMS] Found ${availableNumbers.length} available number(s):`);
+    const allNumbers = await getAvailableSMSNumbers(businessId);
+    console.log(`[BulkSMS] Found ${allNumbers.length} number(s) total:`);
+    allNumbers.forEach((num, idx) => {
+      console.log(`[BulkSMS]   ${idx + 1}. ${num.phone_number} (${num.type}, ${num.rateLimit} msg/min, ${num.country}, verified: ${num.verified})`);
+    });
+    
+    // Filter out unverified toll-free numbers (compliance requirement - cannot send from unverified toll-free)
+    const availableNumbers = allNumbers.filter(num => {
+      // Safety check: skip if phone_number is missing
+      if (!num.phone_number) {
+        console.warn(`[BulkSMS] ⚠️  Skipping number with missing phone_number`);
+        return false;
+      }
+      
+      // Check if it's an unverified toll-free number
+      const isTollFreeNum = isTollFree(num.phone_number);
+      if (num.type === 'TOLL_FREE_UNVERIFIED' || (isTollFreeNum && !num.verified)) {
+        console.warn(`[BulkSMS] ⚠️  Skipping unverified toll-free number ${num.phone_number} - cannot send SMS until verified`);
+        return false;
+      }
+      
+      // Also filter out numbers with rateLimit of 0 (shouldn't happen, but safety check)
+      if (num.rateLimit === 0) {
+        console.warn(`[BulkSMS] ⚠️  Skipping number ${num.phone_number} with rateLimit of 0`);
+        return false;
+      }
+      return true;
+    });
+    
+    console.log(`[BulkSMS] After filtering unverified toll-free numbers: ${availableNumbers.length} available number(s):`);
     availableNumbers.forEach((num, idx) => {
       console.log(`[BulkSMS]   ${idx + 1}. ${num.phone_number} (${num.type}, ${num.rateLimit} msg/min, ${num.country})`);
     });
     
     if (availableNumbers.length === 0) {
+      const unverifiedTollFree = allNumbers.filter(num => num.phone_number && isTollFree(num.phone_number) && !num.verified);
+      if (unverifiedTollFree.length > 0) {
+        throw new Error(`Cannot send SMS: All available numbers are unverified toll-free numbers. Toll-free numbers must be verified before sending SMS. Please verify your toll-free number(s) in Telnyx dashboard or contact support.`);
+      }
       throw new Error('No SMS-capable numbers available for this business');
     }
     
