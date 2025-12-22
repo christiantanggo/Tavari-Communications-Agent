@@ -11,6 +11,10 @@ import {
   isTollFree,
   getNumberCountry
 } from '../utils/phoneFormatter.js';
+import { 
+  getTimezoneFromPhoneNumber, 
+  checkQuietHours 
+} from '../utils/timezoneDetector.js';
 import { SMSCampaign } from '../models/SMSCampaign.js';
 import { SMSCampaignRecipient } from '../models/SMSCampaignRecipient.js';
 import { SMSOptOut } from '../models/SMSOptOut.js';
@@ -286,45 +290,48 @@ export function loadBalanceMessages(phoneNumbers, availableNumbers) {
  * @param {Array} phoneNumbers - Array of recipient phone numbers
  */
 /**
- * Check if current time is within allowed SMS sending hours
+ * Check if current time is within allowed SMS sending hours for a recipient
+ * Uses recipient's timezone (from phone number area code) for TCPA compliance
+ * @param {string} phoneNumber - Recipient phone number
  * @param {Object} business - Business object with SMS time settings
- * @returns {boolean} True if SMS can be sent now
+ * @returns {Object} { allowed: boolean, reason: string, timezone: string, currentTime: string }
  */
-function isWithinSMSTimeWindow(business) {
+function checkRecipientQuietHours(phoneNumber, business) {
   // If SMS business hours are disabled, always allow sending
   if (!business.sms_business_hours_enabled) {
-    return true;
+    return {
+      allowed: true,
+      reason: 'quiet_hours_disabled',
+      message: 'SMS time restrictions are disabled',
+    };
   }
 
-  // Get current time in business timezone
-  const timezone = business.sms_timezone || business.timezone || 'America/New_York';
-  const now = new Date();
+  // Get recipient's timezone from phone number area code
+  const fallbackTimezone = business.sms_timezone || business.timezone || 'America/New_York';
+  const recipientTimezone = getTimezoneFromPhoneNumber(phoneNumber, fallbackTimezone);
   
-  // Convert to business timezone
-  const businessTime = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
-  const currentHour = businessTime.getHours();
-  const currentMinute = businessTime.getMinutes();
-  const currentTimeMinutes = currentHour * 60 + currentMinute;
-
-  // Parse allowed start/end times
+  // Parse allowed start/end times (default: 9 AM - 8 PM for TCPA compliance)
   const startTime = business.sms_allowed_start_time || '09:00:00';
-  const endTime = business.sms_allowed_end_time || '21:00:00';
+  const endTime = business.sms_allowed_end_time || '20:00:00'; // 8 PM, not 9 PM for safety
   
-  const [startHour, startMin] = startTime.split(':').map(Number);
-  const [endHour, endMin] = endTime.split(':').map(Number);
+  const [startHour] = startTime.split(':').map(Number);
+  const [endHour] = endTime.split(':').map(Number);
   
-  const startTimeMinutes = startHour * 60 + startMin;
-  const endTimeMinutes = endHour * 60 + endMin;
-
-  // Check if current time is within allowed window
-  const isWithinWindow = currentTimeMinutes >= startTimeMinutes && currentTimeMinutes <= endTimeMinutes;
+  // Check quiet hours for recipient's timezone
+  const quietHoursCheck = checkQuietHours(recipientTimezone, startHour, endHour);
   
-  console.log(`[BulkSMS] Time check: Current time in ${timezone}: ${businessTime.toLocaleTimeString()}, Allowed: ${startTime} - ${endTime}, Within window: ${isWithinWindow}`);
-  
-  return isWithinWindow;
+  return {
+    allowed: quietHoursCheck.isWithinAllowedHours,
+    reason: quietHoursCheck.isWithinQuietHours ? 'quiet_hours' : 'allowed',
+    timezone: recipientTimezone,
+    currentTime: quietHoursCheck.currentTime.toLocaleTimeString(),
+    message: quietHoursCheck.message,
+    quietHoursCheck,
+  };
 }
 
-export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumbers) {
+export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumbers, options = {}) {
+  const { overrideQuietHours = false } = options;
   console.log(`[BulkSMS] ========== FUNCTION CALLED ==========`);
   console.log(`[BulkSMS] Function entry point reached`);
   console.log(`[BulkSMS] Parameters received:`, {
@@ -363,16 +370,65 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
   }
   console.log(`[BulkSMS] ✅ Business found: ${business.name}`);
   
-  // Check if SMS time restrictions are enabled and if we're within allowed time
-  // NOTE: We check but don't block - user explicitly started the campaign, so we send it
-  // Time restrictions are informational only for campaigns (they can still be used for scheduled sends in future)
-  if (business.sms_business_hours_enabled) {
-    const isWithinWindow = isWithinSMSTimeWindow(business);
-    if (!isWithinWindow) {
-      console.log(`[BulkSMS] ⚠️ WARNING: Current time is outside allowed SMS sending hours, but sending anyway (campaign was manually started)`);
-    } else {
-      console.log(`[BulkSMS] ✅ Current time is within allowed SMS sending hours`);
+  // Check quiet hours for all recipients before sending
+  // This enforces TCPA compliance by checking each recipient's timezone
+  const quietHoursViolations = [];
+  const quietHoursStats = {
+    total: phoneNumbers.length,
+    allowed: 0,
+    blocked: 0,
+    timezones: {},
+  };
+  
+  if (business.sms_business_hours_enabled && !overrideQuietHours) {
+    console.log(`[BulkSMS] 🔍 Checking quiet hours for ${phoneNumbers.length} recipients...`);
+    
+    for (const phoneNumber of phoneNumbers) {
+      const check = checkRecipientQuietHours(phoneNumber, business);
+      
+      // Track timezone distribution
+      if (!quietHoursStats.timezones[check.timezone]) {
+        quietHoursStats.timezones[check.timezone] = { allowed: 0, blocked: 0 };
+      }
+      
+      if (check.allowed) {
+        quietHoursStats.allowed++;
+        quietHoursStats.timezones[check.timezone].allowed++;
+      } else {
+        quietHoursStats.blocked++;
+        quietHoursStats.timezones[check.timezone].blocked++;
+        quietHoursViolations.push({
+          phoneNumber,
+          timezone: check.timezone,
+          currentTime: check.currentTime,
+          reason: check.message,
+        });
+      }
     }
+    
+    console.log(`[BulkSMS] 📊 Quiet Hours Check Results:`);
+    console.log(`[BulkSMS]   Total recipients: ${quietHoursStats.total}`);
+    console.log(`[BulkSMS]   Allowed: ${quietHoursStats.allowed}`);
+    console.log(`[BulkSMS]   Blocked (quiet hours): ${quietHoursStats.blocked}`);
+    Object.entries(quietHoursStats.timezones).forEach(([tz, stats]) => {
+      console.log(`[BulkSMS]   ${tz}: ${stats.allowed} allowed, ${stats.blocked} blocked`);
+    });
+    
+    // If all recipients are in quiet hours, block the entire campaign
+    if (quietHoursStats.blocked === quietHoursStats.total && quietHoursStats.total > 0) {
+      const errorMessage = `🚫 All recipients are in quiet hours. SMS sending is blocked to comply with TCPA regulations. Allowed hours: ${business.sms_allowed_start_time || '09:00'} - ${business.sms_allowed_end_time || '20:00'} (recipient's local time). Use overrideQuietHours option to bypass (admin only).`;
+      console.error(`[BulkSMS] ${errorMessage}`);
+      await SMSCampaign.updateStatus(campaignId, 'failed');
+      throw new Error(errorMessage);
+    }
+    
+    // If some recipients are in quiet hours, log warning but continue with allowed recipients
+    if (quietHoursStats.blocked > 0) {
+      console.warn(`[BulkSMS] ⚠️  ${quietHoursStats.blocked} recipient(s) are in quiet hours and will be skipped`);
+      console.warn(`[BulkSMS] ⚠️  Sample violations:`, quietHoursViolations.slice(0, 3));
+    }
+  } else if (overrideQuietHours) {
+    console.warn(`[BulkSMS] ⚠️  Quiet hours override enabled - sending despite quiet hours restrictions (admin override)`);
   } else {
     console.log(`[BulkSMS] ✅ SMS time restrictions are disabled - sending allowed at any time`);
   }
@@ -409,8 +465,25 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
       ? phoneNumbers 
       : (await SMSCampaignRecipient.findByCampaignId(campaignId)).map(r => r.phone_number);
     
-    // Load balance messages
-    const assignments = loadBalanceMessages(recipientPhoneNumbers, availableNumbers);
+    // Filter out recipients in quiet hours (if enabled)
+    let allowedRecipients = recipientPhoneNumbers;
+    const quietHoursBlockedSet = new Set();
+    
+    if (business.sms_business_hours_enabled && quietHoursStats.blocked > 0) {
+      console.log(`[BulkSMS] 🔍 Filtering out ${quietHoursStats.blocked} recipient(s) in quiet hours...`);
+      allowedRecipients = recipientPhoneNumbers.filter(phoneNumber => {
+        const check = checkRecipientQuietHours(phoneNumber, business);
+        if (!check.allowed) {
+          quietHoursBlockedSet.add(phoneNumber);
+          return false;
+        }
+        return true;
+      });
+      console.log(`[BulkSMS] ✅ ${allowedRecipients.length} recipient(s) allowed after quiet hours filter`);
+    }
+    
+    // Load balance messages (only for allowed recipients)
+    const assignments = loadBalanceMessages(allowedRecipients, availableNumbers);
     
     // Check opt-outs - normalize phone numbers for comparison
     const optOuts = await SMSOptOut.findByBusinessId(businessId);
@@ -435,6 +508,11 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
     
     // Filter out opted-out numbers - normalize recipient numbers too
     const validAssignments = assignments.filter(a => {
+      // Skip if in quiet hours
+      if (quietHoursBlockedSet.has(a.phoneNumber)) {
+        return false;
+      }
+      
       try {
         const normalizedPhone = formatPhoneNumberE164(a.phoneNumber);
         // Check both normalized and original format
@@ -446,8 +524,12 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
       }
     });
     
-    const optedOutCount = assignments.length - validAssignments.length;
+    const filteredCount = assignments.length - validAssignments.length;
+    const optedOutCount = filteredCount - (quietHoursStats.blocked || 0);
     
+    if (quietHoursStats.blocked > 0) {
+      console.log(`[BulkSMS] ✅ Filtered out ${quietHoursStats.blocked} recipient(s) in quiet hours - TCPA compliance`);
+    }
     if (optedOutCount > 0) {
       console.log(`[BulkSMS] ✅ Filtered out ${optedOutCount} opted-out number(s) - they will NOT receive messages`);
     }

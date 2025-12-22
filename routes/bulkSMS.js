@@ -217,7 +217,19 @@ router.post('/campaigns', authenticate, async (req, res) => {
           throw new Error(`sendBulkSMS is not a function! Type: ${typeof sendBulkSMS}`);
         }
         
-        await sendBulkSMS(campaign.id, req.businessId, message_text, filteredNumbers);
+        // Check if user has admin override permission (for quiet hours bypass)
+        const { User } = await import('../models/User.js');
+        const user = await User.findById(req.user.id);
+        const isAdmin = user?.role === 'admin';
+        const overrideQuietHours = req.body.override_quiet_hours === true && isAdmin;
+        
+        if (overrideQuietHours) {
+          console.log(`[BulkSMS Route] ⚠️  Admin override enabled - bypassing quiet hours restrictions`);
+        }
+        
+        await sendBulkSMS(campaign.id, req.businessId, message_text, filteredNumbers, {
+          overrideQuietHours,
+        });
         console.log(`[BulkSMS Route] ✅ sendBulkSMS completed successfully for campaign ${campaign.id}`);
       } catch (error) {
         console.error(`[BulkSMS Route] ❌ CRITICAL ERROR in sendBulkSMS for campaign ${campaign.id}:`, error);

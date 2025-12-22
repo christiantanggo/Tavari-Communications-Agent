@@ -1,18 +1,23 @@
-# Quick script to kill process on port 3001 or 5001
+# PowerShell script to kill process on port 5001
 $port = 5001
-$processes = netstat -ano | findstr ":$port" | ForEach-Object {
-    if ($_ -match '\s+(\d+)$') {
-        $matches[1]
-    }
-} | Select-Object -Unique
+Write-Host "Looking for process using port $port..." -ForegroundColor Yellow
 
-if ($processes) {
-    foreach ($pid in $processes) {
-        Write-Host "Killing process $pid on port $port"
-        taskkill /PID $pid /F 2>$null
+$connections = netstat -ano | findstr ":$port"
+if ($connections) {
+    $processIds = $connections | ForEach-Object {
+        if ($_ -match '\s+(\d+)$') {
+            $matches[1]
+        }
+    } | Select-Object -Unique
+    
+    foreach ($processId in $processIds) {
+        if ($processId) {
+            Write-Host "Killing process $processId..." -ForegroundColor Red
+            taskkill /F /PID $processId 2>$null | Out-Null
+        }
     }
-    Write-Host "Port $port is now free"
+    Start-Sleep -Seconds 1
+    Write-Host "✅ Port $port should now be free!" -ForegroundColor Green
 } else {
-    Write-Host "No process found on port $port"
+    Write-Host "✅ Port $port is already free!" -ForegroundColor Green
 }
-

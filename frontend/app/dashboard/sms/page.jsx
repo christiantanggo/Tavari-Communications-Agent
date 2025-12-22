@@ -511,6 +511,21 @@ function SMSPage() {
     }
   };
 
+  const handleDiagnose = async () => {
+    setLoading(true);
+    try {
+      const res = await bulkSMSAPI.diagnose();
+      console.log('Diagnostic Info:', res.data);
+      alert(`Diagnostic Info:\n\nBusiness: ${res.data.business?.name || 'N/A'}\nPhone: ${res.data.business?.vapi_phone_number || res.data.business?.telnyx_number || 'Not configured'}\nBusiness Lookup: ${res.data.businessLookupTest?.found ? '✅ Working' : '❌ Failed'}\nOpt-Outs: ${res.data.optOuts?.count || 0}\n\nCheck console for full details.`);
+      success('Diagnostic complete - check console for details');
+    } catch (error) {
+      console.error('Diagnostic error:', error);
+      showError(error.response?.data?.error || 'Failed to run diagnostic');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const messageLength = messageText.length;
   const messageCount = Math.ceil(messageLength / 160);
   
@@ -1433,6 +1448,22 @@ function SMSPage() {
           {/* Opt-Outs Tab */}
           {activeTab === 'optouts' && (
             <div className="bg-white rounded-lg shadow p-6">
+              <div className="mb-4 flex gap-2">
+                <button
+                  onClick={handleSyncOptOuts}
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+                >
+                  Sync Opt-Outs
+                </button>
+                <button
+                  onClick={handleDiagnose}
+                  disabled={loading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
+                >
+                  Run Diagnostic
+                </button>
+              </div>
               {loading ? (
                 <div className="text-center py-8">Loading opt-outs...</div>
               ) : optOuts.length === 0 ? (

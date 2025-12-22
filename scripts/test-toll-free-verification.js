@@ -4,18 +4,22 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { isTollFree } from '../utils/phoneFormatter.js';
-import { autoVerifyAfterPurchase } from '../services/telnyxVerification.js';
-import { Business } from '../models/Business.js';
 
+// Load environment variables first
 dotenv.config();
 
+// Verify API key is loaded
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE_URL = 'https://api.telnyx.com/v2';
 
 if (!TELNYX_API_KEY) {
   console.error('❌ TELNYX_API_KEY not set in environment variables');
+  console.error('   Make sure you have a .env file with TELNYX_API_KEY=your_key');
   process.exit(1);
 }
+
+// Import services after env is loaded
+const { autoVerifyAfterPurchase, getVerificationStatus, submitTollFreeVerification } = await import('../services/telnyxVerification.js');
 
 async function testTollFreeVerification() {
   console.log('🔍 Testing Toll-Free Verification for Your Purchased Number...\n');
@@ -68,7 +72,6 @@ async function testTollFreeVerification() {
       
       // Test 1: Check current verification status
       try {
-        const { getVerificationStatus } = await import('../services/telnyxVerification.js');
         const status = await getVerificationStatus(number.phone_number);
         
         console.log(`   📊 Current Status:`);
