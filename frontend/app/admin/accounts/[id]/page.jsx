@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import AdminGuard from '@/components/AdminGuard';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
-import { adminPhoneNumbersAPI } from '@/lib/api';
+import { adminPhoneNumbersAPI, adminSMSNumbersAPI } from '@/lib/api';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
 
@@ -56,22 +56,18 @@ function AdminAccountDetailPage() {
       if (accountRes.ok) {
         const accountData = await accountRes.json();
         setAccount(accountData.business);
+        setBonusMinutes(accountData.business.bonus_minutes || '');
+        setCustomMonthly(accountData.business.custom_pricing_monthly || '');
+        setCustomOverage(accountData.business.custom_pricing_overage || '');
         await loadBusinessPhoneNumbers(); // Load phone numbers after account loads
       }
-      ]);
-
-      const accountData = await accountRes.json();
-      setAccount(accountData.business);
-      setBonusMinutes(accountData.business.bonus_minutes || '');
-      setCustomMonthly(accountData.business.custom_pricing_monthly || '');
-      setCustomOverage(accountData.business.custom_pricing_overage || '');
-
-      if (usageRes) {
+      
+      if (usageRes && usageRes.ok) {
         const usageData = await usageRes.json();
         setUsage(usageData.usage);
       }
-
-      if (activityRes) {
+      
+      if (activityRes && activityRes.ok) {
         const activityData = await activityRes.json();
         setActivity(activityData.logs || []);
       }
