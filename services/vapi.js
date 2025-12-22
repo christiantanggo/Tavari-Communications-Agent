@@ -565,7 +565,10 @@ export async function purchaseTelnyxNumber(phoneNumber, businessId = null) {
           },
         });
         if (getResponse.data?.data && getResponse.data.data.length > 0) {
-          return getResponse.data.data[0];
+          const fetchedNumber = getResponse.data.data[0];
+          // Check verification status
+          await triggerVerificationIfNeeded(cleanNumber, businessId);
+          return fetchedNumber;
         }
       }
       
