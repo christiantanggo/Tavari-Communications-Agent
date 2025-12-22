@@ -48,7 +48,7 @@ const upload = multer({
  */
 router.post('/campaigns', authenticate, async (req, res) => {
   try {
-    const { name, message_text, contact_ids = [], list_ids = [], send_to_all = false } = req.body;
+    const { name, message_text, contact_ids = [], list_ids = [], send_to_all = false, exclude_sent_today = false } = req.body;
     
     if (!name || !message_text) {
       return res.status(400).json({ 
@@ -110,6 +110,7 @@ router.post('/campaigns', authenticate, async (req, res) => {
         let skippedNoConsent = 0;
         let skippedOptedOut = 0;
         let skippedNoPhone = 0;
+        let skippedSentToday = 0;
         
         for (const contact of allBusinessContacts) {
           if (!contact.phone_number) {
@@ -131,6 +132,17 @@ router.post('/campaigns', authenticate, async (req, res) => {
             continue;
           }
           
+          // Check if we should exclude contacts who received messages today
+          if (exclude_sent_today && contact.last_sms_sent_at) {
+            const lastSentDate = new Date(contact.last_sms_sent_at);
+            const today = new Date();
+            // Check if last sent was today (same day)
+            if (lastSentDate.toDateString() === today.toDateString()) {
+              skippedSentToday++;
+              continue;
+            }
+          }
+          
           if (!contactIdSet.has(contact.id)) {
             allContacts.push(contact);
             contactIdSet.add(contact.id);
@@ -138,7 +150,7 @@ router.post('/campaigns', authenticate, async (req, res) => {
         }
         
         console.log(`[BulkSMS] Loaded ${allContacts.length} valid contacts from all business contacts`);
-        console.log(`[BulkSMS] Skipped: ${skippedNoConsent} no consent, ${skippedOptedOut} opted out, ${skippedNoPhone} no phone`);
+        console.log(`[BulkSMS] Skipped: ${skippedNoConsent} no consent, ${skippedOptedOut} opted out, ${skippedNoPhone} no phone${exclude_sent_today ? `, ${skippedSentToday || 0} sent today` : ''}`);
       } catch (error) {
         console.error('[BulkSMS] Error loading all contacts:', error);
         return res.status(500).json({ 
@@ -147,12 +159,13 @@ router.post('/campaigns', authenticate, async (req, res) => {
       }
     }
     
-    // Get contacts from selected contact IDs
-    if (contact_ids.length > 0) {
-      console.log(`[BulkSMS] Loading ${contact_ids.length} individual contacts...`);
-      let skippedNoConsent = 0;
-      let skippedOptedOut = 0;
-      let skippedNoPhone = 0;
+      // Get contacts from selected contact IDs
+      if (contact_ids.length > 0) {
+        console.log(`[BulkSMS] Loading ${contact_ids.length} individual contacts...`);
+        let skippedNoConsent = 0;
+        let skippedOptedOut = 0;
+        let skippedNoPhone = 0;
+        let skippedSentToday = 0;
       
       for (const contactId of contact_ids) {
         try {
@@ -203,7 +216,7 @@ router.post('/campaigns', authenticate, async (req, res) => {
         }
       }
       console.log(`[BulkSMS] Loaded ${allContacts.length} valid contacts from individual selection`);
-      console.log(`[BulkSMS] Skipped: ${skippedNoConsent} no consent, ${skippedOptedOut} opted out, ${skippedNoPhone} no phone`);
+      console.log(`[BulkSMS] Skipped: ${skippedNoConsent} no consent, ${skippedOptedOut} opted out, ${skippedNoPhone} no phone${exclude_sent_today ? `, ${skippedSentToday || 0} sent today` : ''}`);
     }
     
     // Get contacts from selected lists
@@ -238,6 +251,17 @@ router.post('/campaigns', authenticate, async (req, res) => {
               if (!consentCheck.hasConsent) {
                 console.warn(`[BulkSMS] Contact ${contact.id} (${contact.phone_number}) in list ${listId} does not have SMS consent: ${consentCheck.reason}`);
                 continue; // Skip this contact
+              }
+              
+              // Check if we should exclude contacts who received messages today
+              if (exclude_sent_today && contact.last_sms_sent_at) {
+                const lastSentDate = new Date(contact.last_sms_sent_at);
+                const today = new Date();
+                // Check if last sent was today (same day)
+                if (lastSentDate.toDateString() === today.toDateString()) {
+                  console.log(`[BulkSMS] Contact ${contact.id} (${contact.phone_number}) in list ${listId} received message today, skipping`);
+                  continue;
+                }
               }
               
               // Check frequency limits

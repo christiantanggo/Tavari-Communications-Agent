@@ -19,6 +19,7 @@ function SMSPage() {
   const [selectedListsForCampaign, setSelectedListsForCampaign] = useState([]);
   const [sendToAllContacts, setSendToAllContacts] = useState(false);
   const [loadingAllContacts, setLoadingAllContacts] = useState(false);
+  const [excludeSentToday, setExcludeSentToday] = useState(false);
   
   // Campaigns Tab
   const [campaigns, setCampaigns] = useState([]);
@@ -202,6 +203,7 @@ function SMSPage() {
         contact_ids: sendToAllContacts ? [] : selectedContactsForCampaign,
         list_ids: sendToAllContacts ? [] : selectedListsForCampaign,
         send_to_all: sendToAllContacts,
+        exclude_sent_today: excludeSentToday,
       });
       
       success(`Campaign "${campaignName}" created! Sending ${res.data.campaign.total_recipients} messages...`);
@@ -794,6 +796,23 @@ function SMSPage() {
                     </p>
                   </div>
                 </label>
+                
+                {sendToAllContacts && (
+                  <label className="flex items-center mt-3 ml-6">
+                    <input
+                      type="checkbox"
+                      checked={excludeSentToday}
+                      onChange={(e) => setExcludeSentToday(e.target.checked)}
+                      className="mr-2"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-blue-900">Exclude contacts who received a message today</span>
+                      <p className="text-xs text-blue-700 mt-1">
+                        Skip contacts who already received an SMS today to avoid sending twice in one day
+                      </p>
+                    </div>
+                  </label>
+                )}
               </div>
 
               {/* Select Contacts */}
