@@ -19,16 +19,45 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle auth errors
+// Retry logic for rate limiting (429 errors)
+const retryRequest = async (config, retries = 2) => {
+  for (let i = 0; i < retries; i++) {
+    // Exponential backoff: wait 1s, 2s, 4s
+    const delay = Math.pow(2, i) * 1000;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    try {
+      return await api.request(config);
+    } catch (retryError) {
+      if (retryError.response?.status !== 429 || i === retries - 1) {
+        throw retryError;
+      }
+    }
+  }
+};
+
+// Handle auth errors and rate limiting
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
       Cookies.remove('token');
       if (typeof window !== 'undefined') {
         window.location.href = '/login';
       }
     }
+    
+    // Retry on 429 (rate limit) errors
+    if (error.response?.status === 429 && error.config && !error.config._retry) {
+      error.config._retry = true;
+      try {
+        return await retryRequest(error.config);
+      } catch (retryError) {
+        // If retry fails, return the original error
+        return Promise.reject(error);
+      }
+    }
+    
     return Promise.reject(error);
   }
 );

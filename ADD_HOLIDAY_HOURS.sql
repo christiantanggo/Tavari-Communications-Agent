@@ -32,3 +32,4 @@ SELECT
   ) THEN '✅ EXISTS' ELSE '❌ MISSING' END AS status;
 
 
+

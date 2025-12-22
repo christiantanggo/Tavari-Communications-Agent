@@ -17,6 +17,8 @@ function SMSPage() {
   const [selectedNumbers, setSelectedNumbers] = useState([]);
   const [selectedContactsForCampaign, setSelectedContactsForCampaign] = useState([]);
   const [selectedListsForCampaign, setSelectedListsForCampaign] = useState([]);
+  const [sendToAllContacts, setSendToAllContacts] = useState(false);
+  const [loadingAllContacts, setLoadingAllContacts] = useState(false);
   
   // Campaigns Tab
   const [campaigns, setCampaigns] = useState([]);
@@ -185,8 +187,8 @@ function SMSPage() {
       return;
     }
     
-    if (selectedContactsForCampaign.length === 0 && selectedListsForCampaign.length === 0) {
-      showError('Please select at least one contact or list to send to');
+    if (!sendToAllContacts && selectedContactsForCampaign.length === 0 && selectedListsForCampaign.length === 0) {
+      showError('Please select at least one contact or list to send to, or enable "Send to All Contacts"');
       return;
     }
     
@@ -195,8 +197,9 @@ function SMSPage() {
       const res = await bulkSMSAPI.createCampaign({
         name: campaignName,
         message_text: messageText,
-        contact_ids: selectedContactsForCampaign,
-        list_ids: selectedListsForCampaign,
+        contact_ids: sendToAllContacts ? [] : selectedContactsForCampaign,
+        list_ids: sendToAllContacts ? [] : selectedListsForCampaign,
+        send_to_all: sendToAllContacts,
       });
       
       success(`Campaign "${campaignName}" created! Sending ${res.data.campaign.total_recipients} messages...`);
@@ -726,36 +729,92 @@ function SMSPage() {
                 </div>
               </div>
 
+              {/* Send to All Contacts Option */}
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-4">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={sendToAllContacts}
+                    onChange={(e) => {
+                      setSendToAllContacts(e.target.checked);
+                      if (e.target.checked) {
+                        // Clear individual selections when "Send to All" is enabled
+                        setSelectedContactsForCampaign([]);
+                        setSelectedListsForCampaign([]);
+                      }
+                    }}
+                    className="mr-2"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-blue-900">Send to All Contacts</span>
+                    <p className="text-xs text-blue-700 mt-1">
+                      Send this campaign to all contacts in your database (excluding opted-out contacts and those without consent)
+                    </p>
+                  </div>
+                </label>
+              </div>
+
               {/* Select Contacts */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Contacts to Send To
+                  Or Select Specific Contacts to Send To
                 </label>
                 <div className="border border-gray-300 rounded-md p-4 max-h-60 overflow-y-auto">
                   {contacts.length === 0 ? (
                     <p className="text-sm text-gray-500">No contacts available. Add contacts in the Contacts tab.</p>
                   ) : (
                     <div className="space-y-2">
-                      <div className="flex items-center mb-2 pb-2 border-b">
-                        <input
-                          type="checkbox"
-                          checked={selectedContactsForCampaign.length === contacts.filter(c => !c.opted_out).length && contacts.filter(c => !c.opted_out).length > 0}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedContactsForCampaign(contacts.filter(c => !c.opted_out).map(c => c.id));
-                            } else {
-                              setSelectedContactsForCampaign([]);
-                            }
-                          }}
-                          className="mr-2"
-                        />
-                        <span className="text-sm font-medium">Select All ({contacts.filter(c => !c.opted_out).length} available)</span>
+                      <div className="flex items-center justify-between mb-2 pb-2 border-b">
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={!sendToAllContacts && selectedContactsForCampaign.length === contacts.filter(c => !c.opted_out).length && contacts.filter(c => !c.opted_out).length > 0}
+                            disabled={sendToAllContacts}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedContactsForCampaign(contacts.filter(c => !c.opted_out).map(c => c.id));
+                              } else {
+                                setSelectedContactsForCampaign([]);
+                              }
+                            }}
+                            className="mr-2"
+                          />
+                          <span className="text-sm font-medium">Select All ({contacts.filter(c => !c.opted_out).length} available)</span>
+                        </div>
+                        {contactsTotal > contacts.length && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setLoadingAllContacts(true);
+                              try {
+                                const res = await contactsAPI.getContacts({ all: true });
+                                const allContacts = res.data.contacts || [];
+                                setContacts(allContacts);
+                                setContactsTotal(allContacts.length);
+                                // Auto-select all if not sending to all
+                                if (!sendToAllContacts) {
+                                  setSelectedContactsForCampaign(allContacts.filter(c => !c.opted_out).map(c => c.id));
+                                }
+                              } catch (error) {
+                                console.error('Failed to load all contacts:', error);
+                                showError('Failed to load all contacts. Please try again.');
+                              } finally {
+                                setLoadingAllContacts(false);
+                              }
+                            }}
+                            disabled={loadingAllContacts || sendToAllContacts}
+                            className="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                          >
+                            {loadingAllContacts ? 'Loading...' : `Load All (${contactsTotal} total)`}
+                          </button>
+                        )}
                       </div>
                       {contacts.filter(c => !c.opted_out).map((contact) => (
                         <label key={contact.id} className="flex items-center">
                           <input
                             type="checkbox"
                             checked={selectedContactsForCampaign.includes(contact.id)}
+                            disabled={sendToAllContacts}
                             onChange={(e) => {
                               if (e.target.checked) {
                                 setSelectedContactsForCampaign([...selectedContactsForCampaign, contact.id]);
@@ -765,7 +824,7 @@ function SMSPage() {
                             }}
                             className="mr-2"
                           />
-                          <span className="text-sm">
+                          <span className={`text-sm ${sendToAllContacts ? 'text-gray-400' : ''}`}>
                             {contact.first_name} {contact.last_name} - {contact.phone_number}
                           </span>
                         </label>
@@ -773,9 +832,12 @@ function SMSPage() {
                     </div>
                   )}
                 </div>
-                {selectedContactsForCampaign.length > 0 && (
+                {(selectedContactsForCampaign.length > 0 || sendToAllContacts) && (
                   <p className="mt-2 text-sm text-gray-600">
-                    {selectedContactsForCampaign.length} contact(s) selected
+                    {sendToAllContacts 
+                      ? `Will send to all contacts (${contactsTotal} total, excluding opted-out and no-consent contacts)`
+                      : `${selectedContactsForCampaign.length} contact(s) selected`
+                    }
                   </p>
                 )}
               </div>
@@ -795,6 +857,7 @@ function SMSPage() {
                           <input
                             type="checkbox"
                             checked={selectedListsForCampaign.includes(list.id)}
+                            disabled={sendToAllContacts}
                             onChange={(e) => {
                               if (e.target.checked) {
                                 setSelectedListsForCampaign([...selectedListsForCampaign, list.id]);

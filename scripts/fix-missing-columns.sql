@@ -62,3 +62,4 @@ CREATE INDEX IF NOT EXISTS idx_businesses_vapi_assistant_id ON businesses(vapi_a
 CREATE INDEX IF NOT EXISTS idx_call_sessions_vapi_call_id ON call_sessions(vapi_call_id);
 
 
+

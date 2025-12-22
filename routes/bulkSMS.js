@@ -45,7 +45,7 @@ const upload = multer({
  */
 router.post('/campaigns', authenticate, async (req, res) => {
   try {
-    const { name, message_text, contact_ids = [], list_ids = [] } = req.body;
+    const { name, message_text, contact_ids = [], list_ids = [], send_to_all = false } = req.body;
     
     if (!name || !message_text) {
       return res.status(400).json({ 
@@ -53,9 +53,9 @@ router.post('/campaigns', authenticate, async (req, res) => {
       });
     }
     
-    if (contact_ids.length === 0 && list_ids.length === 0) {
+    if (!send_to_all && contact_ids.length === 0 && list_ids.length === 0) {
       return res.status(400).json({ 
-        error: 'Please select at least one contact or list' 
+        error: 'Please select at least one contact or list, or enable "Send to All Contacts"' 
       });
     }
     
@@ -73,6 +73,54 @@ router.post('/campaigns', authenticate, async (req, res) => {
     
     // Import compliance checking utilities
     const { checkConsent, checkFrequencyLimits, detectCountry } = await import('../services/compliance.js');
+    
+    // If send_to_all is true, fetch all contacts for the business
+    if (send_to_all) {
+      console.log(`[BulkSMS] Loading ALL contacts for business ${req.businessId}...`);
+      try {
+        const allBusinessContacts = await Contact.findByBusinessId(req.businessId, 50000, 0);
+        console.log(`[BulkSMS] Found ${allBusinessContacts.length} total contacts in business`);
+        
+        // Add all contacts that have phone numbers and haven't opted out
+        let skippedNoConsent = 0;
+        let skippedOptedOut = 0;
+        let skippedNoPhone = 0;
+        
+        for (const contact of allBusinessContacts) {
+          if (!contact.phone_number) {
+            skippedNoPhone++;
+            continue;
+          }
+          
+          if (contact.opted_out) {
+            skippedOptedOut++;
+            continue;
+          }
+          
+          // Check SMS consent (TCPA/CASL compliance)
+          const country = detectCountry(contact.phone_number);
+          const consentCheck = checkConsent(contact, country);
+          
+          if (!consentCheck.hasConsent) {
+            skippedNoConsent++;
+            continue;
+          }
+          
+          if (!contactIdSet.has(contact.id)) {
+            allContacts.push(contact);
+            contactIdSet.add(contact.id);
+          }
+        }
+        
+        console.log(`[BulkSMS] Loaded ${allContacts.length} valid contacts from all business contacts`);
+        console.log(`[BulkSMS] Skipped: ${skippedNoConsent} no consent, ${skippedOptedOut} opted out, ${skippedNoPhone} no phone`);
+      } catch (error) {
+        console.error('[BulkSMS] Error loading all contacts:', error);
+        return res.status(500).json({ 
+          error: 'Failed to load all contacts: ' + error.message 
+        });
+      }
+    }
     
     // Get contacts from selected contact IDs
     if (contact_ids.length > 0) {
