@@ -15,6 +15,7 @@ import { SMSCampaign } from '../models/SMSCampaign.js';
 import { SMSCampaignRecipient } from '../models/SMSCampaignRecipient.js';
 import { SMSOptOut } from '../models/SMSOptOut.js';
 import { Business } from '../models/Business.js';
+import { BusinessPhoneNumber } from '../models/BusinessPhoneNumber.js';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE_URL = 'https://api.telnyx.com/v2';
@@ -171,18 +172,52 @@ export async function getAvailableSMSNumbers(businessId) {
   
   const numbers = [];
   
-  // For now, use vapi_phone_number. Later, we can extend to support multiple numbers
-  if (business.vapi_phone_number) {
-    const numberInfo = detectNumberType(business.vapi_phone_number, true); // Assume verified for now
-    numbers.push({
-      phone_number: business.vapi_phone_number,
-      ...numberInfo,
-      verified: true, // TODO: Check actual verification status from Telnyx
-    });
+  // Get all active phone numbers from business_phone_numbers table (new system)
+  try {
+    const businessPhoneNumbers = await BusinessPhoneNumber.findActiveByBusinessId(businessId);
+    
+    if (businessPhoneNumbers.length > 0) {
+      // Use numbers from business_phone_numbers table
+      for (const bpn of businessPhoneNumbers) {
+        const numberInfo = detectNumberType(bpn.phone_number, true); // Assume verified for now
+        numbers.push({
+          phone_number: bpn.phone_number,
+          ...numberInfo,
+          verified: true, // TODO: Check actual verification status from Telnyx
+          is_primary: bpn.is_primary,
+        });
+      }
+      console.log(`[BulkSMS] Found ${numbers.length} phone number(s) from business_phone_numbers table`);
+    } else {
+      // Fallback to legacy telnyx_number field
+      if (business.telnyx_number) {
+        const numberInfo = detectNumberType(business.telnyx_number, true);
+        numbers.push({
+          phone_number: business.telnyx_number,
+          ...numberInfo,
+          verified: true,
+          is_primary: true,
+        });
+        console.log(`[BulkSMS] Using legacy telnyx_number field: ${business.telnyx_number}`);
+      }
+    }
+  } catch (error) {
+    console.warn('[BulkSMS] Error loading from business_phone_numbers table (may not exist yet):', error.message);
+    // Fallback to legacy telnyx_number field
+    if (business.telnyx_number) {
+      const numberInfo = detectNumberType(business.telnyx_number, true);
+      numbers.push({
+        phone_number: business.telnyx_number,
+        ...numberInfo,
+        verified: true,
+        is_primary: true,
+      });
+    }
   }
   
-  // TODO: Query Telnyx API to get all numbers for this business
-  // For now, return the single vapi_phone_number
+  if (numbers.length === 0) {
+    console.warn(`[BulkSMS] ⚠️  No SMS-capable phone numbers found for business ${businessId}`);
+  }
   
   return numbers;
 }
