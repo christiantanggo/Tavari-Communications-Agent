@@ -955,10 +955,10 @@ function SMSPage() {
               
               <button
                 onClick={handleCreateCampaign}
-                disabled={loading || !campaignName || !messageText || (selectedContactsForCampaign.length === 0 && selectedListsForCampaign.length === 0)}
+                disabled={loading || !campaignName || !messageText || (!sendToAllContacts && selectedContactsForCampaign.length === 0 && selectedListsForCampaign.length === 0)}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed mt-4"
               >
-                {loading ? 'Creating Campaign...' : 'Create Campaign'}
+                {loading ? (sendToAllContacts ? 'Loading All Contacts...' : 'Creating Campaign...') : 'Create Campaign'}
               </button>
               {selectedNumbers.length === 0 && availableNumbers.length === 0 && (
                 <p className="text-sm text-yellow-600 mt-2">
