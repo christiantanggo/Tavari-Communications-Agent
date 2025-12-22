@@ -800,13 +800,33 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
         // Update recipient status
         const recipient = recipientMap.get(phoneNumber);
         if (recipient) {
-          const errorMessage = error.response?.data?.errors?.[0]?.detail || 
-                              error.response?.data?.message || 
-                              error.message || 
-                              'Unknown error';
+          // Extract detailed error message from Telnyx API response
+          let errorMessage = 'Unknown error';
+          
+          if (error.response?.data?.errors && Array.isArray(error.response.data.errors) && error.response.data.errors.length > 0) {
+            const firstError = error.response.data.errors[0];
+            // Format: "Title: Detail" or just "Detail" if no title
+            errorMessage = firstError.title && firstError.detail
+              ? `${firstError.title}: ${firstError.detail}`
+              : firstError.detail || firstError.title || errorMessage;
+            
+            // Include error code if available
+            if (firstError.code) {
+              errorMessage = `[${firstError.code}] ${errorMessage}`;
+            }
+          } else if (error.response?.data?.message) {
+            errorMessage = error.response.data.message;
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
+          console.log(`[BulkSMS] Saving error message for ${phoneNumber}: ${errorMessage}`);
+          
           await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
             error_message: errorMessage,
           });
+          
+          console.log(`[BulkSMS] ✅ Error message saved for recipient ${recipient.id}`);
         }
         
         failedCount++;

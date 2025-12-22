@@ -1058,9 +1058,9 @@ function SMSPage() {
                                       <div className="text-sm text-gray-600 mt-1">
                                         {recipient.phone_number}
                                       </div>
-                                      {recipient.error_message && (
+                                      {(recipient.error_message || recipient.status === 'failed') && (
                                         <div className="text-xs text-red-700 mt-2 p-2 bg-red-100 rounded">
-                                          <strong>Error:</strong> {recipient.error_message}
+                                          <strong>Error:</strong> {recipient.error_message || 'Message failed to send (no error details available)'}
                                         </div>
                                       )}
                                     </div>
