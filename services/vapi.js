@@ -438,12 +438,41 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
 }
 
 /**
+ * Helper function to trigger verification if needed (non-blocking)
+ */
+async function triggerVerificationIfNeeded(phoneNumber, businessId) {
+  try {
+    const { autoVerifyAfterPurchase } = await import('./telnyxVerification.js');
+    const { Business } = await import('../models/Business.js');
+    const business = businessId ? await Business.findById(businessId) : null;
+    if (business) {
+      console.log(`[VAPI] Attempting automatic verification for ${phoneNumber}...`);
+      const verificationResult = await autoVerifyAfterPurchase(phoneNumber, {
+        name: business.name,
+        website: business.website || '',
+        use_case: 'Marketing and promotional messages',
+      });
+      
+      if (verificationResult.verified) {
+        console.log(`[VAPI] ✅ Number ${phoneNumber} is verified and ready for high-volume SMS`);
+      } else if (verificationResult.manual_verification_required) {
+        console.log(`[VAPI] ⚠️  Manual verification required for ${phoneNumber}. Please verify in Telnyx portal.`);
+      }
+    }
+  } catch (verifyError) {
+    console.warn(`[VAPI] ⚠️  Verification check failed (non-critical):`, verifyError.message);
+    // Don't fail purchase if verification check fails
+  }
+}
+
+/**
  * Purchase a phone number from Telnyx
  * Uses the recommended /number_orders endpoint, with fallback to /phone_numbers
  * @param {string} phoneNumber - Phone number in E.164 format
+ * @param {string} businessId - Optional business ID for automatic verification
  * @returns {Promise<Object>} Purchased phone number object
  */
-export async function purchaseTelnyxNumber(phoneNumber) {
+export async function purchaseTelnyxNumber(phoneNumber, businessId = null) {
   try {
     const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
     const TELNYX_API_BASE_URL = process.env.TELNYX_API_BASE_URL || 'https://api.telnyx.com/v2';
@@ -477,8 +506,13 @@ export async function purchaseTelnyxNumber(phoneNumber) {
       });
       
       if (checkResponse.data?.data && checkResponse.data.data.length > 0) {
+        const existingNumber = checkResponse.data.data[0];
         console.log(`[VAPI] ✅ Phone number already exists in Telnyx: ${cleanNumber}`);
-        return checkResponse.data.data[0];
+        
+        // Check verification status for existing numbers too
+        await triggerVerificationIfNeeded(cleanNumber, businessId);
+        
+        return existingNumber;
       }
     } catch (checkError) {
       // If check fails, continue to purchase
@@ -572,8 +606,13 @@ export async function purchaseTelnyxNumber(phoneNumber) {
               },
             });
             if (getResponse.data?.data && getResponse.data.data.length > 0) {
+              const existingNumber = getResponse.data.data[0];
               console.log(`[VAPI] ✅ Number already exists in Telnyx: ${cleanNumber}`);
-              return getResponse.data.data[0];
+              
+              // Check verification status for existing numbers too
+              await triggerVerificationIfNeeded(cleanNumber, businessId);
+              
+              return existingNumber;
             }
           } catch (getError) {
             // Ignore and throw original error
