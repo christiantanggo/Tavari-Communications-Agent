@@ -1230,16 +1230,21 @@ router.post("/phone-numbers/migrate-to-telnyx/:businessId", authenticateAdmin, a
       telnyx_number: business.vapi_phone_number,
     });
 
-    // Log admin activity
-    await AdminActivityLog.create({
-      admin_user_id: req.adminId,
-      business_id: businessId,
-      action: "migrate_phone_to_telnyx",
-      details: { 
-        phone_number: business.vapi_phone_number,
-        business_name: business.name,
-      },
-    });
+    // Log admin activity (gracefully handle if table doesn't exist)
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: businessId,
+        action: "migrate_phone_to_telnyx",
+        details: { 
+          phone_number: business.vapi_phone_number,
+          business_name: business.name,
+        },
+      });
+    } catch (logError) {
+      console.warn('[Admin] Failed to log activity (table may not exist):', logError.message);
+      // Continue without logging - don't fail the request
+    }
 
     res.json({
       success: true,
