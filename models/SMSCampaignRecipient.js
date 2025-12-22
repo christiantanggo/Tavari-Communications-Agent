@@ -73,6 +73,40 @@ export class SMSCampaignRecipient {
     return data || [];
   }
   
+  /**
+   * Find all queued recipients ready to send (scheduled_send_at <= now)
+   * @returns {Promise<Array>} Array of recipient records ready to send
+   */
+  static async findReadyToSend() {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('*')
+      .eq('status', 'queued')
+      .lte('scheduled_send_at', now)
+      .order('scheduled_send_at', { ascending: true });
+    
+    if (error) throw error;
+    return data || [];
+  }
+  
+  /**
+   * Find queued recipients for a specific campaign
+   * @param {string} campaign_id - Campaign ID
+   * @returns {Promise<Array>} Array of queued recipient records
+   */
+  static async findQueuedByCampaignId(campaign_id) {
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .eq('status', 'queued')
+      .order('scheduled_send_at', { ascending: true });
+    
+    if (error) throw error;
+    return data || [];
+  }
+  
   static async updateStatus(id, status, additionalData = {}) {
     const updates = {
       status,

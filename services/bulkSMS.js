@@ -465,20 +465,75 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
       ? phoneNumbers 
       : (await SMSCampaignRecipient.findByCampaignId(campaignId)).map(r => r.phone_number);
     
-    // Filter out recipients in quiet hours (if enabled)
+    // Filter out recipients in quiet hours (if enabled) and queue them for later
     let allowedRecipients = recipientPhoneNumbers;
     const quietHoursBlockedSet = new Set();
+    const queuedRecipients = []; // Store recipients to queue for later sending
     
     if (business.sms_business_hours_enabled && quietHoursStats.blocked > 0) {
       console.log(`[BulkSMS] 🔍 Filtering out ${quietHoursStats.blocked} recipient(s) in quiet hours...`);
+      
+      // Get all recipient records from database to update their status
+      const allRecipientRecords = await SMSCampaignRecipient.findByCampaignId(campaignId);
+      const recipientRecordMap = new Map(allRecipientRecords.map(r => [r.phone_number, r]));
+      
       allowedRecipients = recipientPhoneNumbers.filter(phoneNumber => {
         const check = checkRecipientQuietHours(phoneNumber, business);
         if (!check.allowed) {
           quietHoursBlockedSet.add(phoneNumber);
+          
+          // Calculate next allowed send time (9 AM in recipient's timezone)
+          const recipientTimezone = check.timezone;
+          const startTime = business.sms_allowed_start_time || '09:00:00';
+          const [startHour] = startTime.split(':').map(Number);
+          
+          // Get current time in recipient's timezone
+          const now = new Date();
+          const timeInTimezone = new Date(now.toLocaleString('en-US', { timeZone: recipientTimezone }));
+          const currentHour = timeInTimezone.getHours();
+          
+          // Calculate scheduled send time: next 9 AM in recipient's timezone
+          const scheduledSend = new Date(timeInTimezone);
+          scheduledSend.setHours(startHour, 0, 0, 0);
+          
+          // If current time is before 9 AM today, schedule for today
+          // If current time is after 8 PM, schedule for tomorrow
+          if (currentHour >= (parseInt(business.sms_allowed_end_time?.split(':')[0]) || 20)) {
+            scheduledSend.setDate(scheduledSend.getDate() + 1);
+          }
+          
+          // Store recipient record for queuing
+          const recipientRecord = recipientRecordMap.get(phoneNumber);
+          if (recipientRecord) {
+            queuedRecipients.push({
+              recipientId: recipientRecord.id,
+              phoneNumber,
+              scheduledSendAt: scheduledSend.toISOString(),
+              timezone: recipientTimezone,
+            });
+          }
+          
           return false;
         }
         return true;
       });
+      
+      // Queue blocked recipients for later sending
+      if (queuedRecipients.length > 0) {
+        console.log(`[BulkSMS] 📅 Queuing ${queuedRecipients.length} recipient(s) for scheduled sending...`);
+        for (const queued of queuedRecipients) {
+          try {
+            await SMSCampaignRecipient.updateStatus(queued.recipientId, 'queued', {
+              scheduled_send_at: queued.scheduledSendAt,
+            });
+            console.log(`[BulkSMS]   Queued ${queued.phoneNumber} for ${queued.scheduledSendAt} (${queued.timezone})`);
+          } catch (error) {
+            console.error(`[BulkSMS] Error queuing recipient ${queued.phoneNumber}:`, error.message);
+          }
+        }
+        console.log(`[BulkSMS] ✅ Queued ${queuedRecipients.length} recipient(s) - they will be sent automatically when quiet hours end`);
+      }
+      
       console.log(`[BulkSMS] ✅ ${allowedRecipients.length} recipient(s) allowed after quiet hours filter`);
     }
     

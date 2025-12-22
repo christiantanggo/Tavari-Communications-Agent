@@ -210,6 +210,31 @@ app.get("/api/telnyx-phone-numbers/search", async (req, res, next) => {
 import { errorHandler } from "./middleware/errorHandler.js";
 app.use(errorHandler);
 
+// Start scheduled job to process queued SMS (every 5 minutes)
+let queuedSMSInterval = null;
+try {
+  const { processQueuedSMS } = await import('./services/processQueuedSMS.js');
+  
+  // Process queued SMS every 5 minutes
+  const processQueuedSMSJob = async () => {
+    try {
+      await processQueuedSMS();
+    } catch (error) {
+      console.error('[Server] Error in queued SMS processing job:', error.message);
+    }
+  };
+  
+  // Run immediately on startup (in case there are queued messages)
+  processQueuedSMSJob();
+  
+  // Then run every 5 minutes
+  queuedSMSInterval = setInterval(processQueuedSMSJob, 5 * 60 * 1000); // 5 minutes
+  
+  console.log('✅ Queued SMS processor started (runs every 5 minutes)');
+} catch (error) {
+  console.warn('⚠️  Could not start queued SMS processor:', error.message);
+}
+
 // Start server
 const server = app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
