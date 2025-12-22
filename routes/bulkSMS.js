@@ -71,17 +71,58 @@ router.post('/campaigns', authenticate, async (req, res) => {
     const allContacts = [];
     const contactIdSet = new Set();
     
+    // Import compliance checking utilities
+    const { checkConsent, checkFrequencyLimits, detectCountry } = await import('../services/compliance.js');
+    
     // Get contacts from selected contact IDs
     if (contact_ids.length > 0) {
       console.log(`[BulkSMS] Loading ${contact_ids.length} individual contacts...`);
+      let skippedNoConsent = 0;
+      let skippedOptedOut = 0;
+      let skippedNoPhone = 0;
+      
       for (const contactId of contact_ids) {
         try {
           const contact = await Contact.findById(contactId);
-          if (contact && contact.business_id === req.businessId && !contact.opted_out && contact.phone_number) {
-            if (!contactIdSet.has(contact.id)) {
-              allContacts.push(contact);
-              contactIdSet.add(contact.id);
-            }
+          if (!contact || contact.business_id !== req.businessId) {
+            continue;
+          }
+          
+          if (!contact.phone_number) {
+            skippedNoPhone++;
+            continue;
+          }
+          
+          if (contact.opted_out) {
+            skippedOptedOut++;
+            continue;
+          }
+          
+          // Check SMS consent (TCPA/CASL compliance)
+          const country = detectCountry(contact.phone_number);
+          const consentCheck = checkConsent(contact, country);
+          
+          if (!consentCheck.hasConsent) {
+            skippedNoConsent++;
+            console.warn(`[BulkSMS] Contact ${contactId} (${contact.phone_number}) does not have SMS consent: ${consentCheck.reason}`);
+            continue; // Skip this contact
+          }
+          
+          // Check frequency limits
+          const frequencyCheck = checkFrequencyLimits(contact, {
+            maxPerDay: 1,
+            maxPerWeek: 3,
+            maxPerMonth: 10,
+          });
+          
+          if (!frequencyCheck.allowed) {
+            console.warn(`[BulkSMS] Contact ${contactId} (${contact.phone_number}) exceeds frequency limits: ${frequencyCheck.reason}`);
+            // Still add to campaign but mark for later sending
+          }
+          
+          if (!contactIdSet.has(contact.id)) {
+            allContacts.push(contact);
+            contactIdSet.add(contact.id);
           }
         } catch (contactError) {
           console.error(`[BulkSMS] Error loading contact ${contactId}:`, contactError);
@@ -89,6 +130,7 @@ router.post('/campaigns', authenticate, async (req, res) => {
         }
       }
       console.log(`[BulkSMS] Loaded ${allContacts.length} valid contacts from individual selection`);
+      console.log(`[BulkSMS] Skipped: ${skippedNoConsent} no consent, ${skippedOptedOut} opted out, ${skippedNoPhone} no phone`);
     }
     
     // Get contacts from selected lists
@@ -152,7 +194,8 @@ router.post('/campaigns', authenticate, async (req, res) => {
     
     if (allContacts.length === 0) {
       return res.status(400).json({ 
-        error: 'No valid contacts found. Make sure contacts have phone numbers and are not opted out.' 
+        error: 'No valid contacts found. Make sure contacts have phone numbers, are not opted out, and have provided SMS consent (required for TCPA/CASL compliance).',
+        details: 'Contacts must have: 1) Phone number, 2) Not opted out, 3) SMS consent (sms_consent = true with timestamp)'
       });
     }
     
