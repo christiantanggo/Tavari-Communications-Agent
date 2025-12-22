@@ -698,15 +698,37 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
           continue; // Skip this message
         }
         
-        // Check DNC status (placeholder - requires API integration)
-        const dncCheck = await checkDNCStatus(phoneNumber, country);
-        if (dncCheck.isDNC) {
-          console.warn(`[BulkSMS] ⚠️  Phone number ${phoneNumber} is on ${dncCheck.source} registry`);
+        // Check DNC status (express consent can override DNC status)
+        // Find contact to check for express consent
+        let hasExpressConsent = false;
+        let consentTimestamp = null;
+        try {
+          const contact = await Contact.findByPhone(businessId, phoneNumber);
+          if (contact && contact.sms_consent && contact.sms_consent_timestamp) {
+            hasExpressConsent = true;
+            consentTimestamp = contact.sms_consent_timestamp;
+          }
+        } catch (contactError) {
+          console.warn(`[BulkSMS] Could not check consent for ${phoneNumber}:`, contactError.message);
+        }
+        
+        const dncCheck = await checkDNCStatus(phoneNumber, country, {
+          hasExpressConsent,
+          consentTimestamp,
+        });
+        
+        // Only block if on DNC AND no express consent
+        if (dncCheck.isDNC && !dncCheck.hasExpressConsent) {
+          console.warn(`[BulkSMS] ⚠️  Phone number ${phoneNumber} is on ${dncCheck.source} registry and has no express consent`);
           await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
-            error_message: `Number is on ${dncCheck.source} registry`,
+            error_message: `Number is on ${dncCheck.source} registry and no express consent found`,
           });
           failedCount++;
           continue; // Skip this message
+        } else if (dncCheck.isDNC && dncCheck.hasExpressConsent) {
+          console.log(`[BulkSMS] ✅ Phone number ${phoneNumber} is on ${dncCheck.source} registry but has express consent - sending allowed (TCPA/CASL compliant)`);
+          // Log for compliance records
+          console.log(`[BulkSMS] 📋 Express consent timestamp: ${consentTimestamp}`);
         }
         
         const sendStartTime = Date.now();

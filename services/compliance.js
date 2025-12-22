@@ -61,25 +61,40 @@ export function checkProhibitedContent(messageText, recipientCountry = 'US') {
 
 /**
  * Check if a phone number is on Do Not Call registry
- * Note: This is a placeholder - actual implementation requires DNC API integration
+ * Note: Express written consent can override DNC status (TCPA/CASL)
  * @param {string} phoneNumber - Phone number to check
  * @param {string} country - Country code ('US' or 'CA')
- * @returns {Promise<Object>} { isDNC: boolean, source: string, reason: string }
+ * @param {Object} options - Options { hasExpressConsent: boolean, consentTimestamp: string }
+ * @returns {Promise<Object>} { isDNC: boolean, source: string, reason: string, canSend: boolean }
  */
-export async function checkDNCStatus(phoneNumber, country = 'US') {
+export async function checkDNCStatus(phoneNumber, country = 'US', options = {}) {
+  const { hasExpressConsent = false, consentTimestamp = null } = options;
+  
   // TODO: Integrate with actual DNC APIs
   // US: National Do Not Call Registry API
   // Canada: National Do Not Call List (DNCL) API
+  
+  // IMPORTANT: Express written consent CAN override DNC status
+  // If contact has provided express written consent (e.g., checked box on waiver),
+  // they can receive marketing messages even if on DNC registry
+  // This is allowed under TCPA (US) and CASL (Canada)
   
   // For now, return false (not on DNC) - actual implementation needed
   // This should be replaced with real API calls:
   // - US: https://telemarketing.donotcall.gov/
   // - Canada: https://www.lnnte-dncl.gc.ca/
   
+  // If express consent exists, allow sending even if on DNC (with proper documentation)
+  const canSend = hasExpressConsent || false; // Default to false if no consent
+  
   return {
-    isDNC: false,
+    isDNC: false, // Placeholder - will be true when API integration is complete
     source: country === 'CA' ? 'DNCL' : 'DNC',
-    reason: 'DNC checking not yet implemented - requires API integration',
+    reason: hasExpressConsent 
+      ? 'Express written consent overrides DNC status (TCPA/CASL compliant)'
+      : 'DNC checking not yet implemented - requires API integration',
+    canSend: canSend, // Can send if express consent exists
+    hasExpressConsent: hasExpressConsent,
     needsImplementation: true,
   };
 }
