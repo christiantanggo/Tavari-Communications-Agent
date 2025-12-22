@@ -137,7 +137,19 @@ export class Business {
     const withPlus = normalized.startsWith('+') ? normalized : `+${normalized}`;
     const withoutPlus = normalized.startsWith('+') ? normalized.substring(1) : normalized;
     
-    // Try multiple formats
+    // First, check business_phone_numbers table (new system)
+    try {
+      const { BusinessPhoneNumber } = await import('./BusinessPhoneNumber.js');
+      const bpn = await BusinessPhoneNumber.findByPhoneNumber(phoneNumber);
+      if (bpn && bpn.businesses) {
+        return bpn.businesses;
+      }
+    } catch (error) {
+      console.warn('[Business] Error checking business_phone_numbers table:', error.message);
+      // Fall through to legacy check
+    }
+    
+    // Fallback to legacy fields (vapi_phone_number and telnyx_number)
     let { data, error } = await supabaseClient
       .from('businesses')
       .select('*')
