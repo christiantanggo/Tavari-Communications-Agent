@@ -81,8 +81,30 @@ router.post('/campaigns', authenticate, async (req, res) => {
     if (send_to_all) {
       console.log(`[BulkSMS] Loading ALL contacts for business ${req.businessId}...`);
       try {
-        const allBusinessContacts = await Contact.findByBusinessId(req.businessId, 50000, 0);
-        console.log(`[BulkSMS] Found ${allBusinessContacts.length} total contacts in business`);
+        // Get total count first
+        const { count } = await supabaseClient
+          .from('contacts')
+          .select('*', { count: 'exact', head: true })
+          .eq('business_id', req.businessId);
+        
+        const totalContacts = count || 0;
+        console.log(`[BulkSMS] Found ${totalContacts} total contacts in business`);
+        
+        // Fetch all contacts in batches of 1000 (Supabase limit)
+        const allBusinessContacts = [];
+        const batchSize = 1000;
+        let currentOffset = 0;
+        
+        while (allBusinessContacts.length < totalContacts && currentOffset < 100000) { // Cap at 100k for safety
+          const batch = await Contact.findByBusinessId(req.businessId, batchSize, currentOffset);
+          if (batch.length === 0) break;
+          allBusinessContacts.push(...batch);
+          currentOffset += batchSize;
+          console.log(`[BulkSMS] Loaded batch: ${allBusinessContacts.length}/${totalContacts} contacts`);
+          if (batch.length < batchSize) break; // No more contacts
+        }
+        
+        console.log(`[BulkSMS] ✅ Loaded ${allBusinessContacts.length} contacts total from database`);
         
         // Add all contacts that have phone numbers and haven't opted out
         let skippedNoConsent = 0;
