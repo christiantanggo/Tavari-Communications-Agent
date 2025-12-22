@@ -173,6 +173,73 @@ export default function NewSetupWizard({ testMode = false }) {
   };
 
   const handleNext = async () => {
+    // Special handling for Step 5 (Package Selection) - redirect to payment if package selected
+    if (currentStep === 5 && formData.step5.packageId && !testMode) {
+      if (!formData.step5.packageId) {
+        showError('Please select a package before continuing.');
+        return;
+      }
+      
+      setSaving(true);
+      try {
+        const checkoutRes = await billingAPI.createCheckout(formData.step5.packageId);
+        
+        // Handle different response formats from billing API
+        // The API returns { url: ... } for both payment pages and success pages
+        const redirectUrl = checkoutRes.data?.url || 
+                           checkoutRes.data?.redirect_url || 
+                           checkoutRes.data?.paymentUrl;
+        
+        if (checkoutRes.data?.success === true) {
+          // Payment already processed successfully (saved payment method used)
+          success('Payment processed successfully! Package activated.');
+          // Continue to next step
+          setCurrentStep(6);
+          setSaving(false);
+          return;
+        } else if (redirectUrl) {
+          // Redirect to payment page or success page
+          console.log('[Setup Wizard] Redirecting to:', redirectUrl);
+          window.location.href = redirectUrl;
+          return; // Stop execution - user will be redirected
+        } else if (checkoutRes.data?.action === 'add_payment_method') {
+          // Need to add payment method first
+          warning('Please add a payment method first. You can complete payment later in billing settings.');
+          // Continue to next step
+          setCurrentStep(6);
+          setSaving(false);
+          return;
+        } else {
+          showError(checkoutRes.data?.error || checkoutRes.data?.message || 'Failed to initiate payment. You can complete payment later in billing settings.');
+          // Continue to next step even if payment fails
+          setCurrentStep(6);
+          setSaving(false);
+          return;
+        }
+      } catch (paymentError) {
+        console.error('Payment initiation error:', paymentError);
+        const errorData = paymentError.response?.data || {};
+        const errorMsg = errorData.error || 
+                        errorData.message || 
+                        'Failed to initiate payment. You can complete payment later in billing settings.';
+        
+        if (paymentError.response?.status === 402) {
+          // Payment method required
+          warning('Payment method required. You can add one later in billing settings.');
+        } else if (paymentError.response?.status === 503) {
+          // Payment not configured
+          warning('Payment processing is not fully configured. You can complete payment later in billing settings.');
+        } else {
+          showError(errorMsg);
+        }
+        
+        // Continue to next step even if payment fails
+        setCurrentStep(6);
+        setSaving(false);
+        return;
+      }
+    }
+    
     // Save current step before moving forward
     const saved = await saveStep(currentStep);
     if (saved && currentStep < TOTAL_STEPS) {
