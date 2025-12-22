@@ -1024,18 +1024,32 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     
     console.log(`[Admin] Found ${businesses?.length || 0} businesses in database`);
     
+    // Debug: Log all businesses and their phone number fields
+    console.log(`[Admin] All businesses phone number fields:`, (businesses || []).map(b => ({
+      id: b.id,
+      name: b.name,
+      telnyx_number: b.telnyx_number,
+      vapi_phone_number: b.vapi_phone_number,
+      telnyx_type: typeof b.telnyx_number,
+      telnyx_length: b.telnyx_number?.length,
+    })));
+    
     // Create set of assigned SMS numbers (telnyx_number field only)
     // Also store original formats for debugging
     const assignedSMSNumbers = new Set();
     const assignedSMSNumbersOriginal = [];
     
     (businesses || []).forEach(b => {
-      if (b.telnyx_number) {
+      // Check if telnyx_number exists and is not null/empty
+      if (b.telnyx_number && b.telnyx_number.trim() !== '') {
         const original = b.telnyx_number;
-        let normalized = original.replace(/[^0-9+]/g, '');
+        let normalized = original.replace(/[^0-9+]/g, '').trim();
         if (!normalized.startsWith('+')) normalized = '+' + normalized;
         assignedSMSNumbers.add(normalized);
-        assignedSMSNumbersOriginal.push({ original, normalized, business: b.name });
+        assignedSMSNumbersOriginal.push({ original, normalized, business: b.name, business_id: b.id });
+        console.log(`[Admin] ✅ Added assigned number: ${original} -> ${normalized} for business: ${b.name}`);
+      } else {
+        console.log(`[Admin] ⚠️  Business ${b.name} (${b.id}) has no telnyx_number or it's empty. Value:`, b.telnyx_number);
       }
     });
     
