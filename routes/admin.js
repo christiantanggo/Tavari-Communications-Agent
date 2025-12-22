@@ -1011,43 +1011,77 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     console.log(`[Admin] Found ${allTelnyxNumbers.length} phone numbers in Telnyx account`);
     
     // Get all phone numbers assigned to businesses for SMS (telnyx_number field)
+    // Get ALL businesses, not just those with phone numbers, to ensure we check everything
     const { data: businesses, error } = await supabaseClient
       .from('businesses')
-      .select('telnyx_number, vapi_phone_number')
-      .or('telnyx_number.not.is.null,vapi_phone_number.not.is.null');
+      .select('id, name, telnyx_number, vapi_phone_number')
+      .is('deleted_at', null);
     
     if (error) {
       console.error('[Admin] Error fetching assigned numbers:', error);
       return res.status(500).json({ error: "Failed to fetch assigned numbers" });
     }
     
+    console.log(`[Admin] Found ${businesses?.length || 0} businesses in database`);
+    
     // Create set of assigned SMS numbers (telnyx_number field only)
+    // Also store original formats for debugging
     const assignedSMSNumbers = new Set();
+    const assignedSMSNumbersOriginal = [];
     
     (businesses || []).forEach(b => {
       if (b.telnyx_number) {
-        let normalized = b.telnyx_number.replace(/[^0-9+]/g, '');
+        const original = b.telnyx_number;
+        let normalized = original.replace(/[^0-9+]/g, '');
         if (!normalized.startsWith('+')) normalized = '+' + normalized;
         assignedSMSNumbers.add(normalized);
+        assignedSMSNumbersOriginal.push({ original, normalized, business: b.name });
       }
     });
+    
+    console.log(`[Admin] Found ${assignedSMSNumbers.size} businesses with telnyx_number assigned`);
+    console.log(`[Admin] Assigned SMS numbers:`, Array.from(assignedSMSNumbers).slice(0, 10));
+    if (assignedSMSNumbersOriginal.length > 0) {
+      console.log(`[Admin] Sample assigned numbers:`, assignedSMSNumbersOriginal.slice(0, 5));
+    }
     
     // Filter out numbers assigned for SMS (telnyx_number)
     // Note: A number can be used for both calls (vapi_phone_number) and SMS (telnyx_number)
     // We only filter out numbers that are specifically assigned for SMS
-    const unassignedNumbers = allTelnyxNumbers.filter(telnyxNum => {
+    const unassignedNumbers = [];
+    const assignedNumbers = [];
+    
+    allTelnyxNumbers.forEach(telnyxNum => {
       const phoneNumber = telnyxNum.phone_number;
       let normalized = phoneNumber.replace(/[^0-9+]/g, '');
       if (!normalized.startsWith('+')) normalized = '+' + normalized;
       
-      // Number is unassigned for SMS if it's not in the assignedSMSNumbers set
-      return !assignedSMSNumbers.has(normalized);
+      // Check if this number is assigned for SMS
+      if (assignedSMSNumbers.has(normalized)) {
+        assignedNumbers.push({
+          ...telnyxNum,
+          normalized,
+          phone_number: phoneNumber,
+        });
+      } else {
+        unassignedNumbers.push({
+          ...telnyxNum,
+          normalized,
+          phone_number: phoneNumber,
+        });
+      }
     });
+    
+    console.log(`[Admin] Filtered results: ${assignedNumbers.length} assigned, ${unassignedNumbers.length} unassigned`);
+    if (assignedNumbers.length > 0) {
+      console.log(`[Admin] Sample assigned numbers from Telnyx:`, assignedNumbers.slice(0, 3).map(n => n.phone_number));
+    }
     
     console.log(`[Admin] Found ${unassignedNumbers.length} unassigned phone numbers`);
     
     res.json({
       total: allTelnyxNumbers.length,
+      assigned: assignedNumbers.length,
       unassigned: unassignedNumbers.length,
       numbers: unassignedNumbers.map(num => ({
         phone_number: num.phone_number,
@@ -1057,6 +1091,12 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
         connection_id: num.connection_id,
         region_information: num.region_information,
       })),
+      // Include assigned numbers for debugging
+      _debug: {
+        assigned_count: assignedNumbers.length,
+        assigned_numbers: assignedNumbers.slice(0, 5).map(n => n.phone_number),
+        assigned_sms_numbers_from_db: Array.from(assignedSMSNumbers).slice(0, 5),
+      },
     });
   } catch (error) {
     console.error("Get unassigned phone numbers error:", error);
