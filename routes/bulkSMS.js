@@ -17,6 +17,7 @@ import {
   sendBulkSMS,
   getCampaignStatus,
   cancelCampaign,
+  recoverStuckCampaign,
 } from '../services/bulkSMS.js';
 import { validatePhoneNumbersForBulk, formatPhoneNumberE164 } from '../utils/phoneFormatter.js';
 import { supabaseClient } from '../config/database.js';

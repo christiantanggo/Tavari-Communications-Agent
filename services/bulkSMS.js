@@ -913,6 +913,117 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
 }
 
 /**
+ * Recover stuck campaigns by checking actual recipient statuses
+ * @param {string} campaignId - Campaign ID
+ * @returns {Promise<Object>} Recovery result with updated stats
+ */
+export async function recoverStuckCampaign(campaignId) {
+  console.log(`[BulkSMS] ========== RECOVERING STUCK CAMPAIGN ${campaignId} ==========`);
+  
+  try {
+    const campaign = await SMSCampaign.findById(campaignId);
+    if (!campaign) {
+      throw new Error('Campaign not found');
+    }
+    
+    // Only recover campaigns that are stuck in processing
+    if (campaign.status !== 'processing') {
+      console.log(`[BulkSMS] Campaign ${campaignId} is not in 'processing' status (current: ${campaign.status}), skipping recovery`);
+      return {
+        recovered: false,
+        reason: `Campaign is not stuck (status: ${campaign.status})`,
+        campaign,
+      };
+    }
+    
+    // Get all recipients and count their actual statuses
+    const recipients = await SMSCampaignRecipient.findByCampaignId(campaignId);
+    console.log(`[BulkSMS] Found ${recipients.length} recipients for campaign ${campaignId}`);
+    
+    const statusCounts = {
+      sent: 0,
+      failed: 0,
+      pending: 0,
+      queued: 0,
+      cancelled: 0,
+    };
+    
+    recipients.forEach(recipient => {
+      const status = recipient.status || 'pending';
+      if (statusCounts[status] !== undefined) {
+        statusCounts[status]++;
+      } else {
+        statusCounts.pending++;
+      }
+    });
+    
+    const totalProcessed = statusCounts.sent + statusCounts.failed;
+    const totalRecipients = recipients.length;
+    
+    console.log(`[BulkSMS] Recipient status breakdown:`, statusCounts);
+    console.log(`[BulkSMS] Total processed: ${totalProcessed} / ${totalRecipients}`);
+    
+    // Determine final status
+    let finalStatus = 'processing';
+    if (totalProcessed === totalRecipients) {
+      // All recipients have been processed
+      if (statusCounts.failed === totalRecipients) {
+        finalStatus = 'failed';
+      } else if (statusCounts.sent > 0) {
+        finalStatus = 'completed';
+      } else {
+        finalStatus = 'failed';
+      }
+    } else if (totalProcessed > 0 && campaign.sent_count === statusCounts.sent && campaign.failed_count === statusCounts.failed) {
+      // Campaign appears to be stuck - no new progress
+      // Check if it's been stuck for more than 5 minutes
+      const now = new Date();
+      const startedAt = campaign.started_at ? new Date(campaign.started_at) : new Date(campaign.created_at);
+      const stuckDuration = (now - startedAt) / 1000 / 60; // minutes
+      
+      if (stuckDuration > 5) {
+        console.log(`[BulkSMS] Campaign has been stuck for ${stuckDuration.toFixed(1)} minutes`);
+        // Mark as completed if we have some sent, failed otherwise
+        finalStatus = statusCounts.sent > 0 ? 'completed' : 'failed';
+      }
+    }
+    
+    if (finalStatus !== 'processing') {
+      console.log(`[BulkSMS] Updating campaign status from 'processing' to '${finalStatus}'`);
+      await SMSCampaign.updateStatus(campaignId, finalStatus, {
+        sent_count: statusCounts.sent,
+        failed_count: statusCounts.failed,
+      });
+      
+      console.log(`[BulkSMS] ✅ Campaign recovered: ${finalStatus} (${statusCounts.sent} sent, ${statusCounts.failed} failed)`);
+      
+      return {
+        recovered: true,
+        previousStatus: 'processing',
+        newStatus: finalStatus,
+        sentCount: statusCounts.sent,
+        failedCount: statusCounts.failed,
+        totalRecipients,
+        campaign: await SMSCampaign.findById(campaignId),
+      };
+    } else {
+      console.log(`[BulkSMS] Campaign is still processing (${totalProcessed}/${totalRecipients} completed)`);
+      return {
+        recovered: false,
+        reason: 'Campaign is still actively processing',
+        sentCount: statusCounts.sent,
+        failedCount: statusCounts.failed,
+        totalRecipients,
+        campaign,
+      };
+    }
+  } catch (error) {
+    console.error(`[BulkSMS] Error recovering campaign ${campaignId}:`, error);
+    throw error;
+  }
+}
+
+/**
  * Get campaign status
  * @param {string} campaignId - Campaign ID
  * @returns {Promise<Object>} Campaign status with stats
