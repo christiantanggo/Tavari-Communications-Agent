@@ -1041,16 +1041,33 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     const assignedSMSNumbersOriginal = [];
     
     (businesses || []).forEach(b => {
-      // Check if telnyx_number exists and is not null/empty
-      if (b.telnyx_number && b.telnyx_number.trim() !== '') {
-        const original = b.telnyx_number;
+      // Check telnyx_number first (primary SMS number field)
+      let phoneNumber = b.telnyx_number;
+      let source = 'telnyx_number';
+      
+      // If telnyx_number is null/empty, fall back to vapi_phone_number
+      // (some businesses might have the number in vapi_phone_number for SMS)
+      if (!phoneNumber || (typeof phoneNumber === 'string' && phoneNumber.trim() === '')) {
+        phoneNumber = b.vapi_phone_number;
+        source = 'vapi_phone_number';
+      }
+      
+      // Process the phone number if we found one
+      if (phoneNumber && typeof phoneNumber === 'string' && phoneNumber.trim() !== '') {
+        const original = phoneNumber;
         let normalized = original.replace(/[^0-9+]/g, '').trim();
         if (!normalized.startsWith('+')) normalized = '+' + normalized;
         assignedSMSNumbers.add(normalized);
-        assignedSMSNumbersOriginal.push({ original, normalized, business: b.name, business_id: b.id });
-        console.log(`[Admin] ✅ Added assigned number: ${original} -> ${normalized} for business: ${b.name}`);
+        assignedSMSNumbersOriginal.push({ 
+          original, 
+          normalized, 
+          business: b.name, 
+          business_id: b.id,
+          source: source 
+        });
+        console.log(`[Admin] ✅ Added assigned number from ${source}: ${original} -> ${normalized} for business: ${b.name}`);
       } else {
-        console.log(`[Admin] ⚠️  Business ${b.name} (${b.id}) has no telnyx_number or it's empty. Value:`, b.telnyx_number);
+        console.log(`[Admin] ⚠️  Business ${b.name} (${b.id}) has no phone number. telnyx_number: ${b.telnyx_number}, vapi_phone_number: ${b.vapi_phone_number}`);
       }
     });
     
