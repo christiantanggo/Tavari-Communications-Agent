@@ -451,6 +451,19 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
       numberSendCounts[num.phone_number] = 0;
     });
     
+    // Log initial distribution plan
+    console.log(`[BulkSMS] 📊 Load Balancing Plan:`);
+    console.log(`[BulkSMS]   Total messages: ${validAssignments.length}`);
+    console.log(`[BulkSMS]   Available numbers: ${availableNumbers.length}`);
+    const distribution = {};
+    validAssignments.forEach(a => {
+      distribution[a.fromNumber] = (distribution[a.fromNumber] || 0) + 1;
+    });
+    Object.entries(distribution).forEach(([num, count]) => {
+      const percent = ((count / validAssignments.length) * 100).toFixed(1);
+      console.log(`[BulkSMS]   ${num}: ${count} messages (${percent}%)`);
+    });
+    
     let sentCount = 0;
     let failedCount = 0;
     const errors = [];
@@ -558,6 +571,15 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
     console.log(`[BulkSMS] Total time: ${totalTime} seconds (${(totalTime / 60).toFixed(1)} minutes)`);
     console.log(`[BulkSMS] Average rate: ${sentCount > 0 ? (sentCount / (totalTime / 60)).toFixed(1) : 0} messages/minute`);
     console.log(`[BulkSMS] End time: ${new Date().toISOString()}`);
+    
+    // Log distribution summary
+    console.log(`[BulkSMS] 📊 Message Distribution by Phone Number:`);
+    const sortedNumbers = Object.entries(numberSendCounts)
+      .sort((a, b) => b[1] - a[1]); // Sort by count descending
+    sortedNumbers.forEach(([phoneNumber, count]) => {
+      const percent = sentCount > 0 ? ((count / sentCount) * 100).toFixed(1) : 0;
+      console.log(`[BulkSMS]   ${phoneNumber}: ${count} messages (${percent}%)`);
+    });
     
     await SMSCampaign.updateStatus(campaignId, finalStatus, {
       sent_count: sentCount,

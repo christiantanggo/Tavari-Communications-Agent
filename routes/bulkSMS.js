@@ -689,6 +689,72 @@ router.get('/opt-outs', authenticate, async (req, res) => {
 });
 
 /**
+ * Test load balancing distribution (shows which numbers would be used)
+ * GET /api/bulk-sms/test-load-balance
+ */
+router.get('/test-load-balance', authenticate, async (req, res) => {
+  try {
+    const { getAvailableSMSNumbers, loadBalanceMessages } = await import('../services/bulkSMS.js');
+    
+    // Get available numbers for this business
+    const availableNumbers = await getAvailableSMSNumbers(req.businessId);
+    
+    if (availableNumbers.length === 0) {
+      return res.status(400).json({
+        error: 'No SMS-capable numbers available for this business',
+      });
+    }
+    
+    // Simulate load balancing with different message counts
+    const testScenarios = [1, 5, 10, 20, 50, 100];
+    const results = [];
+    
+    for (const messageCount of testScenarios) {
+      const testPhoneNumbers = Array(messageCount).fill(null).map((_, i) => `+1555123${String(i).padStart(4, '0')}`);
+      const assignments = loadBalanceMessages(testPhoneNumbers, availableNumbers);
+      
+      // Count distribution
+      const distribution = {};
+      assignments.forEach(a => {
+        distribution[a.fromNumber] = (distribution[a.fromNumber] || 0) + 1;
+      });
+      
+      results.push({
+        message_count: messageCount,
+        available_numbers: availableNumbers.length,
+        distribution: Object.entries(distribution).map(([num, count]) => ({
+          phone_number: num,
+          message_count: count,
+          percentage: ((count / messageCount) * 100).toFixed(1) + '%',
+        })),
+      });
+    }
+    
+    res.json({
+      success: true,
+      business_id: req.businessId,
+      available_numbers: availableNumbers.map(n => ({
+        phone_number: n.phone_number,
+        type: n.type,
+        rate_limit: n.rateLimit,
+        country: n.country,
+      })),
+      load_balancing_test: results,
+      summary: {
+        total_numbers: availableNumbers.length,
+        total_rate_limit: availableNumbers.reduce((sum, n) => sum + (n.rateLimit || 0), 0),
+        rate_limit_unit: 'messages_per_minute',
+      },
+    });
+  } catch (error) {
+    console.error('[BulkSMS] Test load balance error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to test load balancing',
+    });
+  }
+});
+
+/**
  * Test SMS sending (for debugging)
  * POST /api/bulk-sms/test
  */
