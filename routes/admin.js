@@ -1064,15 +1064,35 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
       let isAssigned = assignedSMSNumbers.has(normalizedWithPlus) || assignedSMSNumbers.has(normalizedWithoutPlus);
       
       // Also check if any assigned number is a prefix/suffix match (handle incomplete numbers)
-      if (!isAssigned && normalizedWithPlus.startsWith('+1') && normalizedWithPlus.length >= 11) {
-        const last10Digits = normalizedWithPlus.slice(-10);
-        isAssigned = assignedSMSNumbers.has('+1' + last10Digits) || 
-                     assignedSMSNumbers.has(last10Digits) ||
-                     // Check if any assigned number matches the last 10 digits
-                     Array.from(assignedSMSNumbers).some(assigned => {
-                       const assignedLast10 = assigned.replace(/^\+1/, '').slice(-10);
-                       return assignedLast10 === last10Digits || last10Digits.includes(assignedLast10) || assignedLast10.includes(last10Digits);
-                     });
+      // This handles cases where DB has +1669240773 but Telnyx has +16692407730
+      if (!isAssigned && normalizedWithPlus.startsWith('+1')) {
+        const last10Digits = normalizedWithPlus.slice(-10); // Last 10 digits of Telnyx number
+        
+        // Check if any assigned number ends with these 10 digits or vice versa
+        for (const assigned of assignedSMSNumbers) {
+          const assignedClean = assigned.replace(/^\+1?/, ''); // Remove +1 or + from assigned
+          const telnyxClean = normalizedWithPlus.replace(/^\+1/, ''); // Remove +1 from Telnyx
+          
+          // Check if one is a prefix of the other (handles incomplete numbers)
+          if (assignedClean.length >= 9 && telnyxClean.length >= 9) {
+            // Compare last 9 digits (more lenient than 10)
+            const assignedLast9 = assignedClean.slice(-9);
+            const telnyxLast9 = telnyxClean.slice(-9);
+            
+            if (assignedLast9 === telnyxLast9) {
+              isAssigned = true;
+              console.log(`[Admin] ✅ Matched via partial: DB has ${assigned}, Telnyx has ${normalizedWithPlus} (last 9 digits match)`);
+              break;
+            }
+            
+            // Also check if one contains the other (handles +1669240773 vs +16692407730)
+            if (assignedClean.includes(telnyxClean) || telnyxClean.includes(assignedClean)) {
+              isAssigned = true;
+              console.log(`[Admin] ✅ Matched via contains: DB has ${assigned}, Telnyx has ${normalizedWithPlus}`);
+              break;
+            }
+          }
+        }
       }
       
       if (isAssigned) {
