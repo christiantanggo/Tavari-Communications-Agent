@@ -784,6 +784,39 @@ router.get('/campaigns/:id/recipients', authenticate, async (req, res) => {
 });
 
 /**
+ * Recover stuck campaign by checking actual recipient statuses
+ * POST /api/bulk-sms/campaigns/:id/recover
+ */
+router.post('/campaigns/:id/recover', authenticate, async (req, res) => {
+  try {
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const result = await recoverStuckCampaign(req.params.id);
+    
+    res.json({
+      success: result.recovered,
+      message: result.recovered 
+        ? `Campaign recovered: ${result.previousStatus} → ${result.newStatus}`
+        : result.reason,
+      result,
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Recover campaign error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to recover campaign' 
+    });
+  }
+});
+
+/**
  * Resend to specific failed recipients
  * POST /api/bulk-sms/campaigns/:id/resend-recipients
  */

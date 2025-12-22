@@ -1248,6 +1248,34 @@ function SMSPage() {
                     <div className="mt-4 flex space-x-2">
                       {(selectedCampaign.status === 'pending' || selectedCampaign.status === 'processing') && (
                         <>
+                          {selectedCampaign.status === 'processing' && (
+                            <button
+                              onClick={async () => {
+                                if (!confirm('Recover this stuck campaign? This will check actual recipient statuses and update the campaign status accordingly.')) {
+                                  return;
+                                }
+                                setLoading(true);
+                                try {
+                                  const res = await bulkSMSAPI.recoverCampaign(selectedCampaign.id);
+                                  if (res.data.success) {
+                                    success(res.data.message || 'Campaign recovered successfully');
+                                    await handleViewCampaign(selectedCampaign.id);
+                                    await loadData();
+                                  } else {
+                                    showError(res.data.message || 'Campaign is still processing');
+                                  }
+                                } catch (error) {
+                                  console.error('Recover campaign error:', error);
+                                  showError(error.response?.data?.error || 'Failed to recover campaign');
+                                } finally {
+                                  setLoading(false);
+                                }
+                              }}
+                              className="px-4 py-2 text-sm bg-orange-600 text-white rounded-md hover:bg-orange-700"
+                            >
+                              Recover Stuck Campaign
+                            </button>
+                          )}
                           <button
                             onClick={() => handlePauseCampaign(selectedCampaign.id)}
                             className="px-4 py-2 text-sm bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
