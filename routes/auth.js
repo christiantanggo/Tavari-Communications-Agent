@@ -267,7 +267,7 @@ router.post('/signup', async (req, res) => {
         try {
           // Purchase the number from Telnyx
           console.log(`[Signup] Purchasing number ${phoneNumber} from Telnyx...`);
-          await purchaseTelnyxNumber(phoneNumber);
+          await purchaseTelnyxNumber(phoneNumber, businessId);
           console.log(`[Signup] ✅ Number purchased from Telnyx`);
           
           // Provision to VAPI

@@ -322,7 +322,7 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
     } else {
       // No unassigned numbers, purchase the selected one
       console.log(`[Business Provision] No unassigned numbers found, purchasing: ${phoneNumber}`);
-      telnyxNumber = await purchaseTelnyxNumber(phoneNumber);
+      telnyxNumber = await purchaseTelnyxNumber(phoneNumber, req.businessId);
     }
     
     // Provision phone number to VAPI (this will use the Telnyx number)

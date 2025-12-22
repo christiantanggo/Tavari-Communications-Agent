@@ -179,11 +179,22 @@ export async function getAvailableSMSNumbers(businessId) {
     if (businessPhoneNumbers.length > 0) {
       // Use numbers from business_phone_numbers table
       for (const bpn of businessPhoneNumbers) {
-        const numberInfo = detectNumberType(bpn.phone_number, true); // Assume verified for now
+        // Check actual verification status from Telnyx
+        let isVerified = true; // Default to verified
+        try {
+          const { getVerificationStatus } = await import('./telnyxVerification.js');
+          const verificationStatus = await getVerificationStatus(bpn.phone_number);
+          isVerified = verificationStatus.verified || !verificationStatus.is_toll_free; // Verified if verified or not toll-free
+        } catch (verifyError) {
+          console.warn(`[BulkSMS] Could not check verification status for ${bpn.phone_number}:`, verifyError.message);
+          // Default to verified to avoid blocking sends
+        }
+        
+        const numberInfo = detectNumberType(bpn.phone_number, isVerified);
         numbers.push({
           phone_number: bpn.phone_number,
           ...numberInfo,
-          verified: true, // TODO: Check actual verification status from Telnyx
+          verified: isVerified,
           is_primary: bpn.is_primary,
         });
       }

@@ -101,7 +101,7 @@ router.post('/assign', authenticate, async (req, res) => {
       // If purchasing new, purchase from Telnyx first
       if (purchase_new) {
         console.log(`[Phone Assign] Purchasing new number ${phoneNumberE164}...`);
-        await purchaseTelnyxNumber(phoneNumberE164);
+        await purchaseTelnyxNumber(phoneNumberE164, req.businessId);
         console.log(`[Phone Assign] ✅ Number purchased from Telnyx`);
       }
 
