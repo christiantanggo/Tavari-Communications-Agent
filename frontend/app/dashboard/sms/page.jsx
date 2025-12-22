@@ -1248,32 +1248,60 @@ function SMSPage() {
                       {(selectedCampaign.status === 'pending' || selectedCampaign.status === 'processing') && (
                         <>
                           {selectedCampaign.status === 'processing' && (
-                            <button
-                              onClick={async () => {
-                                if (!confirm('Recover this stuck campaign? This will check actual recipient statuses and update the campaign status accordingly.')) {
-                                  return;
-                                }
-                                setLoading(true);
-                                try {
-                                  const res = await bulkSMSAPI.recoverCampaign(selectedCampaign.id);
-                                  if (res.data.success) {
-                                    success(res.data.message || 'Campaign recovered successfully');
-                                    await handleViewCampaign(selectedCampaign.id);
-                                    await loadData();
-                                  } else {
-                                    showError(res.data.message || 'Campaign is still processing');
+                            <>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Recover this stuck campaign? This will check actual recipient statuses and update the campaign status accordingly.')) {
+                                    return;
                                   }
-                                } catch (error) {
-                                  console.error('Recover campaign error:', error);
-                                  showError(error.response?.data?.error || 'Failed to recover campaign');
-                                } finally {
-                                  setLoading(false);
-                                }
-                              }}
-                              className="px-4 py-2 text-sm bg-orange-600 text-white rounded-md hover:bg-orange-700"
-                            >
-                              Recover Stuck Campaign
-                            </button>
+                                  setLoading(true);
+                                  try {
+                                    const res = await bulkSMSAPI.recoverCampaign(selectedCampaign.id);
+                                    if (res.data.success) {
+                                      success(res.data.message || 'Campaign recovered successfully');
+                                      await handleViewCampaign(selectedCampaign.id);
+                                      await loadData();
+                                    } else {
+                                      showError(res.data.message || 'Campaign is still processing');
+                                    }
+                                  } catch (error) {
+                                    console.error('Recover campaign error:', error);
+                                    showError(error.response?.data?.error || 'Failed to recover campaign');
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                className="px-4 py-2 text-sm bg-orange-600 text-white rounded-md hover:bg-orange-700"
+                              >
+                                Recover Campaign
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Force complete this campaign? This will mark it as completed based on current recipient statuses, even if not all messages are processed. Use this if messages were sent but the campaign status is stuck.')) {
+                                    return;
+                                  }
+                                  setLoading(true);
+                                  try {
+                                    const res = await bulkSMSAPI.recoverCampaign(selectedCampaign.id, { force: true });
+                                    if (res.data.success) {
+                                      success(res.data.message || 'Campaign force completed successfully');
+                                      await handleViewCampaign(selectedCampaign.id);
+                                      await loadData();
+                                    } else {
+                                      showError(res.data.message || 'Failed to force complete campaign');
+                                    }
+                                  } catch (error) {
+                                    console.error('Force recover campaign error:', error);
+                                    showError(error.response?.data?.error || 'Failed to force complete campaign');
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                className="px-4 py-2 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700"
+                              >
+                                Force Complete
+                              </button>
+                            </>
                           )}
                           <button
                             onClick={() => handlePauseCampaign(selectedCampaign.id)}
