@@ -1193,6 +1193,56 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
   }
 });
 
+// Migrate vapi_phone_number to telnyx_number for a business
+router.post("/phone-numbers/migrate-to-telnyx/:businessId", authenticateAdmin, async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    
+    const business = await Business.findById(businessId);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    // Check if business has vapi_phone_number but no telnyx_number
+    if (!business.vapi_phone_number) {
+      return res.status(400).json({ error: "Business does not have a vapi_phone_number to migrate" });
+    }
+
+    if (business.telnyx_number) {
+      return res.status(400).json({ error: "Business already has a telnyx_number. Use assign-sms to change it." });
+    }
+
+    // Copy vapi_phone_number to telnyx_number
+    await Business.update(businessId, {
+      telnyx_number: business.vapi_phone_number,
+    });
+
+    // Log admin activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: businessId,
+      action: "migrate_phone_to_telnyx",
+      details: { 
+        phone_number: business.vapi_phone_number,
+        business_name: business.name,
+      },
+    });
+
+    res.json({
+      success: true,
+      phone_number: business.vapi_phone_number,
+      business: {
+        id: business.id,
+        name: business.name,
+      },
+      message: "Phone number migrated from vapi_phone_number to telnyx_number",
+    });
+  } catch (error) {
+    console.error("Migrate phone number error:", error);
+    res.status(500).json({ error: error.message || "Failed to migrate phone number" });
+  }
+});
+
 // Assign SMS number to business
 router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (req, res) => {
   try {

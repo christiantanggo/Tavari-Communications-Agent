@@ -197,6 +197,7 @@ export const adminPackagesAPI = {
 export const adminSMSNumbersAPI = {
   getUnassigned: () => adminApi.get('/phone-numbers/unassigned'),
   assignSMS: (businessId, phoneNumber) => adminApi.post(`/phone-numbers/assign-sms/${businessId}`, { phone_number: phoneNumber }),
+  migrateToTelnyx: (businessId) => adminApi.post(`/phone-numbers/migrate-to-telnyx/${businessId}`),
 };
 
 // Bulk SMS API
