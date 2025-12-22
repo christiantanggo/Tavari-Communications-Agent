@@ -74,6 +74,9 @@ function AdminDashboardPage() {
               <Link href="/admin/phone-numbers" className="text-gray-700 hover:text-blue-600">
                 Phone Numbers
               </Link>
+              <Link href="/admin/test-wizard" className="text-gray-700 hover:text-blue-600">
+                Test Wizard
+              </Link>
               <button
                 onClick={handleLogout}
                 className="text-gray-700 hover:text-blue-600"

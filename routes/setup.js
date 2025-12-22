@@ -30,8 +30,10 @@ router.get('/data', authenticate, async (req, res) => {
       business: {
         name: business.name,
         phone: business.phone,
+        email: business.email,
         public_phone_number: business.public_phone_number,
         address: business.address,
+        website: business.website,
         timezone: business.timezone,
         onboarding_complete: business.onboarding_complete,
         vapi_phone_number: business.vapi_phone_number,
@@ -49,15 +51,22 @@ router.get('/data', authenticate, async (req, res) => {
 // Update step 1: Business info
 router.post('/step1', authenticate, async (req, res) => {
   try {
-    const { name, phone, address, website, timezone } = req.body;
+    const { name, phone, address, website, timezone, email } = req.body;
     
-    await Business.update(req.businessId, {
+    const updateData = {
       name,
       phone,
       address,
       website,
       timezone,
-    });
+    };
+    
+    // Update email if provided (for business email)
+    if (email !== undefined) {
+      updateData.email = email;
+    }
+    
+    await Business.update(req.businessId, updateData);
     
     res.json({ success: true });
   } catch (error) {
@@ -84,14 +93,37 @@ router.post('/step2', authenticate, async (req, res) => {
   }
 });
 
-// Update step 3: Business hours
+// Update step 3: Business hours and holiday hours
 router.post('/step3', authenticate, async (req, res) => {
   try {
-    const { business_hours } = req.body;
+    const { business_hours, holiday_hours } = req.body;
     
-    await AIAgent.update(req.businessId, {
-      business_hours,
-    });
+    const updateData = {};
+    if (business_hours !== undefined) {
+      updateData.business_hours = business_hours;
+    }
+    if (holiday_hours !== undefined) {
+      // Normalize holiday hours dates to YYYY-MM-DD format
+      let normalizedHolidayHours = holiday_hours;
+      if (Array.isArray(holiday_hours)) {
+        normalizedHolidayHours = holiday_hours.map(h => {
+          if (!h.date) return h;
+          let dateStr = h.date;
+          if (dateStr instanceof Date) {
+            const year = dateStr.getFullYear();
+            const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+            const day = String(dateStr.getDate()).padStart(2, '0');
+            dateStr = `${year}-${month}-${day}`;
+          } else if (dateStr.includes('T')) {
+            dateStr = dateStr.split('T')[0];
+          }
+          return { ...h, date: dateStr };
+        });
+      }
+      updateData.holiday_hours = normalizedHolidayHours;
+    }
+    
+    await AIAgent.update(req.businessId, updateData);
     
     res.json({ success: true });
   } catch (error) {

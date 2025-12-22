@@ -1,5 +1,14 @@
 'use client';
 
+import NewSetupWizard from './new-wizard';
+
+function SetupPage() {
+  return <NewSetupWizard testMode={false} />;
+}
+
+export default SetupPage;
+
+/* OLD SETUP WIZARD - REPLACED BY NEW 9-STEP WIZARD
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
