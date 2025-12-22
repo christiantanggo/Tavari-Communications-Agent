@@ -3,6 +3,7 @@
 
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { isTollFree } from '../utils/phoneFormatter.js';
 
 dotenv.config();
 
@@ -18,31 +19,56 @@ async function testVerificationAPI() {
   console.log('🔍 Testing Telnyx Toll-Free Verification API...\n');
 
   try {
-    // Step 1: Get a toll-free number from your account
-    console.log('1️⃣  Fetching toll-free numbers from your Telnyx account...');
+    // Step 1: Get all phone numbers and filter for actual toll-free numbers
+    console.log('1️⃣  Fetching phone numbers from your Telnyx account...');
     const numbersResponse = await axios.get(`${TELNYX_API_BASE_URL}/phone_numbers`, {
       headers: {
         Authorization: `Bearer ${TELNYX_API_KEY}`,
       },
       params: {
-        'filter[phone_number_type]': 'toll-free',
-        'page[size]': '5',
+        'page[size]': '50', // Get more numbers to filter from
       },
     });
 
-    const tollFreeNumbers = numbersResponse.data?.data || [];
+    const allNumbers = numbersResponse.data?.data || [];
+    
+    // Filter to only actual toll-free numbers by checking area code
+    const tollFreeNumbers = allNumbers.filter(num => {
+      if (!num.phone_number) return false;
+      return isTollFree(num.phone_number);
+    });
+    
+    console.log(`   📊 Found ${allNumbers.length} total phone number(s) in your account`);
+    console.log(`   🔍 Checking which ones are actually toll-free...\n`);
     
     if (tollFreeNumbers.length === 0) {
       console.log('⚠️  No toll-free numbers found in your account.');
-      console.log('   You can still test the API endpoints below.\n');
+      console.log('   Toll-free numbers have area codes: 800, 833, 844, 855, 866, 877, 888');
+      console.log('   Your numbers are all local numbers (not toll-free).');
+      console.log('   Local numbers do NOT require toll-free verification.');
+      console.log('   You can still test the API endpoints below with a toll-free number if you purchase one.\n');
     } else {
-      console.log(`✅ Found ${tollFreeNumbers.length} toll-free number(s):`);
+      console.log(`✅ Found ${tollFreeNumbers.length} actual toll-free number(s):`);
       tollFreeNumbers.forEach((num, idx) => {
         console.log(`   ${idx + 1}. ${num.phone_number} (ID: ${num.id})`);
         console.log(`      Status: ${num.status || 'unknown'}`);
+        console.log(`      Phone Type (from Telnyx): ${num.phone_number_type || 'unknown'}`);
         console.log(`      Verification Status: ${num.verification_status || num.toll_free_verification_status || 'unknown'}`);
       });
       console.log('');
+      
+      // Show non-toll-free numbers for reference
+      const localNumbers = allNumbers.filter(num => !isTollFree(num.phone_number));
+      if (localNumbers.length > 0) {
+        console.log(`   ℹ️  You also have ${localNumbers.length} local number(s) (these don't need toll-free verification):`);
+        localNumbers.slice(0, 5).forEach((num, idx) => {
+          console.log(`      ${idx + 1}. ${num.phone_number}`);
+        });
+        if (localNumbers.length > 5) {
+          console.log(`      ... and ${localNumbers.length - 5} more`);
+        }
+        console.log('');
+      }
     }
 
     // Step 2: Test multiple possible Toll-Free Verification API endpoints
@@ -134,12 +160,18 @@ async function testVerificationAPI() {
         console.log(`   💡 Automatic verification via API is NOT available`);
         console.log(`   💡 Manual verification required through Telnyx portal`);
         console.log(`   💡 Portal: https://portal.telnyx.com/#/app/numbers`);
-        console.log(`\n   📝 Note: You have ${tollFreeNumbers.length} toll-free number(s), but the API endpoint is not available.`);
-        console.log(`   📝 This could mean:`);
-        console.log(`      - The API requires special account permissions`);
-        console.log(`      - The API is behind a feature flag`);
-        console.log(`      - Manual verification is the only option for your account`);
-        console.log(`   📝 Contact Telnyx support to enable API access if needed\n`);
+        if (tollFreeNumbers.length > 0) {
+          console.log(`\n   📝 Note: You have ${tollFreeNumbers.length} toll-free number(s), but the API endpoint is not available.`);
+          console.log(`   📝 This could mean:`);
+          console.log(`      - The API requires special account permissions`);
+          console.log(`      - The API is behind a feature flag`);
+          console.log(`      - Manual verification is the only option for your account`);
+          console.log(`   📝 Contact Telnyx support to enable API access if needed\n`);
+        } else {
+          console.log(`\n   📝 Note: You don't have any toll-free numbers to verify.`);
+          console.log(`   📝 Toll-free verification is only needed for numbers with area codes: 800, 833, 844, 855, 866, 877, 888`);
+          console.log(`   📝 Your current numbers are local numbers and don't require toll-free verification.\n`);
+        }
       }
     } else {
       console.log(`   ⏭️  Skipped (no toll-free numbers to test)`);
