@@ -348,31 +348,62 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
     console.log(`[VAPI] Found ${allTelnyxNumbers.length} phone numbers in Telnyx account`);
     
     // Get all phone numbers assigned to businesses in our database
+    // Check multiple sources: vapi_phone_number, telnyx_number, and business_phone_numbers table
+    const assignedNumbers = new Set();
+    
+    // 1. Check businesses.vapi_phone_number
     const { data: businesses, error } = await supabaseClient
       .from('businesses')
-      .select('vapi_phone_number')
-      .not('vapi_phone_number', 'is', null);
+      .select('vapi_phone_number, telnyx_number')
+      .is('deleted_at', null);
     
     if (error) {
       console.warn('[VAPI] Error fetching assigned numbers from database:', error);
-      return [];
-    }
-    
-    const assignedNumbers = new Set(
-      (businesses || [])
-        .map(b => b.vapi_phone_number)
-        .filter(n => n)
-        .map(n => {
-          // Normalize phone numbers for comparison
-          let normalized = n.replace(/[^0-9+]/g, '');
+    } else {
+      (businesses || []).forEach(b => {
+        // Add vapi_phone_number if present
+        if (b.vapi_phone_number) {
+          let normalized = b.vapi_phone_number.replace(/[^0-9+]/g, '');
           if (!normalized.startsWith('+')) {
             normalized = '+' + normalized;
           }
-          return normalized;
-        })
-    );
+          assignedNumbers.add(normalized);
+        }
+        // Add telnyx_number if present
+        if (b.telnyx_number) {
+          let normalized = b.telnyx_number.replace(/[^0-9+]/g, '');
+          if (!normalized.startsWith('+')) {
+            normalized = '+' + normalized;
+          }
+          assignedNumbers.add(normalized);
+        }
+      });
+    }
     
-    console.log(`[VAPI] Found ${assignedNumbers.size} phone numbers assigned to businesses`);
+    // 2. Check business_phone_numbers table
+    try {
+      const { BusinessPhoneNumber } = await import('../models/BusinessPhoneNumber.js');
+      const { data: businessPhoneNumbers, error: bpnError } = await supabaseClient
+        .from('business_phone_numbers')
+        .select('phone_number')
+        .eq('is_active', true);
+      
+      if (!bpnError && businessPhoneNumbers) {
+        businessPhoneNumbers.forEach(bpn => {
+          if (bpn.phone_number) {
+            let normalized = bpn.phone_number.replace(/[^0-9+]/g, '');
+            if (!normalized.startsWith('+')) {
+              normalized = '+' + normalized;
+            }
+            assignedNumbers.add(normalized);
+          }
+        });
+      }
+    } catch (bpnImportError) {
+      console.warn('[VAPI] Could not check business_phone_numbers table (may not exist yet):', bpnImportError.message);
+    }
+    
+    console.log(`[VAPI] Found ${assignedNumbers.size} phone numbers assigned to businesses (checked vapi_phone_number, telnyx_number, and business_phone_numbers)`);
     
     // Find unassigned numbers in Telnyx
     const unassignedTelnyxNumbers = allTelnyxNumbers.filter(telnyxNum => {
@@ -416,6 +447,19 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
     const unassignedNumbers = [...unassignedVapiNumbers, ...unassignedTelnyxNumbers];
     console.log(`[VAPI] Total unassigned numbers available: ${unassignedNumbers.length}`);
     
+    // Separate toll-free and local numbers
+    const { isTollFree } = await import('../utils/phoneFormatter.js');
+    const tollFreeNumbers = unassignedNumbers.filter(num => {
+      const phone = num.phoneNumber || num.phone_number || num.number;
+      return phone && isTollFree(phone);
+    });
+    const localNumbers = unassignedNumbers.filter(num => {
+      const phone = num.phoneNumber || num.phone_number || num.number;
+      return phone && !isTollFree(phone);
+    });
+    
+    console.log(`[VAPI] Unassigned numbers breakdown: ${localNumbers.length} local, ${tollFreeNumbers.length} toll-free`);
+    
     // If preferred area code is provided, prioritize numbers with that area code
     if (preferredAreaCode && unassignedNumbers.length > 0) {
       const cleanAreaCode = preferredAreaCode.replace(/\D/g, '');
@@ -428,6 +472,18 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
         console.log(`[VAPI] Found ${preferred.length} unassigned numbers with preferred area code ${cleanAreaCode}`);
         return preferred;
       }
+    }
+    
+    // Prioritize local numbers over toll-free for automatic assignment
+    // Toll-free numbers are more expensive and should be assigned manually
+    if (localNumbers.length > 0) {
+      console.log(`[VAPI] Prioritizing ${localNumbers.length} local numbers over ${tollFreeNumbers.length} toll-free numbers`);
+      return localNumbers;
+    }
+    
+    // If no local numbers available, return toll-free (but log a warning)
+    if (tollFreeNumbers.length > 0) {
+      console.warn(`[VAPI] ⚠️  Only toll-free numbers available for assignment. Consider assigning manually.`);
     }
     
     return unassignedNumbers;
