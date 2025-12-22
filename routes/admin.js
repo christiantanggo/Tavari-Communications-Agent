@@ -1010,49 +1010,65 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     const allTelnyxNumbers = telnyxResponse.data?.data || [];
     console.log(`[Admin] Found ${allTelnyxNumbers.length} phone numbers in Telnyx account`);
     
-    // Get all phone numbers assigned to businesses for SMS (telnyx_number field)
-    // Get ALL businesses, not just those with phone numbers, to ensure we check everything
-    // Use select('*') to get ALL fields and ensure telnyx_number is included
+    // Get all phone numbers assigned to businesses for SMS
+    // Check both business_phone_numbers table (new) and telnyx_number field (legacy)
+    
+    // Get all active phone numbers from business_phone_numbers table
+    const { data: businessPhoneNumbers, error: bpnError } = await supabaseClient
+      .from('business_phone_numbers')
+      .select('business_id, phone_number, businesses!inner(name)')
+      .eq('is_active', true);
+    
+    if (bpnError) {
+      console.warn('[Admin] Error fetching business_phone_numbers (table may not exist yet):', bpnError.message);
+    }
+    
+    // Also get businesses with telnyx_number (legacy support)
     const { data: businesses, error } = await supabaseClient
       .from('businesses')
-      .select('*')
+      .select('id, name, telnyx_number, vapi_phone_number')
       .is('deleted_at', null);
     
     if (error) {
-      console.error('[Admin] Error fetching assigned numbers:', error);
+      console.error('[Admin] Error fetching businesses:', error);
       return res.status(500).json({ error: "Failed to fetch assigned numbers" });
     }
     
     console.log(`[Admin] Found ${businesses?.length || 0} businesses in database`);
+    console.log(`[Admin] Found ${businessPhoneNumbers?.length || 0} phone numbers in business_phone_numbers table`);
     
-    // Debug: Log all businesses and their phone number fields
-    console.log(`[Admin] All businesses phone number fields:`, (businesses || []).map(b => ({
-      id: b.id,
-      name: b.name,
-      telnyx_number: b.telnyx_number,
-      vapi_phone_number: b.vapi_phone_number,
-      telnyx_type: typeof b.telnyx_number,
-      telnyx_length: b.telnyx_number?.length,
-    })));
-    
-    // Create set of assigned SMS numbers (telnyx_number field only)
-    // Also store original formats for debugging
+    // Create set of assigned SMS numbers
     const assignedSMSNumbers = new Set();
     const assignedSMSNumbersOriginal = [];
     
+    // Add numbers from business_phone_numbers table (new system)
+    (businessPhoneNumbers || []).forEach(bpn => {
+      const phoneNumber = bpn.phone_number;
+      if (phoneNumber && typeof phoneNumber === 'string' && phoneNumber.trim() !== '') {
+        const original = phoneNumber;
+        let normalized = original.replace(/[^0-9+]/g, '').trim();
+        if (!normalized.startsWith('+')) normalized = '+' + normalized;
+        assignedSMSNumbers.add(normalized);
+        assignedSMSNumbersOriginal.push({ 
+          original, 
+          normalized, 
+          business: bpn.businesses?.name || 'Unknown',
+          business_id: bpn.business_id,
+          source: 'business_phone_numbers' 
+        });
+      }
+    });
+    
+    // Also check legacy telnyx_number field (only if business doesn't have numbers in new table)
     (businesses || []).forEach(b => {
-      // Check telnyx_number first (primary SMS number field)
-      let phoneNumber = b.telnyx_number;
-      let source = 'telnyx_number';
-      
-      // If telnyx_number is null/empty, fall back to vapi_phone_number
-      // (some businesses might have the number in vapi_phone_number for SMS)
-      if (!phoneNumber || (typeof phoneNumber === 'string' && phoneNumber.trim() === '')) {
-        phoneNumber = b.vapi_phone_number;
-        source = 'vapi_phone_number';
+      // Check if this business already has numbers in business_phone_numbers (skip to avoid duplicates)
+      const hasInNewTable = businessPhoneNumbers?.some(bpn => bpn.business_id === b.id);
+      if (hasInNewTable) {
+        return; // Skip legacy fields if business has numbers in new table
       }
       
-      // Process the phone number if we found one
+      // Check telnyx_number (legacy support)
+      const phoneNumber = b.telnyx_number;
       if (phoneNumber && typeof phoneNumber === 'string' && phoneNumber.trim() !== '') {
         const original = phoneNumber;
         let normalized = original.replace(/[^0-9+]/g, '').trim();
@@ -1063,11 +1079,8 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
           normalized, 
           business: b.name, 
           business_id: b.id,
-          source: source 
+          source: 'telnyx_number (legacy)' 
         });
-        console.log(`[Admin] ✅ Added assigned number from ${source}: ${original} -> ${normalized} for business: ${b.name}`);
-      } else {
-        console.log(`[Admin] ⚠️  Business ${b.name} (${b.id}) has no phone number. telnyx_number: ${b.telnyx_number}, vapi_phone_number: ${b.vapi_phone_number}`);
       }
     });
     
@@ -1243,11 +1256,29 @@ router.post("/phone-numbers/migrate-to-telnyx/:businessId", authenticateAdmin, a
   }
 });
 
-// Assign SMS number to business
+// Get all phone numbers for a business
+router.get("/phone-numbers/business/:businessId", authenticateAdmin, async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { BusinessPhoneNumber } = await import("../models/BusinessPhoneNumber.js");
+    
+    const numbers = await BusinessPhoneNumber.findByBusinessId(businessId);
+    
+    res.json({
+      success: true,
+      numbers: numbers || [],
+    });
+  } catch (error) {
+    console.error("Get business phone numbers error:", error);
+    res.status(500).json({ error: error.message || "Failed to get business phone numbers" });
+  }
+});
+
+// Assign SMS number to business (adds to business_phone_numbers table)
 router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { phone_number } = req.body;
+    const { phone_number, is_primary } = req.body;
     
     if (!phone_number) {
       return res.status(400).json({ error: "Phone number is required" });
@@ -1259,7 +1290,7 @@ router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (r
     }
 
     // Normalize phone number
-    let phoneNumberE164 = phone_number.replace(/[^0-9+]/g, '');
+    let phoneNumberE164 = phone_number.replace(/[^0-9+]/g, '').trim();
     if (!phoneNumberE164.startsWith('+')) {
       phoneNumberE164 = '+' + phoneNumberE164;
     }
@@ -1286,24 +1317,39 @@ router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (r
     }
 
     // Check if number is already assigned to another business
-    const { supabaseClient } = await import("../config/database.js");
-    const { data: existingBusiness } = await supabaseClient
-      .from('businesses')
-      .select('id, name, telnyx_number')
-      .eq('telnyx_number', phoneNumberE164)
-      .is('deleted_at', null)
-      .single();
-
-    if (existingBusiness && existingBusiness.id !== businessId) {
+    const { BusinessPhoneNumber } = await import("../models/BusinessPhoneNumber.js");
+    const existing = await BusinessPhoneNumber.findByPhoneNumber(phoneNumberE164);
+    
+    if (existing && existing.business_id !== businessId) {
+      const existingBusiness = await Business.findById(existing.business_id);
       return res.status(409).json({ 
-        error: `Phone number is already assigned to business: ${existingBusiness.name}` 
+        error: `Phone number is already assigned to business: ${existingBusiness?.name || existing.business_id}` 
       });
     }
 
-    // Update business with SMS number
-    await Business.update(businessId, {
-      telnyx_number: phoneNumberE164,
-    });
+    // Check if number is already assigned to this business
+    const existingForBusiness = await BusinessPhoneNumber.findByBusinessId(businessId);
+    const alreadyAssigned = existingForBusiness.find(n => n.phone_number === phoneNumberE164 && n.is_active);
+    
+    if (alreadyAssigned) {
+      return res.status(409).json({ 
+        error: "Phone number is already assigned to this business" 
+      });
+    }
+
+    // Add phone number to business_phone_numbers table
+    const phoneNumberRecord = await BusinessPhoneNumber.create(
+      businessId, 
+      phoneNumberE164, 
+      is_primary || false
+    );
+
+    // Also update telnyx_number field for backwards compatibility (set as primary if it's the first)
+    if (is_primary || existingForBusiness.length === 0) {
+      await Business.update(businessId, {
+        telnyx_number: phoneNumberE164,
+      });
+    }
 
     // Log admin activity
     await AdminActivityLog.create({
@@ -1313,12 +1359,14 @@ router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (r
       details: { 
         phone_number: phoneNumberE164,
         business_name: business.name,
+        is_primary: is_primary || false,
       },
     });
 
     res.json({
       success: true,
       phone_number: phoneNumberE164,
+      phone_number_id: phoneNumberRecord.id,
       business: {
         id: business.id,
         name: business.name,
@@ -1327,6 +1375,67 @@ router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (r
   } catch (error) {
     console.error("Assign SMS number error:", error);
     res.status(500).json({ error: error.message || "Failed to assign SMS number" });
+  }
+});
+
+// Remove phone number from business
+router.delete("/phone-numbers/business/:businessId/:phoneNumberId", authenticateAdmin, async (req, res) => {
+  try {
+    const { businessId, phoneNumberId } = req.params;
+    
+    const business = await Business.findById(businessId);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    const { BusinessPhoneNumber } = await import("../models/BusinessPhoneNumber.js");
+    
+    // Verify the phone number belongs to this business
+    const phoneNumber = await BusinessPhoneNumber.findByBusinessId(businessId);
+    const numberRecord = phoneNumber.find(n => n.id === phoneNumberId);
+    
+    if (!numberRecord) {
+      return res.status(404).json({ error: "Phone number not found for this business" });
+    }
+
+    // Remove the phone number
+    await BusinessPhoneNumber.remove(phoneNumberId);
+
+    // If this was the primary number, update telnyx_number field
+    if (numberRecord.is_primary) {
+      const remainingNumbers = await BusinessPhoneNumber.findActiveByBusinessId(businessId);
+      const newPrimary = remainingNumbers.find(n => n.is_primary) || remainingNumbers[0];
+      
+      if (newPrimary) {
+        await Business.update(businessId, {
+          telnyx_number: newPrimary.phone_number,
+        });
+      } else {
+        // No numbers left, clear telnyx_number
+        await Business.update(businessId, {
+          telnyx_number: null,
+        });
+      }
+    }
+
+    // Log admin activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: businessId,
+      action: "remove_sms_number",
+      details: { 
+        phone_number: numberRecord.phone_number,
+        business_name: business.name,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Phone number removed successfully",
+    });
+  } catch (error) {
+    console.error("Remove SMS number error:", error);
+    res.status(500).json({ error: error.message || "Failed to remove SMS number" });
   }
 });
 

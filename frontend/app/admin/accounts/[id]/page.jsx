@@ -28,6 +28,9 @@ function AdminAccountDetailPage() {
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState('');
   const [purchaseNew, setPurchaseNew] = useState(false);
   const [changingNumber, setChangingNumber] = useState(false);
+  const [businessPhoneNumbers, setBusinessPhoneNumbers] = useState([]);
+  const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(false);
+  const [removingNumber, setRemovingNumber] = useState(null);
 
   useEffect(() => {
     if (accountId) {
@@ -48,6 +51,13 @@ function AdminAccountDetailPage() {
         fetch(`${API_URL}/api/admin/accounts/${accountId}/activity`, {
           headers: { 'Authorization': `Bearer ${token}` },
         }).catch(() => null),
+      ]);
+      
+      if (accountRes.ok) {
+        const accountData = await accountRes.json();
+        setAccount(accountData.business);
+        await loadBusinessPhoneNumbers(); // Load phone numbers after account loads
+      }
       ]);
 
       const accountData = await accountRes.json();
@@ -187,12 +197,13 @@ function AdminAccountDetailPage() {
 
     setAssigningNumber(true);
     try {
-      const response = await adminPhoneNumbersAPI.assign(accountId, selectedPhoneNumber, purchaseNew);
+      const response = await adminSMSNumbersAPI.assignSMS(accountId, selectedPhoneNumber, false);
       if (response.data.success) {
         success(`Phone number ${response.data.phone_number} assigned successfully!`);
         setShowPhoneSelector(false);
         setSelectedPhoneNumber('');
         setPurchaseNew(false);
+        await loadBusinessPhoneNumbers();
         await loadAccount();
       } else {
         showError('Failed to assign phone number');
@@ -230,6 +241,39 @@ function AdminAccountDetailPage() {
       showError(`Failed to change phone number: ${errorMessage}`);
     } finally {
       setChangingNumber(false);
+    }
+  };
+
+  const loadBusinessPhoneNumbers = async () => {
+    setLoadingPhoneNumbers(true);
+    try {
+      const numbers = await adminSMSNumbersAPI.getBusinessNumbers(accountId);
+      setBusinessPhoneNumbers(numbers.data?.numbers || []);
+    } catch (error) {
+      console.error('Failed to load business phone numbers:', error);
+      // If table doesn't exist yet, that's okay - just show empty list
+      setBusinessPhoneNumbers([]);
+    } finally {
+      setLoadingPhoneNumbers(false);
+    }
+  };
+
+  const handleRemoveNumber = async (phoneNumberId) => {
+    if (!confirm('Are you sure you want to remove this phone number from this business?')) {
+      return;
+    }
+
+    setRemovingNumber(phoneNumberId);
+    try {
+      await adminSMSNumbersAPI.removeNumber(accountId, phoneNumberId);
+      success('Phone number removed successfully');
+      await loadBusinessPhoneNumbers();
+      await loadAccount(); // Reload account to update telnyx_number if needed
+    } catch (error) {
+      console.error('Failed to remove phone number:', error);
+      showError(error.response?.data?.error || 'Failed to remove phone number');
+    } finally {
+      setRemovingNumber(null);
     }
   };
 
@@ -450,18 +494,46 @@ function AdminAccountDetailPage() {
                   </div>
 
                   <div className="border border-gray-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold mb-4">Phone Number Management</h3>
-                    <div className="space-y-2">
+                    <h3 className="text-lg font-semibold mb-4">SMS Phone Numbers</h3>
+                    <div className="space-y-3">
                       <button
                         onClick={() => openPhoneSelector(false)}
                         className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                       >
-                        {account?.vapi_phone_number ? 'Change Phone Number' : 'Assign Phone Number'}
+                        Add Phone Number
                       </button>
-                      {account?.vapi_phone_number && (
-                        <div className="mt-2 p-2 bg-gray-50 rounded">
-                          <p className="text-sm text-gray-600">Current Number:</p>
-                          <p className="font-mono text-sm font-semibold">{account.vapi_phone_number}</p>
+                      
+                      {loadingPhoneNumbers ? (
+                        <p className="text-sm text-gray-500">Loading phone numbers...</p>
+                      ) : businessPhoneNumbers.length === 0 ? (
+                        <p className="text-sm text-gray-500">No phone numbers assigned</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {businessPhoneNumbers.map((number) => (
+                            <div
+                              key={number.id}
+                              className="flex items-center justify-between p-2 bg-gray-50 rounded border"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm font-semibold">{number.phone_number}</span>
+                                {number.is_primary && (
+                                  <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">Primary</span>
+                                )}
+                                {!number.is_active && (
+                                  <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-800 rounded">Inactive</span>
+                                )}
+                              </div>
+                              {number.is_active && (
+                                <button
+                                  onClick={() => handleRemoveNumber(number.id)}
+                                  disabled={removingNumber === number.id}
+                                  className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-gray-400"
+                                >
+                                  {removingNumber === number.id ? 'Removing...' : 'Remove'}
+                                </button>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>

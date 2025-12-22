@@ -181,7 +181,7 @@ function AdminPhoneNumbersPage() {
                     <option value="">-- Select a business --</option>
                     {filteredBusinesses.map((business) => (
                       <option key={business.id} value={business.id}>
-                        {business.name} ({business.email}) - Current SMS: {business.telnyx_number || 'None'}
+                        {business.name} ({business.email}) - Current: {business.telnyx_number || 'None'}
                       </option>
                     ))}
                   </select>

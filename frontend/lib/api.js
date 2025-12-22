@@ -196,7 +196,9 @@ export const adminPackagesAPI = {
 // Admin SMS Phone Numbers API
 export const adminSMSNumbersAPI = {
   getUnassigned: () => adminApi.get('/phone-numbers/unassigned'),
-  assignSMS: (businessId, phoneNumber) => adminApi.post(`/phone-numbers/assign-sms/${businessId}`, { phone_number: phoneNumber }),
+  assignSMS: (businessId, phoneNumber, isPrimary = false) => adminApi.post(`/phone-numbers/assign-sms/${businessId}`, { phone_number: phoneNumber, is_primary: isPrimary }),
+  getBusinessNumbers: (businessId) => adminApi.get(`/phone-numbers/business/${businessId}`),
+  removeNumber: (businessId, phoneNumberId) => adminApi.delete(`/phone-numbers/business/${businessId}/${phoneNumberId}`),
   migrateToTelnyx: (businessId) => adminApi.post(`/phone-numbers/migrate-to-telnyx/${businessId}`),
 };
 
