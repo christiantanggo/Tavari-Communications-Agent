@@ -814,6 +814,19 @@ router.get('/numbers', authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error('[BulkSMS Route] Get numbers error:', error);
+    
+    // Handle rate limiting gracefully
+    if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('rate limit')) {
+      console.warn('[BulkSMS Route] Rate limited when getting numbers - returning cached/default numbers');
+      // Return empty array or cached numbers instead of error
+      // The frontend can still work with empty numbers array
+      return res.json({
+        numbers: [],
+        total_throughput: { totalRate: 0, unit: 'messages_per_minute', totalPerHour: 0 },
+        warning: 'Rate limited - verification status check skipped. Numbers may not show verification status.',
+      });
+    }
+    
     res.status(500).json({ 
       error: error.message || 'Failed to get numbers' 
     });

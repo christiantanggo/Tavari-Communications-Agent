@@ -191,15 +191,30 @@ export async function getAvailableSMSNumbers(businessId) {
     if (businessPhoneNumbers.length > 0) {
       // Use numbers from business_phone_numbers table
       for (const bpn of businessPhoneNumbers) {
-        // Check actual verification status from Telnyx
+        // Only check verification status for toll-free numbers (local numbers don't need verification)
+        // Skip verification check if rate limited to avoid 429 errors
         let isVerified = true; // Default to verified
-        try {
-          const { getVerificationStatus } = await import('./telnyxVerification.js');
-          const verificationStatus = await getVerificationStatus(bpn.phone_number);
-          isVerified = verificationStatus.verified || !verificationStatus.is_toll_free; // Verified if verified or not toll-free
-        } catch (verifyError) {
-          console.warn(`[BulkSMS] Could not check verification status for ${bpn.phone_number}:`, verifyError.message);
-          // Default to verified to avoid blocking sends
+        const isTollFreeNum = isTollFree(bpn.phone_number);
+        
+        // Only check verification for toll-free numbers
+        if (isTollFreeNum) {
+          try {
+            const { getVerificationStatus } = await import('./telnyxVerification.js');
+            const verificationStatus = await getVerificationStatus(bpn.phone_number);
+            isVerified = verificationStatus.verified || false;
+          } catch (verifyError) {
+            // Handle rate limiting gracefully - skip verification check if 429
+            if (verifyError.response?.status === 429) {
+              console.warn(`[BulkSMS] Rate limited (429) when checking verification for ${bpn.phone_number} - skipping check, assuming verified`);
+              isVerified = true; // Assume verified to avoid blocking sends
+            } else {
+              console.warn(`[BulkSMS] Could not check verification status for ${bpn.phone_number}:`, verifyError.message);
+              isVerified = true; // Default to verified to avoid blocking sends
+            }
+          }
+        } else {
+          // Local numbers don't need verification - always verified
+          isVerified = true;
         }
         
         const numberInfo = detectNumberType(bpn.phone_number, isVerified);
