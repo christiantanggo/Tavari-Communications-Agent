@@ -21,6 +21,8 @@ function SMSPage() {
   // Campaigns Tab
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [failedRecipients, setFailedRecipients] = useState([]);
+  const [loadingFailedRecipients, setLoadingFailedRecipients] = useState(false);
   
   // Numbers Tab
   const [availableNumbers, setAvailableNumbers] = useState([]);
@@ -234,6 +236,14 @@ function SMSPage() {
     try {
       const res = await bulkSMSAPI.getCampaign(campaignId);
       setSelectedCampaign(res.data.campaign);
+      
+      // Load failed recipients if there are any
+      if (res.data.campaign.failed_count > 0) {
+        loadFailedRecipients(campaignId);
+      } else {
+        setFailedRecipients([]);
+      }
+      
       // Scroll to details section
       setTimeout(() => {
         const detailsElement = document.getElementById('campaign-details');
@@ -243,6 +253,36 @@ function SMSPage() {
       }, 100);
     } catch (error) {
       showError('Failed to load campaign details');
+    }
+  };
+
+  const loadFailedRecipients = async (campaignId) => {
+    setLoadingFailedRecipients(true);
+    try {
+      const res = await bulkSMSAPI.getRecipients(campaignId, 'failed');
+      setFailedRecipients(res.data.recipients || []);
+    } catch (error) {
+      console.error('Failed to load failed recipients:', error);
+      setFailedRecipients([]);
+    } finally {
+      setLoadingFailedRecipients(false);
+    }
+  };
+
+  const handleResendFailedRecipients = async (campaignId, recipientIds) => {
+    if (!confirm(`Resend to ${recipientIds.length} failed recipient(s)?`)) {
+      return;
+    }
+    
+    try {
+      await bulkSMSAPI.resendRecipients(campaignId, recipientIds);
+      success(`Resending to ${recipientIds.length} recipient(s)...`);
+      
+      // Reload campaign and failed recipients
+      await handleViewCampaign(campaignId);
+      await loadData();
+    } catch (error) {
+      showError(error.response?.data?.error || 'Failed to resend to recipients');
     }
   };
 
@@ -986,6 +1026,60 @@ function SMSPage() {
                         <strong className="text-gray-700">Failed:</strong>
                         <span className="ml-2 text-red-600">{selectedCampaign.failed_count || 0}</span>
                       </div>
+                      
+                      {/* Failed Recipients Section */}
+                      {selectedCampaign.failed_count > 0 && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                          <div className="flex justify-between items-center mb-3">
+                            <strong className="text-gray-700">Failed Recipients:</strong>
+                            {failedRecipients.length > 0 && (
+                              <button
+                                onClick={() => handleResendFailedRecipients(selectedCampaign.id, failedRecipients.map(r => r.id))}
+                                className="px-3 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                              >
+                                Resend All ({failedRecipients.length})
+                              </button>
+                            )}
+                          </div>
+                          {loadingFailedRecipients ? (
+                            <p className="text-sm text-gray-500">Loading failed recipients...</p>
+                          ) : failedRecipients.length > 0 ? (
+                            <div className="space-y-2 max-h-60 overflow-y-auto">
+                              {failedRecipients.map((recipient) => (
+                                <div key={recipient.id} className="p-3 bg-red-50 rounded-md border border-red-200">
+                                  <div className="flex justify-between items-start">
+                                    <div className="flex-1">
+                                      <div className="font-medium text-sm text-gray-900">
+                                        {recipient.first_name && recipient.last_name 
+                                          ? `${recipient.first_name} ${recipient.last_name}`
+                                          : recipient.email || 'Unknown'
+                                        }
+                                      </div>
+                                      <div className="text-sm text-gray-600 mt-1">
+                                        {recipient.phone_number}
+                                      </div>
+                                      {recipient.error_message && (
+                                        <div className="text-xs text-red-700 mt-2 p-2 bg-red-100 rounded">
+                                          <strong>Error:</strong> {recipient.error_message}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => handleResendFailedRecipients(selectedCampaign.id, [recipient.id])}
+                                      className="ml-2 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap"
+                                    >
+                                      Resend
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500">No failed recipients found</p>
+                          )}
+                        </div>
+                      )}
+                      
                       <div>
                         <strong className="text-gray-700">Created:</strong>
                         <span className="ml-2">{formatDateInBusinessTimezone(selectedCampaign.created_at)}</span>

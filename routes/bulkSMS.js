@@ -735,6 +735,71 @@ router.get('/campaigns/:id/recipients', authenticate, async (req, res) => {
 });
 
 /**
+ * Resend to specific failed recipients
+ * POST /api/bulk-sms/campaigns/:id/resend-recipients
+ */
+router.post('/campaigns/:id/resend-recipients', authenticate, async (req, res) => {
+  try {
+    const { recipient_ids } = req.body;
+    
+    if (!recipient_ids || !Array.isArray(recipient_ids) || recipient_ids.length === 0) {
+      return res.status(400).json({ error: 'recipient_ids array is required' });
+    }
+    
+    const campaign = await SMSCampaign.findById(req.params.id);
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    if (campaign.business_id !== req.businessId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Get the recipients to resend
+    const allRecipients = await SMSCampaignRecipient.findByCampaignId(req.params.id);
+    const recipientsToResend = allRecipients.filter(r => recipient_ids.includes(r.id));
+    
+    if (recipientsToResend.length === 0) {
+      return res.status(404).json({ error: 'No recipients found with provided IDs' });
+    }
+    
+    // Get phone numbers to resend
+    const phoneNumbers = recipientsToResend.map(r => r.phone_number).filter(Boolean);
+    
+    if (phoneNumbers.length === 0) {
+      return res.status(400).json({ error: 'No valid phone numbers found for resend' });
+    }
+    
+    // Reset recipient statuses to pending
+    for (const recipient of recipientsToResend) {
+      await SMSCampaignRecipient.updateStatus(recipient.id, 'pending', {
+        error_message: null,
+        sent_at: null,
+        telnyx_message_id: null,
+      });
+    }
+    
+    // Resend the messages
+    sendBulkSMS(req.params.id, req.businessId, campaign.message_text, phoneNumbers)
+      .catch(error => {
+        console.error(`[BulkSMS Route] Background send error for resent recipients:`, error);
+      });
+    
+    res.json({ 
+      success: true, 
+      message: `Resending to ${phoneNumbers.length} recipient(s)`,
+      recipient_count: phoneNumbers.length,
+    });
+  } catch (error) {
+    console.error('[BulkSMS Route] Resend recipients error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to resend to recipients' 
+    });
+  }
+});
+
+/**
  * Get all SMS-capable numbers for business
  * GET /api/bulk-sms/numbers
  */

@@ -213,6 +213,7 @@ export const bulkSMSAPI = {
   pauseCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/pause`),
   restartCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/restart`),
   resendCampaign: (id) => api.post(`/bulk-sms/campaigns/${id}/resend`),
+  resendRecipients: (id, recipientIds) => api.post(`/bulk-sms/campaigns/${id}/resend-recipients`, { recipient_ids: recipientIds }),
   testSMS: (data) => api.post('/bulk-sms/test', data),
   getRecipients: (id, status) => api.get(`/bulk-sms/campaigns/${id}/recipients`, { 
     params: status ? { status } : {} 
