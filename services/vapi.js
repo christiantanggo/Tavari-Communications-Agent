@@ -507,12 +507,16 @@ export async function purchaseTelnyxNumber(phoneNumber) {
       // Extract phone number from order response
       if (orderResponse.data?.data?.phone_numbers && orderResponse.data.data.phone_numbers.length > 0) {
         const purchasedNumber = orderResponse.data.data.phone_numbers[0];
-        console.log(`[VAPI] ✅ Phone number purchased via number_orders: ${purchasedNumber.phone_number || cleanNumber}`);
+        const finalNumber = purchasedNumber.phone_number || cleanNumber;
+        console.log(`[VAPI] ✅ Phone number purchased via number_orders: ${finalNumber}`);
+        
+        // Automatically verify toll-free numbers after purchase
+        await triggerVerificationIfNeeded(finalNumber, businessId);
         
         // Return in consistent format
         return {
           id: purchasedNumber.id,
-          phone_number: purchasedNumber.phone_number || cleanNumber,
+          phone_number: finalNumber,
           ...purchasedNumber
         };
       }
@@ -552,6 +556,10 @@ export async function purchaseTelnyxNumber(phoneNumber) {
         });
 
         console.log(`[VAPI] ✅ Purchased phone number from Telnyx via direct endpoint: ${cleanNumber}`);
+        
+        // Automatically verify toll-free numbers after purchase
+        await triggerVerificationIfNeeded(cleanNumber, businessId);
+        
         return directResponse.data.data;
       } catch (directError) {
         // If both methods fail, check if number might already exist
