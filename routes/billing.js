@@ -124,14 +124,37 @@ router.post('/checkout', authenticate, async (req, res) => {
       }
     }
     
-    // Customer doesn't have saved payment method - redirect to add one first
-    // After adding payment method, they can try checkout again (will use API method above)
+    // Customer doesn't have saved payment method - redirect to Helcim payment page
+    // The payment page will allow them to add a payment method and complete payment
     if (process.env.HELCIM_PAYMENT_PAGE_URL) {
-      return res.status(402).json({
-        error: 'Payment method required',
-        message: 'Please add a payment method first, then try again.',
-        action: 'add_payment_method',
-        url: null, // Frontend should redirect to add payment method page
+      const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
+      const amount = pkg.monthly_price.toFixed(2);
+      const separator = paymentPageUrl.includes('?') ? '&' : '?';
+      
+      // Get or create customer for payment page
+      let customerId = null;
+      try {
+        const customer = await HelcimService.getOrCreateCustomer(
+          req.businessId,
+          business.email,
+          business.name,
+          business.phone
+        );
+        customerId = customer.customerId || customer.id;
+      } catch (customerError) {
+        console.warn('[Billing] Could not get/create customer for payment page:', customerError.message);
+      }
+      
+      // Build payment page URL with amount and customer info
+      const paymentUrlWithAmount = `${paymentPageUrl}${separator}amount=${amount}&package_id=${packageId}${customerId ? `&customer_id=${customerId}` : ''}`;
+      
+      return res.json({
+        url: paymentUrlWithAmount,
+        amount: amount,
+        packageId: packageId,
+        packageName: pkg.name,
+        customerId: customerId,
+        message: 'Redirecting to payment page...'
       });
     }
     

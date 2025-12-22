@@ -190,6 +190,8 @@ export default function NewSetupWizard({ testMode = false }) {
                            checkoutRes.data?.redirect_url || 
                            checkoutRes.data?.paymentUrl;
         
+        console.log('[Setup Wizard] Checkout response:', checkoutRes.data);
+        
         if (checkoutRes.data?.success === true) {
           // Payment already processed successfully (saved payment method used)
           success('Payment processed successfully! Package activated.');
@@ -199,18 +201,16 @@ export default function NewSetupWizard({ testMode = false }) {
           return;
         } else if (redirectUrl) {
           // Redirect to payment page or success page
-          console.log('[Setup Wizard] Redirecting to:', redirectUrl);
+          console.log('[Setup Wizard] Redirecting to payment:', redirectUrl);
           window.location.href = redirectUrl;
           return; // Stop execution - user will be redirected
-        } else if (checkoutRes.data?.action === 'add_payment_method') {
-          // Need to add payment method first
-          warning('Please add a payment method first. You can complete payment later in billing settings.');
-          // Continue to next step
-          setCurrentStep(6);
-          setSaving(false);
-          return;
         } else {
-          showError(checkoutRes.data?.error || checkoutRes.data?.message || 'Failed to initiate payment. You can complete payment later in billing settings.');
+          // If no URL and no success, show error but allow continuing
+          const errorMsg = checkoutRes.data?.error || 
+                          checkoutRes.data?.message || 
+                          'Failed to initiate payment. You can complete payment later in billing settings.';
+          console.error('[Setup Wizard] No payment URL returned:', checkoutRes.data);
+          showError(errorMsg);
           // Continue to next step even if payment fails
           setCurrentStep(6);
           setSaving(false);
