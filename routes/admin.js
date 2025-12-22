@@ -1012,9 +1012,10 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     
     // Get all phone numbers assigned to businesses for SMS (telnyx_number field)
     // Get ALL businesses, not just those with phone numbers, to ensure we check everything
+    // Use select('*') to get ALL fields and ensure telnyx_number is included
     const { data: businesses, error } = await supabaseClient
       .from('businesses')
-      .select('id, name, telnyx_number, vapi_phone_number')
+      .select('*')
       .is('deleted_at', null);
     
     if (error) {
