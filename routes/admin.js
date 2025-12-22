@@ -1269,13 +1269,94 @@ router.get("/phone-numbers/business/:businessId", authenticateAdmin, async (req,
     
     const numbers = await BusinessPhoneNumber.findByBusinessId(businessId);
     
+    // Also get business info for verification
+    const business = await Business.findById(businessId);
+    
     res.json({
       success: true,
       numbers: numbers || [],
+      business: business ? {
+        id: business.id,
+        name: business.name,
+        telnyx_number: business.telnyx_number, // Legacy field for comparison
+      } : null,
+      verification: {
+        total_numbers: numbers?.length || 0,
+        active_numbers: numbers?.filter(n => n.is_active).length || 0,
+        primary_numbers: numbers?.filter(n => n.is_primary).length || 0,
+      },
     });
   } catch (error) {
     console.error("Get business phone numbers error:", error);
     res.status(500).json({ error: error.message || "Failed to get business phone numbers" });
+  }
+});
+
+// Verify all phone number assignments (admin diagnostic endpoint)
+router.get("/phone-numbers/verify", authenticateAdmin, async (req, res) => {
+  try {
+    const { supabaseClient } = await import("../config/database.js");
+    const { BusinessPhoneNumber } = await import("../models/BusinessPhoneNumber.js");
+    
+    // Get all businesses with their phone numbers
+    const { data: businesses, error: businessError } = await supabaseClient
+      .from('businesses')
+      .select('id, name, telnyx_number')
+      .is('deleted_at', null);
+    
+    if (businessError) {
+      throw businessError;
+    }
+    
+    const verification = [];
+    
+    for (const business of businesses || []) {
+      try {
+        const numbers = await BusinessPhoneNumber.findByBusinessId(business.id);
+        
+        verification.push({
+          business_id: business.id,
+          business_name: business.name,
+          legacy_telnyx_number: business.telnyx_number,
+          numbers_in_table: numbers?.length || 0,
+          active_numbers: numbers?.filter(n => n.is_active).length || 0,
+          primary_numbers: numbers?.filter(n => n.is_primary).length || 0,
+          phone_numbers: numbers?.map(n => ({
+            id: n.id,
+            phone_number: n.phone_number,
+            is_primary: n.is_primary,
+            is_active: n.is_active,
+            created_at: n.created_at,
+          })) || [],
+        });
+      } catch (error) {
+        verification.push({
+          business_id: business.id,
+          business_name: business.name,
+          error: error.message,
+        });
+      }
+    }
+    
+    // Also get total counts
+    const { data: allNumbers, error: numbersError } = await supabaseClient
+      .from('business_phone_numbers')
+      .select('id, business_id, phone_number, is_primary, is_active');
+    
+    res.json({
+      success: true,
+      summary: {
+        total_businesses: businesses?.length || 0,
+        total_phone_numbers: allNumbers?.length || 0,
+        active_phone_numbers: allNumbers?.filter(n => n.is_active).length || 0,
+        primary_phone_numbers: allNumbers?.filter(n => n.is_primary).length || 0,
+      },
+      businesses: verification,
+      all_assignments: allNumbers || [],
+    });
+  } catch (error) {
+    console.error("Verify phone numbers error:", error);
+    res.status(500).json({ error: error.message || "Failed to verify phone numbers" });
   }
 });
 

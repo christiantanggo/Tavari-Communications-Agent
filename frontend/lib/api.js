@@ -200,6 +200,7 @@ export const adminSMSNumbersAPI = {
   getBusinessNumbers: (businessId) => adminApi.get(`/phone-numbers/business/${businessId}`),
   removeNumber: (businessId, phoneNumberId) => adminApi.delete(`/phone-numbers/business/${businessId}/${phoneNumberId}`),
   migrateToTelnyx: (businessId) => adminApi.post(`/phone-numbers/migrate-to-telnyx/${businessId}`),
+  verify: () => adminApi.get('/phone-numbers/verify'),
 };
 
 // Bulk SMS API
