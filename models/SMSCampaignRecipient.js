@@ -128,6 +128,54 @@ export class SMSCampaignRecipient {
     return data;
   }
   
+  /**
+   * Find recipient by Telnyx message ID
+   * @param {string} telnyx_message_id - Telnyx message ID
+   * @returns {Promise<Object|null>} Recipient record or null
+   */
+  static async findByTelnyxMessageId(telnyx_message_id) {
+    if (!telnyx_message_id) return null;
+    
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('*')
+      .eq('telnyx_message_id', telnyx_message_id)
+      .limit(1)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
+    }
+    
+    return data;
+  }
+
+  /**
+   * Find recipient by phone number and campaign ID
+   * @param {string} campaign_id - Campaign ID
+   * @param {string} phone_number - Phone number (E.164 format)
+   * @returns {Promise<Object|null>} Recipient record or null
+   */
+  static async findByCampaignAndPhone(campaign_id, phone_number) {
+    if (!campaign_id || !phone_number) return null;
+    
+    const { data, error } = await supabaseClient
+      .from('sms_campaign_recipients')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .eq('phone_number', phone_number)
+      .limit(1)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
+    }
+    
+    return data;
+  }
+
   static async getCampaignStats(campaign_id) {
     const { data, error } = await supabaseClient
       .from('sms_campaign_recipients')

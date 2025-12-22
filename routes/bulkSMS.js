@@ -1388,8 +1388,129 @@ router.post('/webhook', express.json(), async (req, res) => {
       } else {
         console.log('[BulkSMS Webhook] Message received but no opt-out/opt-in keyword detected');
       }
+    } else if (eventType === 'message.sent' || eventType === 'message.finalized') {
+      // Handle outbound message status updates (for bulk SMS campaigns)
+      console.log(`[BulkSMS Webhook] Processing ${eventType} event for outbound message`);
+      
+      const message = data?.payload || data;
+      const messageId = message?.id;
+      const toRecipients = message?.to || [];
+      
+      if (!messageId) {
+        console.warn('[BulkSMS Webhook] ⚠️ No message ID in payload, cannot update recipient status');
+        return;
+      }
+      
+      // Find recipient by telnyx_message_id
+      try {
+        const recipient = await SMSCampaignRecipient.findByTelnyxMessageId(messageId);
+        
+        if (recipient) {
+          console.log(`[BulkSMS Webhook] ✅ Found recipient ${recipient.id} for message ${messageId}`);
+          
+          // Process status from the event
+          if (eventType === 'message.sent') {
+            // Message was sent successfully
+            if (recipient.status !== 'sent') {
+              await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
+                telnyx_message_id: messageId,
+              });
+              console.log(`[BulkSMS Webhook] ✅ Updated recipient ${recipient.id} to 'sent' status`);
+              
+              // Update campaign counts
+              const campaign = await SMSCampaign.findById(recipient.campaign_id);
+              if (campaign) {
+                await SMSCampaign.update(recipient.campaign_id, {
+                  sent_count: (campaign.sent_count || 0) + 1,
+                });
+              }
+            }
+          } else if (eventType === 'message.finalized') {
+            // Message was finalized (delivered or failed)
+            // Check the status in the 'to' array
+            const recipientStatus = toRecipients[0]?.status;
+            
+            if (recipientStatus === 'delivered') {
+              // Message was delivered successfully
+              if (recipient.status !== 'sent') {
+                await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
+                  telnyx_message_id: messageId,
+                });
+                console.log(`[BulkSMS Webhook] ✅ Updated recipient ${recipient.id} to 'sent' (delivered) status`);
+              }
+            } else if (recipientStatus === 'failed' || message?.errors?.length > 0) {
+              // Message failed
+              const errorMessage = message?.errors?.[0]?.detail || message?.errors?.[0]?.title || 'Message delivery failed';
+              await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
+                telnyx_message_id: messageId,
+                error_message: errorMessage,
+              });
+              console.log(`[BulkSMS Webhook] ❌ Updated recipient ${recipient.id} to 'failed' status: ${errorMessage}`);
+              
+              // Update campaign counts
+              const campaign = await SMSCampaign.findById(recipient.campaign_id);
+              if (campaign) {
+                await SMSCampaign.update(recipient.campaign_id, {
+                  failed_count: (campaign.failed_count || 0) + 1,
+                });
+              }
+            } else {
+              // Status is 'sent' or unknown - mark as sent
+              if (recipient.status !== 'sent') {
+                await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
+                  telnyx_message_id: messageId,
+                });
+                console.log(`[BulkSMS Webhook] ✅ Updated recipient ${recipient.id} to 'sent' status (finalized)`);
+              }
+            }
+          }
+        } else {
+          // Try to find by phone number if we have campaign context
+          // This is a fallback if telnyx_message_id wasn't stored
+          if (toRecipients.length > 0) {
+            const toPhoneNumber = toRecipients[0]?.phone_number;
+            if (toPhoneNumber) {
+              const formattedPhone = formatPhoneNumberE164(toPhoneNumber);
+              
+              // Find all pending recipients with this phone number
+              // We'll update the most recent one for the most recent campaign
+              const { data: recipients } = await supabaseClient
+                .from('sms_campaign_recipients')
+                .select('*')
+                .eq('phone_number', formattedPhone)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false })
+                .limit(1);
+              
+              if (recipients && recipients.length > 0) {
+                const recipient = recipients[0];
+                console.log(`[BulkSMS Webhook] ✅ Found recipient ${recipient.id} by phone number (fallback)`);
+                
+                if (eventType === 'message.sent' || (eventType === 'message.finalized' && toRecipients[0]?.status === 'delivered')) {
+                  await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
+                    telnyx_message_id: messageId,
+                  });
+                  console.log(`[BulkSMS Webhook] ✅ Updated recipient ${recipient.id} to 'sent' status (fallback)`);
+                } else if (eventType === 'message.finalized' && (toRecipients[0]?.status === 'failed' || message?.errors?.length > 0)) {
+                  const errorMessage = message?.errors?.[0]?.detail || message?.errors?.[0]?.title || 'Message delivery failed';
+                  await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
+                    telnyx_message_id: messageId,
+                    error_message: errorMessage,
+                  });
+                  console.log(`[BulkSMS Webhook] ❌ Updated recipient ${recipient.id} to 'failed' status (fallback)`);
+                }
+              } else {
+                console.log(`[BulkSMS Webhook] ℹ️ No recipient found for message ${messageId} or phone ${formattedPhone}`);
+              }
+            }
+          }
+        }
+      } catch (updateError) {
+        console.error(`[BulkSMS Webhook] ❌ Error updating recipient status for message ${messageId}:`, updateError);
+        // Don't throw - we already sent 200 to Telnyx
+      }
     } else {
-      console.log(`[BulkSMS Webhook] Event type: ${eventType} (not message.received, ignoring)`);
+      console.log(`[BulkSMS Webhook] Event type: ${eventType} (not message.received/sent/finalized, ignoring)`);
     }
   } catch (error) {
     console.error('[BulkSMS Webhook] ❌ CRITICAL ERROR:', error);

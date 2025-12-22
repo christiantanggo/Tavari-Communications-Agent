@@ -64,10 +64,11 @@ export function addBusinessIdentification(messageText, businessName) {
  * @param {string} fromNumber - Sender phone number (E.164 format)
  * @param {string} toNumber - Recipient phone number (E.164 format)
  * @param {string} messageText - SMS message text (footer will be added automatically)
+ * @param {string|boolean} businessNameOrSkipFooter - Optional: business name (ignored, for backward compatibility) or boolean to skip footer
  * @param {boolean} skipFooter - Optional: set to true to skip adding footer (for internal use only)
  * @returns {Promise<Object>} Telnyx API response
  */
-export async function sendSMSDirect(fromNumber, toNumber, messageText, skipFooter = false) {
+export async function sendSMSDirect(fromNumber, toNumber, messageText, businessNameOrSkipFooter = false, skipFooter = false) {
   if (!TELNYX_API_KEY) {
     throw new Error("TELNYX_API_KEY not configured");
   }
@@ -83,9 +84,14 @@ export async function sendSMSDirect(fromNumber, toNumber, messageText, skipFoote
     formattedTo = "+" + formattedTo;
   }
   
-  // Add required footer to all SMS messages (TCPA compliance)
-  const finalMessageText = skipFooter ? messageText : addSMSFooter(messageText);
+  // Handle parameter: if businessNameOrSkipFooter is a boolean, treat it as skipFooter
+  // If it's a string (business name), ignore it (business identification should already be in messageText)
+  const actualSkipFooter = typeof businessNameOrSkipFooter === 'boolean' ? businessNameOrSkipFooter : skipFooter;
   
+  // Add required footer to all SMS messages (TCPA compliance)
+  const finalMessageText = actualSkipFooter ? messageText : addSMSFooter(messageText);
+  
+  // Add timeout to prevent hanging (30 seconds)
   const response = await axios.post(
     "https://api.telnyx.com/v2/messages",
     {
@@ -98,10 +104,11 @@ export async function sendSMSDirect(fromNumber, toNumber, messageText, skipFoote
         Authorization: `Bearer ${TELNYX_API_KEY}`,
         "Content-Type": "application/json",
       },
+      timeout: 30000, // 30 second timeout to prevent hanging
     }
   );
   
-  return response.data;
+  return response;
 }
 
 /**

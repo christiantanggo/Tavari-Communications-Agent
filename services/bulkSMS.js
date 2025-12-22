@@ -753,7 +753,8 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
         
         const sendStartTime = Date.now();
         // Send SMS (compliantMessage already has business identification)
-        const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage, business.name);
+        // Note: sendSMSDirect will add footer, but we've already added business identification
+        const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage, business.name, false);
         const sendDuration = Date.now() - sendStartTime;
         
         if (sendDuration > 1000) {
@@ -761,8 +762,9 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
         }
         
         // Update recipient status
+        // Note: response is now the full axios response, so we need response.data
         await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
-          telnyx_message_id: response.data?.id || null,
+          telnyx_message_id: response.data?.data?.id || response.data?.id || null,
         });
         
         // Update contact frequency tracking if contact exists
@@ -1250,8 +1252,9 @@ export async function resumeStuckCampaign(campaignId) {
         const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage, business.name);
         
         // Update recipient status
+        // Note: response is now the full axios response, so we need response.data
         await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
-          telnyx_message_id: response.data?.id || null,
+          telnyx_message_id: response.data?.data?.id || response.data?.id || null,
         });
         
         sentCount++;
