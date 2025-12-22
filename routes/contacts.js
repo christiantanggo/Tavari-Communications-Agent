@@ -118,6 +118,7 @@ router.get('/:id', authenticate, async (req, res) => {
 /**
  * Create a new contact
  * POST /api/contacts
+ * Requires SMS consent for TCPA/CASL compliance if phone_number is provided
  */
 router.post('/', authenticate, async (req, res) => {
   try {
@@ -223,11 +224,22 @@ router.delete('/:id', authenticate, async (req, res) => {
 /**
  * Upload contacts from CSV
  * POST /api/contacts/upload
+ * Requires SMS consent for TCPA/CASL compliance
  */
 router.post('/upload', authenticate, upload.single('csv'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'CSV file is required' });
+    }
+    
+    // Check if consent was provided (required for TCPA/CASL compliance)
+    const { sms_consent, sms_consent_method = 'csv_upload', sms_consent_source } = req.body;
+    
+    if (sms_consent !== 'true' && sms_consent !== true) {
+      return res.status(400).json({ 
+        error: 'SMS consent is required for TCPA (US) and CASL (Canada) compliance. Please confirm that all contacts in the CSV have provided express consent to receive SMS messages.',
+        requires_consent: true,
+      });
     }
     
     // Parse CSV - returns contact objects
@@ -238,27 +250,36 @@ router.post('/upload', authenticate, upload.single('csv'), async (req, res) => {
     
     console.log(`[Contacts Route] Parsed ${contacts.length} contacts from CSV`);
     
-    // Format phone numbers
+    // Get client IP address for compliance tracking
+    const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    
+    // Format phone numbers and add consent information
     const formattedContacts = contacts.map(contact => ({
       business_id: req.businessId,
       email: contact.email || null,
       first_name: contact.first_name || null,
       last_name: contact.last_name || null,
       phone_number: formatPhoneNumberE164(contact.phone_number) || contact.phone_number,
+      // SMS consent fields (TCPA/CASL compliance)
+      sms_consent: true, // User confirmed consent via checkbox
+      sms_consent_timestamp: new Date().toISOString(),
+      sms_consent_method: sms_consent_method || 'csv_upload',
+      sms_consent_ip_address: clientIp,
+      sms_consent_source: sms_consent_source || 'CSV Upload',
     }));
     
-    console.log(`[Contacts Route] Processing ${formattedContacts.length} formatted contacts...`);
+    console.log(`[Contacts Route] Processing ${formattedContacts.length} formatted contacts with SMS consent...`);
     
     // Create contacts (upsert to handle duplicates) - handles batching internally
     const created = await Contact.createBatch(formattedContacts);
     
-    console.log(`[Contacts Route] ✅ Imported ${created.length} contacts (${formattedContacts.length} total processed)`);
+    console.log(`[Contacts Route] ✅ Imported ${created.length} contacts (${formattedContacts.length} total processed) with SMS consent`);
     
     res.json({
       success: true,
       imported: created.length,
       total: contacts.length,
-      message: `Successfully imported ${created.length} contact(s) out of ${contacts.length} total`,
+      message: `Successfully imported ${created.length} contact(s) out of ${contacts.length} total with SMS consent`,
     });
   } catch (error) {
     console.error('[Contacts Route] Upload contacts error:', error);

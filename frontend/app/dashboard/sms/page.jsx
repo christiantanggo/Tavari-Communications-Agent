@@ -52,6 +52,7 @@ function SMSPage() {
   });
   const [newList, setNewList] = useState({ name: '', description: '' });
   const [uploadFile, setUploadFile] = useState(null);
+  const [smsConsent, setSmsConsent] = useState(false); // TCPA/CASL compliance - consent required
   const [selectedContactsForList, setSelectedContactsForList] = useState([]);
   const [showAddToListModal, setShowAddToListModal] = useState(false);
 
@@ -353,17 +354,32 @@ function SMSPage() {
       return;
     }
     
+    // TCPA/CASL compliance - require explicit consent
+    if (!smsConsent) {
+      showError('SMS consent is required for TCPA (US) and CASL (Canada) compliance. Please confirm that all contacts in the CSV have provided express consent to receive SMS messages.');
+      return;
+    }
+    
     setLoading(true);
     try {
       const formData = new FormData();
       formData.append('csv', uploadFile);
+      formData.append('sms_consent', 'true'); // Required for compliance
+      formData.append('sms_consent_method', 'csv_upload');
+      formData.append('sms_consent_source', 'SMS Dashboard - CSV Upload');
       
       const res = await contactsAPI.uploadContacts(formData);
-      success(`Successfully imported ${res.data.imported} contact(s) out of ${res.data.total} total!`);
+      success(`Successfully imported ${res.data.imported} contact(s) out of ${res.data.total} total with SMS consent!`);
       setUploadFile(null);
+      setSmsConsent(false); // Reset consent checkbox
       await loadData();
     } catch (error) {
-      showError(error.response?.data?.error || 'Failed to upload contacts');
+      const errorMessage = error.response?.data?.error || 'Failed to upload contacts';
+      if (error.response?.data?.requires_consent) {
+        showError(errorMessage);
+      } else {
+        showError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }

@@ -12,6 +12,13 @@ import {
   getNumberCountry
 } from '../utils/phoneFormatter.js';
 import { 
+  checkConsent, 
+  checkFrequencyLimits, 
+  checkProhibitedContent, 
+  detectCountry,
+  checkDNCStatus 
+} from './compliance.js';
+import { 
   getTimezoneFromPhoneNumber, 
   checkQuietHours 
 } from '../utils/timezoneDetector.js';
@@ -672,10 +679,40 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
       
       // Send SMS
       try {
+        // Find recipient record
+        const recipient = recipientMap.get(phoneNumber);
+        if (!recipient) {
+          console.warn(`[BulkSMS] No recipient record found for ${phoneNumber}`);
+          continue;
+        }
+        
+        // Check prohibited content (TCPA/CASL compliance)
+        const country = detectCountry(phoneNumber);
+        const contentCheck = checkProhibitedContent(finalMessageText, country);
+        if (contentCheck.isProhibited) {
+          console.error(`[BulkSMS] ❌ Prohibited content detected for ${phoneNumber}: ${contentCheck.reason}`);
+          await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
+            error_message: contentCheck.reason,
+          });
+          failedCount++;
+          continue; // Skip this message
+        }
+        
+        // Check DNC status (placeholder - requires API integration)
+        const dncCheck = await checkDNCStatus(phoneNumber, country);
+        if (dncCheck.isDNC) {
+          console.warn(`[BulkSMS] ⚠️  Phone number ${phoneNumber} is on ${dncCheck.source} registry`);
+          await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
+            error_message: `Number is on ${dncCheck.source} registry`,
+          });
+          failedCount++;
+          continue; // Skip this message
+        }
+        
         const sendStartTime = Date.now();
         // Add business name identification for TCPA/CTIA compliance
         const compliantMessage = addBusinessIdentification(messageText, business.name);
-        const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage);
+        const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage, business.name);
         const sendDuration = Date.now() - sendStartTime;
         
         if (sendDuration > 1000) {
@@ -683,11 +720,19 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
         }
         
         // Update recipient status
-        const recipient = recipientMap.get(phoneNumber);
-        if (recipient) {
-          await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
-            telnyx_message_id: response.data?.id || null,
-          });
+        await SMSCampaignRecipient.updateStatus(recipient.id, 'sent', {
+          telnyx_message_id: response.data?.id || null,
+        });
+        
+        // Update contact frequency tracking if contact exists
+        try {
+          const contact = await Contact.findByPhone(businessId, phoneNumber);
+          if (contact) {
+            await Contact.updateSMSFrequency(contact.id);
+          }
+        } catch (freqError) {
+          console.warn(`[BulkSMS] Could not update frequency tracking for ${phoneNumber}:`, freqError.message);
+          // Don't fail the send if frequency tracking fails
         }
         
         sentCount++;

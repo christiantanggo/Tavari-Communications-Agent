@@ -17,6 +17,13 @@ export class Contact {
       notes,
       tags = [],
       custom_fields = {},
+      // SMS consent fields (TCPA/CASL compliance)
+      sms_consent = false,
+      sms_consent_timestamp = null,
+      sms_consent_method = null,
+      sms_consent_ip_address = null,
+      sms_consent_source = null,
+      double_opt_in_verified = false,
     } = data;
     
     const { data: contact, error } = await supabaseClient
@@ -35,6 +42,13 @@ export class Contact {
         notes: notes || null,
         tags: tags || [],
         custom_fields: custom_fields || {},
+        // SMS consent fields
+        sms_consent: sms_consent || false,
+        sms_consent_timestamp: sms_consent_timestamp || (sms_consent ? new Date().toISOString() : null),
+        sms_consent_method: sms_consent_method || null,
+        sms_consent_ip_address: sms_consent_ip_address || null,
+        sms_consent_source: sms_consent_source || null,
+        double_opt_in_verified: double_opt_in_verified || false,
       })
       .select()
       .single();
@@ -303,6 +317,80 @@ export class Contact {
       .eq('business_id', business_id)
       .or(`phone_number.ilike.%${query}%,email.ilike.%${query}%,first_name.ilike.%${query}%,last_name.ilike.%${query}%`)
       .limit(limit);
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  /**
+   * Update SMS consent for a contact
+   * @param {string} id - Contact ID
+   * @param {Object} consentData - Consent information
+   */
+  static async updateSMSConsent(id, consentData) {
+    const {
+      sms_consent = true,
+      sms_consent_method = 'web_form',
+      sms_consent_ip_address = null,
+      sms_consent_source = null,
+    } = consentData;
+
+    return this.update(id, {
+      sms_consent,
+      sms_consent_timestamp: sms_consent ? new Date().toISOString() : null,
+      sms_consent_method,
+      sms_consent_ip_address,
+      sms_consent_source,
+    });
+  }
+
+  /**
+   * Update SMS frequency tracking after sending a message
+   * @param {string} id - Contact ID
+   */
+  static async updateSMSFrequency(id) {
+    const now = new Date();
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(now);
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+    // Get current contact to check if we need to reset counters
+    const contact = await this.findById(id);
+    if (!contact) {
+      throw new Error('Contact not found');
+    }
+
+    // Reset weekly counter if last sent was more than a week ago
+    const lastSent = contact.last_sms_sent_at ? new Date(contact.last_sms_sent_at) : null;
+    const shouldResetWeek = !lastSent || lastSent < weekAgo;
+    const shouldResetMonth = !lastSent || lastSent < monthAgo;
+
+    const updates = {
+      last_sms_sent_at: now.toISOString(),
+      sms_message_count: (contact.sms_message_count || 0) + 1,
+      sms_message_count_this_week: shouldResetWeek ? 1 : (contact.sms_message_count_this_week || 0) + 1,
+      sms_message_count_this_month: shouldResetMonth ? 1 : (contact.sms_message_count_this_month || 0) + 1,
+    };
+
+    return this.update(id, updates);
+  }
+
+  /**
+   * Find contacts with valid SMS consent
+   * @param {string} business_id - Business ID
+   * @param {number} limit - Limit
+   * @param {number} offset - Offset
+   */
+  static async findWithConsent(business_id, limit = 100, offset = 0) {
+    const { data, error } = await supabaseClient
+      .from('contacts')
+      .select('*')
+      .eq('business_id', business_id)
+      .eq('sms_consent', true)
+      .not('sms_consent_timestamp', 'is', null)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
     
     if (error) throw error;
     return data || [];

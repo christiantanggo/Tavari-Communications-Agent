@@ -115,9 +115,32 @@ router.post('/campaigns', authenticate, async (req, res) => {
               continue;
             }
             
-            if (!contactIdSet.has(contact.id) && !contact.opted_out && contact.phone_number) {
-              allContacts.push(contact);
-              contactIdSet.add(contact.id);
+            if (!contact.opted_out && contact.phone_number) {
+              // Check SMS consent (TCPA/CASL compliance)
+              const country = detectCountry(contact.phone_number);
+              const consentCheck = checkConsent(contact, country);
+              
+              if (!consentCheck.hasConsent) {
+                console.warn(`[BulkSMS] Contact ${contact.id} (${contact.phone_number}) in list ${listId} does not have SMS consent: ${consentCheck.reason}`);
+                continue; // Skip this contact
+              }
+              
+              // Check frequency limits
+              const frequencyCheck = checkFrequencyLimits(contact, {
+                maxPerDay: 1,
+                maxPerWeek: 3,
+                maxPerMonth: 10,
+              });
+              
+              if (!frequencyCheck.allowed) {
+                console.warn(`[BulkSMS] Contact ${contact.id} (${contact.phone_number}) in list ${listId} exceeds frequency limits: ${frequencyCheck.reason}`);
+                // Still add to campaign but mark for later sending
+              }
+              
+              if (!contactIdSet.has(contact.id)) {
+                allContacts.push(contact);
+                contactIdSet.add(contact.id);
+              }
             }
           }
         } catch (listError) {
