@@ -667,7 +667,7 @@ function AdminAccountDetailPage() {
                               <div className="flex-1">
                                 <div className="font-medium text-gray-900">{num.phone_number}</div>
                                 <div className="text-xs text-gray-500">
-                                  ${(num.cost || 0).toFixed(2)} one-time purchase
+                                  ${(parseFloat(num.cost) || 0).toFixed(2)} one-time purchase
                                 </div>
                               </div>
                             </label>
