@@ -1039,11 +1039,10 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
       }
     });
     
-    console.log(`[Admin] Found ${assignedSMSNumbers.size} businesses with telnyx_number assigned`);
-    console.log(`[Admin] Assigned SMS numbers:`, Array.from(assignedSMSNumbers).slice(0, 10));
-    if (assignedSMSNumbersOriginal.length > 0) {
-      console.log(`[Admin] Sample assigned numbers:`, assignedSMSNumbersOriginal.slice(0, 5));
-    }
+    console.log(`[Admin] Found ${assignedSMSNumbersOriginal.length} businesses with telnyx_number assigned`);
+    console.log(`[Admin] Total unique normalized numbers in set: ${assignedSMSNumbers.size}`);
+    console.log(`[Admin] All assigned numbers from DB:`, assignedSMSNumbersOriginal);
+    console.log(`[Admin] Normalized set (first 10):`, Array.from(assignedSMSNumbers).slice(0, 10));
     
     // Filter out numbers assigned for SMS (telnyx_number)
     // Note: A number can be used for both calls (vapi_phone_number) and SMS (telnyx_number)
