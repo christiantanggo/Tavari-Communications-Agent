@@ -32,6 +32,7 @@
     "test:helcim": "node scripts/test-helcim-connection.js",
     "test:helcim-simple": "node scripts/test-helcim-simple.js",
     "test:verification": "node scripts/test-telnyx-verification-api.js",
+    "test:toll-free": "node scripts/test-toll-free-verification.js",
     "auto-commit": "node -e \"require('child_process').execSync('git add -A && git commit -m \\\"Auto-commit: Update files\\\" && git push origin main', {stdio: 'inherit'})\"",
     "deploy": "npm run auto-commit"
   },
