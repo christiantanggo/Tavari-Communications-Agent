@@ -1351,17 +1351,22 @@ router.post("/phone-numbers/assign-sms/:businessId", authenticateAdmin, async (r
       });
     }
 
-    // Log admin activity
-    await AdminActivityLog.create({
-      admin_user_id: req.adminId,
-      business_id: businessId,
-      action: "assign_sms_number",
-      details: { 
-        phone_number: phoneNumberE164,
-        business_name: business.name,
-        is_primary: is_primary || false,
-      },
-    });
+    // Log admin activity (gracefully handle if table doesn't exist)
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: businessId,
+        action: "assign_sms_number",
+        details: { 
+          phone_number: phoneNumberE164,
+          business_name: business.name,
+          is_primary: is_primary || false,
+        },
+      });
+    } catch (logError) {
+      console.warn('[Admin] Failed to log activity (table may not exist):', logError.message);
+      // Continue without logging - don't fail the request
+    }
 
     res.json({
       success: true,
@@ -1418,16 +1423,21 @@ router.delete("/phone-numbers/business/:businessId/:phoneNumberId", authenticate
       }
     }
 
-    // Log admin activity
-    await AdminActivityLog.create({
-      admin_user_id: req.adminId,
-      business_id: businessId,
-      action: "remove_sms_number",
-      details: { 
-        phone_number: numberRecord.phone_number,
-        business_name: business.name,
-      },
-    });
+    // Log admin activity (gracefully handle if table doesn't exist)
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: businessId,
+        action: "remove_sms_number",
+        details: { 
+          phone_number: numberRecord.phone_number,
+          business_name: business.name,
+        },
+      });
+    } catch (logError) {
+      console.warn('[Admin] Failed to log activity (table may not exist):', logError.message);
+      // Continue without logging - don't fail the request
+    }
 
     res.json({
       success: true,
