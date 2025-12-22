@@ -34,7 +34,67 @@ const upload = multer({
 router.get('/', authenticate, async (req, res) => {
   try {
     // Allow up to 50000 contacts, default to 10000 if not specified
-    const { limit = 10000, offset = 0, search, all = false } = req.query;
+    const { limit = 10000, offset = 0, search, all = false, count_only = false, exclude_sent_today = false } = req.query;
+    
+    // If count_only is true, just return counts
+    if (count_only === 'true' || count_only === true) {
+      // Get total count
+      const { count: totalCount } = await supabaseClient
+        .from('contacts')
+        .select('*', { count: 'exact', head: true })
+        .eq('business_id', req.businessId);
+      
+      let eligibleCount = totalCount || 0;
+      let excludedCount = 0;
+      
+      // If exclude_sent_today is true, count contacts that received SMS today
+      if (exclude_sent_today === 'true' || exclude_sent_today === true) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        // Count contacts that received SMS today
+        const { count: sentTodayCount } = await supabaseClient
+          .from('contacts')
+          .select('*', { count: 'exact', head: true })
+          .eq('business_id', req.businessId)
+          .not('last_sms_sent_at', 'is', null)
+          .gte('last_sms_sent_at', today.toISOString())
+          .lt('last_sms_sent_at', tomorrow.toISOString());
+        
+        excludedCount = sentTodayCount || 0;
+        
+        // Also filter by consent, opted_out, and phone_number for eligible count
+        const { count: eligibleWithFilters } = await supabaseClient
+          .from('contacts')
+          .select('*', { count: 'exact', head: true })
+          .eq('business_id', req.businessId)
+          .eq('sms_consent', true)
+          .eq('opted_out', false)
+          .not('phone_number', 'is', null);
+        
+        eligibleCount = eligibleWithFilters || 0;
+      } else {
+        // Just count eligible contacts (with consent, not opted out, have phone)
+        const { count: eligibleWithFilters } = await supabaseClient
+          .from('contacts')
+          .select('*', { count: 'exact', head: true })
+          .eq('business_id', req.businessId)
+          .eq('sms_consent', true)
+          .eq('opted_out', false)
+          .not('phone_number', 'is', null);
+        
+        eligibleCount = eligibleWithFilters || 0;
+      }
+      
+      return res.json({
+        total: totalCount || 0,
+        eligible: eligibleCount,
+        excluded: excludedCount,
+        will_send: exclude_sent_today ? (eligibleCount - excludedCount) : eligibleCount,
+      });
+    }
     
     let contacts;
     let total;

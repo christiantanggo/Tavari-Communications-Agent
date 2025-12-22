@@ -20,6 +20,10 @@ function SMSPage() {
   const [sendToAllContacts, setSendToAllContacts] = useState(false);
   const [loadingAllContacts, setLoadingAllContacts] = useState(false);
   const [excludeSentToday, setExcludeSentToday] = useState(false);
+  const [totalContactsCount, setTotalContactsCount] = useState(null);
+  const [excludedContactsCount, setExcludedContactsCount] = useState(null);
+  const [eligibleContactsCount, setEligibleContactsCount] = useState(null);
+  const [loadingCounts, setLoadingCounts] = useState(false);
   
   // Campaigns Tab
   const [campaigns, setCampaigns] = useState([]);
@@ -68,6 +72,39 @@ function SMSPage() {
     loadBusinessTimezone();
     loadData();
   }, []);
+
+  // Fetch contact counts when "Send to All Contacts" is selected
+  useEffect(() => {
+    if (sendToAllContacts) {
+      loadContactCounts();
+    } else {
+      // Reset counts when deselected
+      setTotalContactsCount(null);
+      setExcludedContactsCount(null);
+      setEligibleContactsCount(null);
+    }
+  }, [sendToAllContacts, excludeSentToday]);
+
+  const loadContactCounts = async () => {
+    setLoadingCounts(true);
+    try {
+      const res = await contactsAPI.getContacts({
+        count_only: true,
+        exclude_sent_today: excludeSentToday,
+      });
+      
+      setTotalContactsCount(res.data.total || 0);
+      setEligibleContactsCount(res.data.eligible || 0);
+      setExcludedContactsCount(res.data.excluded || 0);
+    } catch (error) {
+      console.error('Failed to load contact counts:', error);
+      setTotalContactsCount(null);
+      setExcludedContactsCount(null);
+      setEligibleContactsCount(null);
+    } finally {
+      setLoadingCounts(false);
+    }
+  };
 
   const loadBusinessTimezone = async () => {
     try {
@@ -798,20 +835,50 @@ function SMSPage() {
                 </label>
                 
                 {sendToAllContacts && (
-                  <label className="flex items-center mt-3 ml-6">
-                    <input
-                      type="checkbox"
-                      checked={excludeSentToday}
-                      onChange={(e) => setExcludeSentToday(e.target.checked)}
-                      className="mr-2"
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-blue-900">Exclude contacts who received a message today</span>
-                      <p className="text-xs text-blue-700 mt-1">
-                        Skip contacts who already received an SMS today to avoid sending twice in one day
-                      </p>
-                    </div>
-                  </label>
+                  <>
+                    <label className="flex items-center mt-3 ml-6">
+                      <input
+                        type="checkbox"
+                        checked={excludeSentToday}
+                        onChange={(e) => setExcludeSentToday(e.target.checked)}
+                        className="mr-2"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-blue-900">Exclude contacts who received a message today</span>
+                        <p className="text-xs text-blue-700 mt-1">
+                          Skip contacts who already received an SMS today to avoid sending twice in one day
+                        </p>
+                      </div>
+                    </label>
+                    
+                    {/* Contact Counts Display */}
+                    {loadingCounts ? (
+                      <div className="mt-4 ml-6 text-sm text-blue-700">
+                        Loading contact counts...
+                      </div>
+                    ) : totalContactsCount !== null && (
+                      <div className="mt-4 ml-6 space-y-2 p-3 bg-white rounded border border-blue-200">
+                        <div className="text-sm">
+                          <span className="font-medium text-blue-900">Total Contacts: </span>
+                          <span className="text-blue-700">{totalContactsCount.toLocaleString()}</span>
+                        </div>
+                        {excludeSentToday && excludedContactsCount !== null && (
+                          <div className="text-sm">
+                            <span className="font-medium text-orange-600">Excluded (sent today): </span>
+                            <span className="text-orange-700">{excludedContactsCount.toLocaleString()}</span>
+                          </div>
+                        )}
+                        <div className="text-sm pt-2 border-t border-blue-200">
+                          <span className="font-bold text-green-700">Total SMS to Send: </span>
+                          <span className="text-green-800 font-semibold text-base">
+                            {eligibleContactsCount !== null 
+                              ? eligibleContactsCount.toLocaleString()
+                              : totalContactsCount.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
