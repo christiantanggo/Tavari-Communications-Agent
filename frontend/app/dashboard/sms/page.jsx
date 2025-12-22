@@ -27,7 +27,6 @@ function SMSPage() {
   const [loadingFailedRecipients, setLoadingFailedRecipients] = useState(false);
   const [sentRecipients, setSentRecipients] = useState([]);
   const [loadingSentRecipients, setLoadingSentRecipients] = useState(false);
-  const [loadingSentRecipients, setLoadingSentRecipients] = useState(false);
   
   // Numbers Tab
   const [availableNumbers, setAvailableNumbers] = useState([]);
