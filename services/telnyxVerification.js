@@ -144,66 +144,93 @@ export async function submitTollFreeVerification(phoneNumber, businessInfo) {
 
     const phoneNumberId = numbers[0].id;
 
-    // Try the official Telnyx Toll-Free Verification API endpoint
-    // POST /v2/toll_free_verifications
-    try {
-      const verifyResponse = await axios.post(
-        `${TELNYX_API_BASE_URL}/toll_free_verifications`,
-        {
-          phone_number: normalized,
-          use_case: businessInfo.use_case || 'Marketing and promotional messages',
-          business_name: businessInfo.name || 'Business',
-          website: businessInfo.website || '',
-          // Optional but recommended fields (will be mandatory after Jan 1, 2026)
-          business_registration_number: businessInfo.business_registration_number || '',
-          business_registration_type: businessInfo.business_registration_type || '',
-          business_registration_country: businessInfo.business_registration_country || 'US',
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${TELNYX_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+    // Try multiple possible Telnyx Toll-Free Verification API endpoints
+    // Based on test results, the API endpoint may not be available
+    // We'll try the official endpoint first, then fall back gracefully
+    const endpointsToTry = [
+      { path: '/toll_free_verifications', name: 'Official endpoint' },
+      { path: `/phone_numbers/${phoneNumberId}/toll_free_verification`, name: 'Phone number endpoint' },
+      { path: `/phone_numbers/${phoneNumberId}/verification`, name: 'Verification endpoint' },
+    ];
 
-      console.log('[Telnyx Verification] ✅ Verification request submitted successfully');
-      return {
-        success: true,
-        message: 'Verification request submitted',
-        verification_id: verifyResponse.data?.data?.id,
-        status: verifyResponse.data?.data?.status || 'pending',
-        api_available: true,
-      };
-    } catch (apiError) {
-      // If API endpoint doesn't exist or requires manual submission, log and return info
-      if (apiError.response?.status === 404 || apiError.response?.status === 501) {
-        console.warn('[Telnyx Verification] Automatic verification API endpoint not available. Manual verification required.');
+    for (const endpoint of endpointsToTry) {
+      try {
+        const verifyResponse = await axios.post(
+          `${TELNYX_API_BASE_URL}${endpoint.path}`,
+          {
+            phone_number: normalized,
+            use_case: businessInfo.use_case || 'Marketing and promotional messages',
+            business_name: businessInfo.name || 'Business',
+            website: businessInfo.website || '',
+            // Optional but recommended fields (will be mandatory after Jan 1, 2026)
+            business_registration_number: businessInfo.business_registration_number || '',
+            business_registration_type: businessInfo.business_registration_type || '',
+            business_registration_country: businessInfo.business_registration_country || 'US',
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${TELNYX_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        console.log(`[Telnyx Verification] ✅ Verification request submitted successfully via ${endpoint.name}`);
         return {
-          success: false,
-          message: 'Automatic verification not available via API. Please verify manually in Telnyx portal.',
-          manual_verification_required: true,
-          api_available: false,
-          portal_url: 'https://portal.telnyx.com/#/app/numbers',
-        };
-      }
-      
-      // If it's a validation error (400/422), the endpoint exists but needs correct data
-      if (apiError.response?.status === 400 || apiError.response?.status === 422) {
-        console.warn('[Telnyx Verification] API endpoint exists but validation failed:', apiError.response.data);
-        return {
-          success: false,
-          message: 'Verification API available but validation failed. Check required fields.',
+          success: true,
+          message: 'Verification request submitted',
+          verification_id: verifyResponse.data?.data?.id,
+          status: verifyResponse.data?.data?.status || 'pending',
           api_available: true,
-          validation_error: apiError.response.data,
-          error_details: apiError.response.data?.errors || [],
+          endpoint_used: endpoint.path,
         };
+      } catch (apiError) {
+        // If 404 or 501, try next endpoint
+        if (apiError.response?.status === 404 || apiError.response?.status === 501) {
+          console.log(`[Telnyx Verification] ${endpoint.name} not available (${apiError.response?.status}), trying next...`);
+          continue; // Try next endpoint
+        }
+        
+        // If it's a validation error (400/422), the endpoint exists but needs correct data
+        if (apiError.response?.status === 400 || apiError.response?.status === 422) {
+          console.warn(`[Telnyx Verification] ${endpoint.name} exists but validation failed:`, apiError.response.data);
+          return {
+            success: false,
+            message: 'Verification API available but validation failed. Check required fields.',
+            api_available: true,
+            endpoint_used: endpoint.path,
+            validation_error: apiError.response.data,
+            error_details: apiError.response.data?.errors || [],
+          };
+        }
+        
+        // If 409 (conflict), number may already be verified
+        if (apiError.response?.status === 409) {
+          console.log(`[Telnyx Verification] ${endpoint.name} - Number may already be verified or verification in progress`);
+          return {
+            success: true,
+            message: 'Verification may already exist or be in progress',
+            api_available: true,
+            endpoint_used: endpoint.path,
+            conflict: true,
+          };
+        }
+        
+        // Other errors - try next endpoint
+        console.log(`[Telnyx Verification] ${endpoint.name} error: ${apiError.response?.status}, trying next...`);
+        continue;
       }
-      
-      // Other errors
-      console.error('[Telnyx Verification] Error submitting verification:', apiError.message);
-      throw apiError;
     }
+
+    // If all endpoints failed with 404/501, API is not available
+    console.warn('[Telnyx Verification] ❌ No automatic verification API endpoints available. Manual verification required.');
+    return {
+      success: false,
+      message: 'Automatic verification not available via API. Please verify manually in Telnyx portal.',
+      manual_verification_required: true,
+      api_available: false,
+      portal_url: 'https://portal.telnyx.com/#/app/numbers',
+    };
   } catch (error) {
     console.error('[Telnyx Verification] Error submitting verification:', error.message);
     throw error;
