@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "dev:clean": "powershell -ExecutionPolicy Bypass -File ./start-dev.ps1",
+    "kill-port": "powershell -ExecutionPolicy Bypass -File ./kill-port.ps1",
     "lint": "eslint .",
     "format": "prettier --write .",
     "migrate": "node scripts/migrate.js",
@@ -29,6 +31,7 @@
     "setup:helcim": "node scripts/setup-helcim-products.js",
     "test:helcim": "node scripts/test-helcim-connection.js",
     "test:helcim-simple": "node scripts/test-helcim-simple.js",
+    "test:verification": "node scripts/test-telnyx-verification-api.js",
     "auto-commit": "node -e \"require('child_process').execSync('git add -A && git commit -m \\\"Auto-commit: Update files\\\" && git push origin main', {stdio: 'inherit'})\"",
     "deploy": "npm run auto-commit"
   },
