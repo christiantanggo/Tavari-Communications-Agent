@@ -970,7 +970,15 @@ router.post('/webhook', express.json(), async (req, res) => {
         // Note: Telnyx may return 409 Conflict if user just opted out (they block sending to opted-out numbers)
         // This is expected behavior - we still record the opt-out successfully
         try {
-          const confirmationMessage = 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.';
+          // CASL (Canada) requires bilingual opt-out confirmation (English and French)
+          // TCPA (US) requires English only
+          // Apply strictest rule: Bilingual for Canadian numbers, English for US
+          const { isCanadianNumber } = await import('../utils/phoneFormatter.js');
+          const isCanadian = isCanadianNumber(formattedFromNumber);
+          
+          const confirmationMessage = isCanadian
+            ? 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.\n\nVous avez été désabonné des messages SMS. Répondez START pour vous réabonner.'
+            : 'You have been unsubscribed from receiving SMS messages. Reply START to opt back in.';
           const senderNumber = business.vapi_phone_number || business.telnyx_number;
           
           if (senderNumber) {
@@ -1037,7 +1045,13 @@ router.post('/webhook', express.json(), async (req, res) => {
           
           // Send confirmation SMS back to the user
           try {
-            const confirmationMessage = 'You have been subscribed to receive SMS messages. Reply STOP to opt out at any time.';
+            // CASL (Canada) requires bilingual opt-in confirmation
+            const { isCanadianNumber } = await import('../utils/phoneFormatter.js');
+            const isCanadian = isCanadianNumber(formattedFromNumber);
+            
+            const confirmationMessage = isCanadian
+              ? 'You have been subscribed to receive SMS messages. Reply STOP to opt out at any time.\n\nVous avez été abonné aux messages SMS. Répondez STOP pour vous désabonner à tout moment.'
+              : 'You have been subscribed to receive SMS messages. Reply STOP to opt out at any time.';
             const senderNumber = business.vapi_phone_number || business.telnyx_number;
             
             if (senderNumber) {

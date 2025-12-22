@@ -291,10 +291,16 @@ export function loadBalanceMessages(phoneNumbers, availableNumbers) {
  */
 /**
  * Check if current time is within allowed SMS sending hours for a recipient
- * Uses recipient's timezone (from phone number area code) for TCPA compliance
+ * Applies STRICTEST rules across US and Canada for full compliance
+ * - US Federal (TCPA): 8 AM - 9 PM
+ * - US Florida: 8 AM - 8 PM
+ * - US Texas: 9 AM - 9 PM (Mon-Sat)
+ * - Canada (CASL): No specific rule, but best practice 8 AM - 9 PM
+ * - STRICTEST RULE: 9 AM - 8 PM (covers all US states and Canada best practice)
+ * 
  * @param {string} phoneNumber - Recipient phone number
  * @param {Object} business - Business object with SMS time settings
- * @returns {Object} { allowed: boolean, reason: string, timezone: string, currentTime: string }
+ * @returns {Object} { allowed: boolean, reason: string, timezone: string, currentTime: string, country: string }
  */
 function checkRecipientQuietHours(phoneNumber, business) {
   // If SMS business hours are disabled, always allow sending
@@ -306,13 +312,22 @@ function checkRecipientQuietHours(phoneNumber, business) {
     };
   }
 
+  // Detect recipient country for country-specific rules
+  const recipientCountry = getNumberCountry(phoneNumber);
+  const isCanadian = isCanadianNumber(phoneNumber);
+  const isUS = isUSNumber(phoneNumber);
+  
   // Get recipient's timezone from phone number area code
   const fallbackTimezone = business.sms_timezone || business.timezone || 'America/New_York';
   const recipientTimezone = getTimezoneFromPhoneNumber(phoneNumber, fallbackTimezone);
   
-  // Parse allowed start/end times (default: 9 AM - 8 PM for TCPA compliance)
-  const startTime = business.sms_allowed_start_time || '09:00:00';
-  const endTime = business.sms_allowed_end_time || '20:00:00'; // 8 PM, not 9 PM for safety
+  // Apply STRICTEST quiet hours across US and Canada
+  // Default: 9 AM - 8 PM (covers all US states including Texas, and Canada best practice)
+  let startTime = business.sms_allowed_start_time || '09:00:00'; // 9 AM (strictest)
+  let endTime = business.sms_allowed_end_time || '20:00:00'; // 8 PM (strictest - covers Florida)
+  
+  // Future: Could add state/province detection for even stricter rules
+  // For now, 9 AM - 8 PM is the strictest that covers all jurisdictions
   
   const [startHour] = startTime.split(':').map(Number);
   const [endHour] = endTime.split(':').map(Number);
@@ -324,6 +339,7 @@ function checkRecipientQuietHours(phoneNumber, business) {
     allowed: quietHoursCheck.isWithinAllowedHours,
     reason: quietHoursCheck.isWithinQuietHours ? 'quiet_hours' : 'allowed',
     timezone: recipientTimezone,
+    country: recipientCountry || (isCanadian ? 'CA' : isUS ? 'US' : 'UNKNOWN'),
     currentTime: quietHoursCheck.currentTime.toLocaleTimeString(),
     message: quietHoursCheck.message,
     quietHoursCheck,

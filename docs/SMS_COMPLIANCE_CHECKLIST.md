@@ -1,4 +1,10 @@
-# SMS Compliance Checklist - TCPA/CTIA
+# SMS Compliance Checklist - TCPA/CTIA (US) & CASL (Canada)
+
+## 🇺🇸🇨🇦 **Cross-Border Compliance**
+
+This checklist covers compliance for **both United States (TCPA/CTIA) and Canada (CASL)**. We implement the **strictest rules** from both countries to ensure full compliance.
+
+---
 
 ## ✅ **Implemented Requirements**
 
@@ -13,11 +19,18 @@
 - ✅ **Format**: `MSG & Data Rates Apply\nSTOP=stop, START=start`
 - ✅ **Functionality**: STOP/START keywords handled via webhook
 
-### 3. Quiet Hours Enforcement
+### 3. Quiet Hours Enforcement (Strictest Rules)
 - ✅ **Status**: Implemented
-- ✅ **Implementation**: Blocks sending outside 9 AM - 8 PM (recipient's timezone)
+- ✅ **Implementation**: Blocks sending outside **9 AM - 8 PM** (recipient's timezone)
+- ✅ **Strictest Rules Applied**:
+  - **US Federal (TCPA)**: 8 AM - 9 PM
+  - **US Florida**: 8 AM - 8 PM (strictest end time)
+  - **US Texas**: 9 AM - 9 PM (strictest start time)
+  - **Canada (CASL)**: No specific rule, but 9 AM - 8 PM is best practice
+  - **Implemented**: **9 AM - 8 PM** (covers all US states and Canada)
 - ✅ **Features**: 
   - Recipient timezone detection from area code
+  - Country detection (US vs Canada)
   - Automatic queuing for blocked recipients
   - Background job processes queued messages
 
@@ -34,6 +47,14 @@
   - Enforces Telnyx rate limits per number type
   - Load balancing across multiple numbers
   - Automatic throttling
+
+### 6. Bilingual Opt-Out (Canada Requirement)
+- ✅ **Status**: Implemented
+- ✅ **Implementation**: 
+  - Detects Canadian phone numbers
+  - Provides bilingual opt-out confirmation (English/French)
+  - Format: "You have been unsubscribed... / Vous avez été désabonné..."
+  - US numbers receive English-only confirmation
 
 ---
 
@@ -151,12 +172,13 @@
 
 ## 📊 **Compliance Score**
 
-- **Implemented**: 5/10 (50%)
-- **Critical Missing**: 2 items
+- **Implemented**: 6/10 (60%)
+- **Critical Missing**: 2 items (consent tracking, express written consent)
 - **Recommended Next Steps**: 
-  1. Add consent tracking
-  2. Add frequency limits
-  3. Add DNC checking
+  1. Add consent tracking (US & Canada)
+  2. Add express written consent requirement (US & Canada)
+  3. Add frequency limits
+  4. Add DNC checking (US & Canada registries)
 
 ---
 

@@ -1,6 +1,12 @@
-# SMS Quiet Hours / Time Restrictions
+# SMS Quiet Hours / Time Restrictions - US & Canada
 
-## TCPA/CTIA Quiet Hours Rules
+## 🇺🇸🇨🇦 **Cross-Border Compliance Strategy**
+
+This document outlines quiet hours requirements for **both United States (TCPA) and Canada (CASL)**. We implement the **strictest rules** from both countries.
+
+---
+
+## US Quiet Hours Rules (TCPA/CTIA)
 
 ### Federal Requirements (TCPA)
 - **Prohibited Hours**: 8:00 PM - 8:00 AM (recipient's local time zone)
@@ -18,11 +24,37 @@
 - **Sundays**: Even stricter restrictions (TBD)
 - **Allowed Hours**: 9:00 AM - 9:00 PM (Mon-Sat)
 
-### Recommended Safe Window
-To comply with both federal and state regulations:
-- **Start Time**: 9:00 AM (covers all states)
-- **End Time**: 8:00 PM (covers federal and most states)
+---
+
+## Canada Quiet Hours Rules (CASL)
+
+### Federal Requirements (CASL)
+- **No Specific Quiet Hours**: CASL does not specify quiet hours
+- **Best Practice**: Follow similar guidelines as US (8:00 AM - 9:00 PM)
+- **Penalty**: Up to $10 million CAD per violation
+
+### Provincial Requirements
+- **No Province-Specific Rules**: Generally follows federal CASL
+- **Best Practice**: 8:00 AM - 9:00 PM (recipient's local time)
+
+---
+
+## ✅ **STRICTEST RULES (Implemented)**
+
+To comply with **both US and Canada**, we use the **most restrictive** rules:
+
+- **Start Time**: **9:00 AM** (covers US Texas and all other states)
+- **End Time**: **8:00 PM** (covers US Florida and all other states)
 - **Timezone**: Recipient's local time zone (critical!)
+- **Applies To**: Both US and Canadian recipients
+
+**Rationale**:
+- US Federal: 8 AM - 9 PM
+- US Florida: 8 AM - 8 PM (strictest end time)
+- US Texas: 9 AM - 9 PM (strictest start time)
+- Canada: No specific rule, but 9 AM - 8 PM is best practice
+
+**Result**: **9:00 AM - 8:00 PM** ensures compliance with all US states and Canada.
 
 ## Current Implementation
 
@@ -63,11 +95,14 @@ The system currently supports:
 
 ## Compliance Checklist
 
-- ✅ Business name identification (just implemented)
+- ✅ Business name identification (implemented)
 - ✅ Opt-out instructions (STOP/START footer)
-- ⚠️ Quiet hours enforcement (currently informational only)
-- ⚠️ Recipient timezone detection (not implemented)
+- ✅ Quiet hours enforcement (9 AM - 8 PM, strictest rules)
+- ✅ Recipient timezone detection (from area code)
 - ✅ Message footer (MSG & Data Rates Apply)
+- ✅ Bilingual opt-out confirmation (Canada - English/French)
+- ✅ Country detection (US vs Canada)
+- ✅ Queuing system for blocked recipients
 
 ## Next Steps
 
