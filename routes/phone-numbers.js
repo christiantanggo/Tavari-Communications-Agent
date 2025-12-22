@@ -230,7 +230,7 @@ router.post('/admin/assign/:businessId', authenticateAdmin, async (req, res) => 
       // If purchasing new, purchase from Telnyx first
       if (purchase_new) {
         console.log(`[Admin Phone Assign] Purchasing new number ${phoneNumberE164}...`);
-        await purchaseTelnyxNumber(phoneNumberE164);
+        await purchaseTelnyxNumber(phoneNumberE164, businessId);
       }
 
       // Check if already in VAPI
@@ -357,7 +357,7 @@ router.post('/admin/change/:businessId', authenticateAdmin, async (req, res) => 
       // If purchasing new, purchase from Telnyx first
       if (purchase_new) {
         console.log(`[Admin Phone Change] Purchasing new number ${phoneNumberE164}...`);
-        await purchaseTelnyxNumber(phoneNumberE164);
+        await purchaseTelnyxNumber(phoneNumberE164, businessId);
       }
 
       // Check if already in VAPI
