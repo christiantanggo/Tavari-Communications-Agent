@@ -94,9 +94,11 @@ export async function processQueuedSMS() {
         for (const recipient of recipients) {
           try {
             // Double-check quiet hours (in case settings changed)
+            // Use BUSINESS timezone (universal timezone), not recipient timezone
             if (business.sms_business_hours_enabled) {
+              const businessTimezone = business.sms_timezone || business.timezone || 'America/New_York';
               const check = checkQuietHours(
-                getTimezoneFromPhoneNumber(recipient.phone_number, business.timezone),
+                businessTimezone,
                 parseInt((business.sms_allowed_start_time || '09:00').split(':')[0]),
                 parseInt((business.sms_allowed_end_time || '20:00').split(':')[0])
               );

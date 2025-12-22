@@ -472,22 +472,43 @@ router.get('/campaigns/:id', authenticate, async (req, res) => {
  */
 router.post('/campaigns/:id/cancel', authenticate, async (req, res) => {
   try {
+    console.log(`[BulkSMS Route] Cancel campaign request for: ${req.params.id}`);
+    console.log(`[BulkSMS Route] Business ID: ${req.businessId}`);
+    
     const campaign = await SMSCampaign.findById(req.params.id);
     
     if (!campaign) {
+      console.error(`[BulkSMS Route] Campaign ${req.params.id} not found`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     
+    console.log(`[BulkSMS Route] Campaign found:`, {
+      id: campaign.id,
+      name: campaign.name,
+      status: campaign.status,
+      business_id: campaign.business_id,
+    });
+    
     if (campaign.business_id !== req.businessId) {
+      console.error(`[BulkSMS Route] Access denied - business ID mismatch`);
       return res.status(403).json({ error: 'Access denied' });
     }
     
+    console.log(`[BulkSMS Route] Calling cancelCampaign function...`);
     await cancelCampaign(req.params.id);
+    console.log(`[BulkSMS Route] ✅ Campaign cancelled successfully`);
+    
     res.json({ success: true, message: 'Campaign cancelled' });
   } catch (error) {
-    console.error('[BulkSMS Route] Cancel campaign error:', error);
+    console.error('[BulkSMS Route] ❌ Cancel campaign error:', error);
+    console.error('[BulkSMS Route] Error message:', error.message);
+    console.error('[BulkSMS Route] Error stack:', error.stack);
+    console.error('[BulkSMS Route] Error code:', error.code);
+    console.error('[BulkSMS Route] Error details:', error.details);
+    
     res.status(500).json({ 
-      error: error.message || 'Failed to cancel campaign' 
+      error: error.message || 'Failed to cancel campaign',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });

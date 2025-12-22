@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
-import { bulkSMSAPI, contactsAPI } from '@/lib/api';
+import { bulkSMSAPI, contactsAPI, authAPI } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 
 function SMSPage() {
@@ -55,10 +55,58 @@ function SMSPage() {
   const [smsConsent, setSmsConsent] = useState(false); // TCPA/CASL compliance - consent required
   const [selectedContactsForList, setSelectedContactsForList] = useState([]);
   const [showAddToListModal, setShowAddToListModal] = useState(false);
+  const [businessTimezone, setBusinessTimezone] = useState('America/New_York'); // Business timezone for date formatting
 
   useEffect(() => {
+    loadBusinessTimezone();
     loadData();
   }, []);
+
+  const loadBusinessTimezone = async () => {
+    try {
+      const userRes = await authAPI.getMe();
+      const timezone = userRes.data?.business?.sms_timezone || 
+                      userRes.data?.business?.timezone || 
+                      'America/New_York';
+      setBusinessTimezone(timezone);
+    } catch (error) {
+      console.error('Failed to load business timezone:', error);
+      // Default to America/New_York if fetch fails
+      setBusinessTimezone('America/New_York');
+    }
+  };
+
+  // Format date in business timezone (not browser timezone)
+  const formatDateInBusinessTimezone = (dateString) => {
+    if (!dateString) return 'N/A';
+    
+    try {
+      // Parse the date string (assume UTC if no timezone info)
+      let date;
+      if (dateString.includes('Z') || dateString.includes('+') || dateString.includes('-', 10)) {
+        // Already has timezone info
+        date = new Date(dateString);
+      } else {
+        // Assume UTC if no timezone specified (database timestamps are typically UTC)
+        date = new Date(dateString + 'Z');
+      }
+      
+      // Format in business timezone
+      return date.toLocaleString('en-US', {
+        timeZone: businessTimezone,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Invalid Date';
+    }
+  };
   
   useEffect(() => {
     if (selectedList) {
@@ -833,7 +881,7 @@ function SMSPage() {
                         <div>
                           <h3 className="text-lg font-semibold">{campaign.name}</h3>
                           <p className="text-sm text-gray-500 mt-1">
-                            Created: {new Date(campaign.created_at).toLocaleString()}
+                            Created: {formatDateInBusinessTimezone(campaign.created_at)}
                           </p>
                         </div>
                         <div className="flex space-x-2">
@@ -940,18 +988,18 @@ function SMSPage() {
                       </div>
                       <div>
                         <strong className="text-gray-700">Created:</strong>
-                        <span className="ml-2">{new Date(selectedCampaign.created_at).toLocaleString()}</span>
+                        <span className="ml-2">{formatDateInBusinessTimezone(selectedCampaign.created_at)}</span>
                       </div>
                       {selectedCampaign.started_at && (
                         <div>
                           <strong className="text-gray-700">Started:</strong>
-                          <span className="ml-2">{new Date(selectedCampaign.started_at).toLocaleString()}</span>
+                          <span className="ml-2">{formatDateInBusinessTimezone(selectedCampaign.started_at)}</span>
                         </div>
                       )}
                       {selectedCampaign.completed_at && (
                         <div>
                           <strong className="text-gray-700">Completed:</strong>
-                          <span className="ml-2">{new Date(selectedCampaign.completed_at).toLocaleString()}</span>
+                          <span className="ml-2">{formatDateInBusinessTimezone(selectedCampaign.completed_at)}</span>
                         </div>
                       )}
                     </div>

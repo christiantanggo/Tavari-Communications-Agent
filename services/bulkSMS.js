@@ -27,6 +27,7 @@ import { SMSCampaignRecipient } from '../models/SMSCampaignRecipient.js';
 import { SMSOptOut } from '../models/SMSOptOut.js';
 import { Business } from '../models/Business.js';
 import { BusinessPhoneNumber } from '../models/BusinessPhoneNumber.js';
+import { Contact } from '../models/Contact.js';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE_URL = 'https://api.telnyx.com/v2';
@@ -305,6 +306,8 @@ export function loadBalanceMessages(phoneNumbers, availableNumbers) {
  * - Canada (CASL): No specific rule, but best practice 8 AM - 9 PM
  * - STRICTEST RULE: 9 AM - 8 PM (covers all US states and Canada best practice)
  * 
+ * Uses BUSINESS timezone (universal timezone) from settings, not recipient timezone
+ * 
  * @param {string} phoneNumber - Recipient phone number
  * @param {Object} business - Business object with SMS time settings
  * @returns {Object} { allowed: boolean, reason: string, timezone: string, currentTime: string, country: string }
@@ -324,9 +327,8 @@ function checkRecipientQuietHours(phoneNumber, business) {
   const isCanadian = isCanadianNumber(phoneNumber);
   const isUS = isUSNumber(phoneNumber);
   
-  // Get recipient's timezone from phone number area code
-  const fallbackTimezone = business.sms_timezone || business.timezone || 'America/New_York';
-  const recipientTimezone = getTimezoneFromPhoneNumber(phoneNumber, fallbackTimezone);
+  // Use BUSINESS timezone from settings (universal timezone), not recipient timezone
+  const businessTimezone = business.sms_timezone || business.timezone || 'America/New_York';
   
   // Apply STRICTEST quiet hours across US and Canada
   // Default: 9 AM - 8 PM (covers all US states including Texas, and Canada best practice)
@@ -339,13 +341,13 @@ function checkRecipientQuietHours(phoneNumber, business) {
   const [startHour] = startTime.split(':').map(Number);
   const [endHour] = endTime.split(':').map(Number);
   
-  // Check quiet hours for recipient's timezone
-  const quietHoursCheck = checkQuietHours(recipientTimezone, startHour, endHour);
+  // Check quiet hours for BUSINESS timezone (universal timezone)
+  const quietHoursCheck = checkQuietHours(businessTimezone, startHour, endHour);
   
   return {
     allowed: quietHoursCheck.isWithinAllowedHours,
     reason: quietHoursCheck.isWithinQuietHours ? 'quiet_hours' : 'allowed',
-    timezone: recipientTimezone,
+    timezone: businessTimezone,
     country: recipientCountry || (isCanadian ? 'CA' : isUS ? 'US' : 'UNKNOWN'),
     currentTime: quietHoursCheck.currentTime.toLocaleTimeString(),
     message: quietHoursCheck.message,
@@ -505,17 +507,17 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
         if (!check.allowed) {
           quietHoursBlockedSet.add(phoneNumber);
           
-          // Calculate next allowed send time (9 AM in recipient's timezone)
-          const recipientTimezone = check.timezone;
+          // Calculate next allowed send time (9 AM in business timezone)
+          const businessTimezone = check.timezone; // This is now business timezone, not recipient
           const startTime = business.sms_allowed_start_time || '09:00:00';
           const [startHour] = startTime.split(':').map(Number);
           
-          // Get current time in recipient's timezone
+          // Get current time in business timezone
           const now = new Date();
-          const timeInTimezone = new Date(now.toLocaleString('en-US', { timeZone: recipientTimezone }));
+          const timeInTimezone = new Date(now.toLocaleString('en-US', { timeZone: businessTimezone }));
           const currentHour = timeInTimezone.getHours();
           
-          // Calculate scheduled send time: next 9 AM in recipient's timezone
+          // Calculate scheduled send time: next 9 AM in business timezone
           const scheduledSend = new Date(timeInTimezone);
           scheduledSend.setHours(startHour, 0, 0, 0);
           
@@ -532,7 +534,7 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
               recipientId: recipientRecord.id,
               phoneNumber,
               scheduledSendAt: scheduledSend.toISOString(),
-              timezone: recipientTimezone,
+              timezone: businessTimezone,
             });
           }
           
@@ -549,7 +551,7 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
             await SMSCampaignRecipient.updateStatus(queued.recipientId, 'queued', {
               scheduled_send_at: queued.scheduledSendAt,
             });
-            console.log(`[BulkSMS]   Queued ${queued.phoneNumber} for ${queued.scheduledSendAt} (${queued.timezone})`);
+            console.log(`[BulkSMS]   Queued ${queued.phoneNumber} for ${queued.scheduledSendAt} (business timezone: ${queued.timezone})`);
           } catch (error) {
             console.error(`[BulkSMS] Error queuing recipient ${queued.phoneNumber}:`, error.message);
           }
@@ -686,9 +688,12 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
           continue;
         }
         
+        // Prepare message with business identification
+        const compliantMessage = addBusinessIdentification(messageText, business.name);
+        
         // Check prohibited content (TCPA/CASL compliance)
         const country = detectCountry(phoneNumber);
-        const contentCheck = checkProhibitedContent(finalMessageText, country);
+        const contentCheck = checkProhibitedContent(compliantMessage, country);
         if (contentCheck.isProhibited) {
           console.error(`[BulkSMS] ❌ Prohibited content detected for ${phoneNumber}: ${contentCheck.reason}`);
           await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
@@ -732,8 +737,7 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
         }
         
         const sendStartTime = Date.now();
-        // Add business name identification for TCPA/CTIA compliance
-        const compliantMessage = addBusinessIdentification(messageText, business.name);
+        // Send SMS (compliantMessage already has business identification)
         const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage, business.name);
         const sendDuration = Date.now() - sendStartTime;
         
@@ -769,21 +773,49 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
           });
         }
       } catch (error) {
-        console.error(`[BulkSMS] ❌ Failed to send SMS to ${phoneNumber} from ${fromNumber}:`, error.message);
-        if (error.response) {
-          console.error(`[BulkSMS] Error response:`, JSON.stringify(error.response.data, null, 2));
+        // Enhanced error logging
+        console.error(`[BulkSMS] ❌ ========== SMS SEND FAILED ==========`);
+        console.error(`[BulkSMS] Phone Number: ${phoneNumber}`);
+        console.error(`[BulkSMS] From Number: ${fromNumber}`);
+        console.error(`[BulkSMS] Error Message: ${error.message}`);
+        console.error(`[BulkSMS] Error Name: ${error.name}`);
+        console.error(`[BulkSMS] Error Code: ${error.code}`);
+        if (error.stack) {
+          console.error(`[BulkSMS] Error Stack:`, error.stack);
         }
+        if (error.response) {
+          console.error(`[BulkSMS] HTTP Status: ${error.response.status}`);
+          console.error(`[BulkSMS] Error Response Data:`, JSON.stringify(error.response.data, null, 2));
+          console.error(`[BulkSMS] Error Response Headers:`, JSON.stringify(error.response.headers, null, 2));
+        }
+        if (error.request) {
+          console.error(`[BulkSMS] Request Config:`, JSON.stringify({
+            url: error.config?.url,
+            method: error.config?.method,
+            headers: error.config?.headers,
+          }, null, 2));
+        }
+        console.error(`[BulkSMS] =========================================`);
         
         // Update recipient status
         const recipient = recipientMap.get(phoneNumber);
         if (recipient) {
+          const errorMessage = error.response?.data?.errors?.[0]?.detail || 
+                              error.response?.data?.message || 
+                              error.message || 
+                              'Unknown error';
           await SMSCampaignRecipient.updateStatus(recipient.id, 'failed', {
-            error_message: error.message,
+            error_message: errorMessage,
           });
         }
         
         failedCount++;
-        errors.push({ phoneNumber, error: error.message });
+        errors.push({ 
+          phoneNumber, 
+          error: error.message,
+          status: error.response?.status,
+          details: error.response?.data,
+        });
         
         // Update campaign progress
         await SMSCampaign.update(campaignId, {
@@ -872,16 +904,33 @@ export async function getCampaignStatus(campaignId) {
  * @param {string} campaignId - Campaign ID
  */
 export async function cancelCampaign(campaignId) {
+  console.log(`[BulkSMS] Cancel campaign called for: ${campaignId}`);
+  
   const campaign = await SMSCampaign.findById(campaignId);
   if (!campaign) {
+    console.error(`[BulkSMS] Campaign ${campaignId} not found`);
     throw new Error('Campaign not found');
   }
   
-  if (campaign.status !== 'processing' && campaign.status !== 'pending') {
-    throw new Error(`Cannot cancel campaign with status: ${campaign.status}`);
+  console.log(`[BulkSMS] Campaign status: ${campaign.status}`);
+  
+  // Allow cancelling pending, processing, or paused campaigns
+  // But provide a warning for completed/failed campaigns
+  if (campaign.status === 'completed' || campaign.status === 'failed' || campaign.status === 'cancelled') {
+    console.warn(`[BulkSMS] Attempting to cancel campaign with status: ${campaign.status}`);
+    // Still allow it - just update the status
   }
   
-  await SMSCampaign.updateStatus(campaignId, 'cancelled');
-  return { success: true };
+  try {
+    await SMSCampaign.updateStatus(campaignId, 'cancelled');
+    console.log(`[BulkSMS] ✅ Campaign ${campaignId} cancelled successfully`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[BulkSMS] ❌ Error updating campaign status:`, error);
+    console.error(`[BulkSMS] Error message:`, error.message);
+    console.error(`[BulkSMS] Error code:`, error.code);
+    console.error(`[BulkSMS] Error details:`, error.details);
+    throw error;
+  }
 }
 
