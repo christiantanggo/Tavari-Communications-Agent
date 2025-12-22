@@ -27,6 +27,7 @@ function SMSPage() {
   const [loadingFailedRecipients, setLoadingFailedRecipients] = useState(false);
   const [sentRecipients, setSentRecipients] = useState([]);
   const [loadingSentRecipients, setLoadingSentRecipients] = useState(false);
+  const [loadingSentRecipients, setLoadingSentRecipients] = useState(false);
   
   // Numbers Tab
   const [availableNumbers, setAvailableNumbers] = useState([]);
@@ -250,6 +251,13 @@ function SMSPage() {
         setFailedRecipients([]);
       }
       
+      // Load sent recipients
+      if (res.data.campaign.sent_count > 0) {
+        loadSentRecipients(campaignId);
+      } else {
+        setSentRecipients([]);
+      }
+      
       // Scroll to details section
       setTimeout(() => {
         const detailsElement = document.getElementById('campaign-details');
@@ -272,6 +280,19 @@ function SMSPage() {
       setFailedRecipients([]);
     } finally {
       setLoadingFailedRecipients(false);
+    }
+  };
+
+  const loadSentRecipients = async (campaignId) => {
+    setLoadingSentRecipients(true);
+    try {
+      const res = await bulkSMSAPI.getRecipients(campaignId, 'sent');
+      setSentRecipients(res.data.recipients || []);
+    } catch (error) {
+      console.error('Failed to load sent recipients:', error);
+      setSentRecipients([]);
+    } finally {
+      setLoadingSentRecipients(false);
     }
   };
 
@@ -1111,6 +1132,48 @@ function SMSPage() {
                         <strong className="text-gray-700">Failed:</strong>
                         <span className="ml-2 text-red-600">{selectedCampaign.failed_count || 0}</span>
                       </div>
+                      
+                      {/* Sent Recipients Section */}
+                      {selectedCampaign.sent_count > 0 && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                          <div className="flex justify-between items-center mb-3">
+                            <strong className="text-gray-700">Sent Recipients ({selectedCampaign.sent_count}):</strong>
+                          </div>
+                          {loadingSentRecipients ? (
+                            <p className="text-sm text-gray-500">Loading sent recipients...</p>
+                          ) : sentRecipients.length > 0 ? (
+                            <div className="space-y-2 max-h-60 overflow-y-auto">
+                              {sentRecipients.map((recipient) => (
+                                <div key={recipient.id} className="p-3 bg-green-50 rounded-md border border-green-200">
+                                  <div className="flex justify-between items-start">
+                                    <div className="flex-1">
+                                      <div className="font-medium text-sm text-gray-900">
+                                        {recipient.first_name && recipient.last_name 
+                                          ? `${recipient.first_name} ${recipient.last_name}`
+                                          : recipient.email || 'Unknown'
+                                        }
+                                      </div>
+                                      <div className="text-sm text-gray-600 mt-1">
+                                        📱 {recipient.phone_number}
+                                      </div>
+                                      {recipient.sent_at && (
+                                        <div className="text-xs text-gray-500 mt-1">
+                                          Sent: {formatDateInBusinessTimezone(recipient.sent_at)}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
+                                      ✓ Sent
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500">No sent recipients found</p>
+                          )}
+                        </div>
+                      )}
                       
                       {/* Failed Recipients Section */}
                       {selectedCampaign.failed_count > 0 && (
