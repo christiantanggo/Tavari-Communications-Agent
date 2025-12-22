@@ -1054,14 +1054,26 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     allTelnyxNumbers.forEach(telnyxNum => {
       const phoneNumber = telnyxNum.phone_number;
       // Normalize Telnyx number
-      let normalizedWithPlus = phoneNumber.replace(/[^0-9+]/g, '');
+      let normalizedWithPlus = phoneNumber.replace(/[^0-9+]/g, '').trim();
       if (!normalizedWithPlus.startsWith('+')) {
         normalizedWithPlus = '+' + normalizedWithPlus;
       }
       const normalizedWithoutPlus = normalizedWithPlus.replace(/^\+/, '');
       
       // Check if this number is assigned for SMS (check both formats)
-      const isAssigned = assignedSMSNumbers.has(normalizedWithPlus) || assignedSMSNumbers.has(normalizedWithoutPlus);
+      let isAssigned = assignedSMSNumbers.has(normalizedWithPlus) || assignedSMSNumbers.has(normalizedWithoutPlus);
+      
+      // Also check if any assigned number is a prefix/suffix match (handle incomplete numbers)
+      if (!isAssigned && normalizedWithPlus.startsWith('+1') && normalizedWithPlus.length >= 11) {
+        const last10Digits = normalizedWithPlus.slice(-10);
+        isAssigned = assignedSMSNumbers.has('+1' + last10Digits) || 
+                     assignedSMSNumbers.has(last10Digits) ||
+                     // Check if any assigned number matches the last 10 digits
+                     Array.from(assignedSMSNumbers).some(assigned => {
+                       const assignedLast10 = assigned.replace(/^\+1/, '').slice(-10);
+                       return assignedLast10 === last10Digits || last10Digits.includes(assignedLast10) || assignedLast10.includes(last10Digits);
+                     });
+      }
       
       if (isAssigned) {
         assignedNumbers.push({
@@ -1076,6 +1088,16 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
           normalized: normalizedWithPlus,
           phone_number: phoneNumber,
         });
+        // Log potential matches for debugging
+        if (normalizedWithPlus.startsWith('+1')) {
+          const last10Digits = normalizedWithPlus.slice(-10);
+          const potentialMatches = Array.from(assignedSMSNumbers).filter(a => 
+            a.includes(last10Digits) || last10Digits.includes(a.replace(/^\+1?/, ''))
+          );
+          if (potentialMatches.length > 0) {
+            console.log(`[Admin] ⚠️  Potential match for ${phoneNumber}:`, potentialMatches);
+          }
+        }
       }
     });
     
