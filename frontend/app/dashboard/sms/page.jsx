@@ -664,6 +664,25 @@ function SMSPage() {
   return (
     <AuthGuard>
       <DashboardHeader />
+      
+      {/* Loading Modal for Campaign Creation */}
+      {loading && sendToAllContacts && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Loading All Contacts</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                We're loading all contacts from your database and checking compliance requirements...
+              </p>
+              <p className="text-xs text-gray-500">
+                This may take a moment if you have many contacts.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-6">SMS Campaigns</h1>
         
