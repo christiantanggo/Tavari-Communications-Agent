@@ -32,6 +32,33 @@ export function addSMSFooter(messageText) {
 }
 
 /**
+ * Add business name identification to SMS message (TCPA/CTIA compliance requirement)
+ * Business name must be included in every message so recipients know who is texting them
+ * @param {string} messageText - Original message text
+ * @param {string} businessName - Business name to identify sender
+ * @returns {string} Message text with business name prepended
+ */
+export function addBusinessIdentification(messageText, businessName) {
+  if (!businessName) {
+    console.warn('[SMS Compliance] ⚠️  No business name provided - message may not be TCPA compliant');
+    return messageText;
+  }
+  
+  // Check if business name is already in the message (to avoid duplicates)
+  // Look for business name at the start of the message
+  const namePattern = new RegExp(`^\\s*${businessName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s:,\\-]`, 'i');
+  
+  if (namePattern.test(messageText)) {
+    // Business name already present, return as-is
+    return messageText;
+  }
+  
+  // Prepend business name with a colon or dash for clarity
+  // Format: "BusinessName: Message text..."
+  return `${businessName}: ${messageText.trim()}`;
+}
+
+/**
  * Send SMS directly via Telnyx API (reusable function)
  * Automatically adds required footer to all messages
  * @param {string} fromNumber - Sender phone number (E.164 format)
@@ -302,6 +329,10 @@ export async function sendSMSNotification(business, callSession, summary, messag
     } else {
       messageText = `New callback request from ${callSession.caller_name || "Unknown"} (${formatPhoneNumber(callSession.caller_number)}). ${summary?.substring(0, 100) || "See dashboard for details."}`;
     }
+    
+    // Add business name identification for TCPA/CTIA compliance
+    messageText = addBusinessIdentification(messageText, business.name);
+    
     console.log("[SMS Notification] Step 2: Building SMS message");
     console.log("[SMS Notification] Message:", messageText);
     

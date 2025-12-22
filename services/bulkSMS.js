@@ -2,7 +2,7 @@
 // Bulk SMS campaign service with rate limiting and multi-number support
 
 import { parse } from 'csv-parse/sync';
-import { sendSMSDirect } from './notifications.js';
+import { sendSMSDirect, addBusinessIdentification } from './notifications.js';
 import { 
   validatePhoneNumbersForBulk, 
   formatPhoneNumberE164,
@@ -520,7 +520,9 @@ export async function sendBulkSMS(campaignId, businessId, messageText, phoneNumb
       // Send SMS
       try {
         const sendStartTime = Date.now();
-        const response = await sendSMSDirect(fromNumber, phoneNumber, messageText);
+        // Add business name identification for TCPA/CTIA compliance
+        const compliantMessage = addBusinessIdentification(messageText, business.name);
+        const response = await sendSMSDirect(fromNumber, phoneNumber, compliantMessage);
         const sendDuration = Date.now() - sendStartTime;
         
         if (sendDuration > 1000) {
