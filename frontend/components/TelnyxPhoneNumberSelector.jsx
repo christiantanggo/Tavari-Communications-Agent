@@ -19,7 +19,7 @@ const phoneTypes = [
 
 export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, countryCode: initialCountryCode = 'US', areaCode: initialAreaCode = null }) {
   const [countryCode, setCountryCode] = useState(initialCountryCode);
-  const [phoneType, setPhoneType] = useState('local');
+  const [phoneType, setPhoneType] = useState('toll-free');
   const [phoneNumberSearch, setPhoneNumberSearch] = useState('');
   const [searchMode, setSearchMode] = useState('browse'); // 'browse' or 'search'
   const [locality, setLocality] = useState(''); // City/Region
