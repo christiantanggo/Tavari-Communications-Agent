@@ -1053,20 +1053,27 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     
     allTelnyxNumbers.forEach(telnyxNum => {
       const phoneNumber = telnyxNum.phone_number;
-      let normalized = phoneNumber.replace(/[^0-9+]/g, '');
-      if (!normalized.startsWith('+')) normalized = '+' + normalized;
+      // Normalize Telnyx number
+      let normalizedWithPlus = phoneNumber.replace(/[^0-9+]/g, '');
+      if (!normalizedWithPlus.startsWith('+')) {
+        normalizedWithPlus = '+' + normalizedWithPlus;
+      }
+      const normalizedWithoutPlus = normalizedWithPlus.replace(/^\+/, '');
       
-      // Check if this number is assigned for SMS
-      if (assignedSMSNumbers.has(normalized)) {
+      // Check if this number is assigned for SMS (check both formats)
+      const isAssigned = assignedSMSNumbers.has(normalizedWithPlus) || assignedSMSNumbers.has(normalizedWithoutPlus);
+      
+      if (isAssigned) {
         assignedNumbers.push({
           ...telnyxNum,
-          normalized,
+          normalized: normalizedWithPlus,
           phone_number: phoneNumber,
         });
+        console.log(`[Admin] ✅ Found assigned number: ${phoneNumber} (normalized: ${normalizedWithPlus})`);
       } else {
         unassignedNumbers.push({
           ...telnyxNum,
-          normalized,
+          normalized: normalizedWithPlus,
           phone_number: phoneNumber,
         });
       }
@@ -1074,7 +1081,16 @@ router.get("/phone-numbers/unassigned", authenticateAdmin, async (req, res) => {
     
     console.log(`[Admin] Filtered results: ${assignedNumbers.length} assigned, ${unassignedNumbers.length} unassigned`);
     if (assignedNumbers.length > 0) {
-      console.log(`[Admin] Sample assigned numbers from Telnyx:`, assignedNumbers.slice(0, 3).map(n => n.phone_number));
+      console.log(`[Admin] All assigned numbers from Telnyx:`, assignedNumbers.map(n => `${n.phone_number} (${n.normalized})`));
+    }
+    if (unassignedNumbers.length > 0 && assignedSMSNumbersOriginal.length > 0) {
+      console.log(`[Admin] ⚠️  WARNING: Found ${assignedSMSNumbersOriginal.length} assigned numbers in DB but ${assignedNumbers.length} matched in Telnyx`);
+      console.log(`[Admin] Checking first unassigned number:`, unassignedNumbers[0]?.phone_number, `(normalized: ${unassignedNumbers[0]?.normalized})`);
+      console.log(`[Admin] Does it match any assigned?`, {
+        'with+': assignedSMSNumbers.has(unassignedNumbers[0]?.normalized),
+        'without+': assignedSMSNumbers.has(unassignedNumbers[0]?.normalized?.replace(/^\+/, '')),
+        'assignedSet': Array.from(assignedSMSNumbers).slice(0, 5),
+      });
     }
     
     console.log(`[Admin] Found ${unassignedNumbers.length} unassigned phone numbers`);
