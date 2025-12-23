@@ -11,8 +11,20 @@ function BillingSuccessContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const sessionId = searchParams.get('session_id');
+  const packageId = searchParams.get('package_id');
+  const fromSetup = searchParams.get('from_setup') === 'true';
 
   useEffect(() => {
+    // If coming from setup wizard, redirect back to setup wizard
+    if (fromSetup && packageId) {
+      const timer = setTimeout(() => {
+        router.push('/dashboard/setup');
+      }, 2000);
+      setLoading(false);
+      return () => clearTimeout(timer);
+    }
+
+    // Legacy flow: require session_id
     if (!sessionId) {
       setError('No session ID found');
       setLoading(false);
@@ -29,7 +41,7 @@ function BillingSuccessContent() {
     setLoading(false);
 
     return () => clearTimeout(timer);
-  }, [sessionId, router]);
+  }, [sessionId, packageId, fromSetup, router]);
 
   if (loading) {
     return (

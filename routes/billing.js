@@ -62,8 +62,8 @@ router.post('/checkout', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Business not found' });
     }
     
-    const successUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing/success?package_id=${packageId}`;
-    const cancelUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing`;
+    const successUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing/success?package_id=${packageId}&from_setup=true`;
+    const cancelUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/setup`;
     
     // Check if Helcim payment page URL is configured
     if (!process.env.HELCIM_PAYMENT_PAGE_URL) {

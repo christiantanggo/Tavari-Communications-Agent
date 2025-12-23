@@ -208,8 +208,10 @@ export default function NewSetupWizard({ testMode = false }) {
         console.log('[Setup Wizard] Creating checkout for package:', formData.step5.packageId);
         const checkoutRes = await billingAPI.createCheckout(formData.step5.packageId);
         
+        console.log('[Setup Wizard] ✅ Checkout API call successful');
         console.log('[Setup Wizard] Full checkout response:', checkoutRes);
         console.log('[Setup Wizard] Checkout response data:', checkoutRes.data);
+        console.log('[Setup Wizard] Response keys:', Object.keys(checkoutRes.data || {}));
         
         // Handle different response formats from billing API
         // The API returns { url: ... } for both payment pages and success pages
@@ -219,6 +221,7 @@ export default function NewSetupWizard({ testMode = false }) {
         
         console.log('[Setup Wizard] Extracted redirect URL:', redirectUrl);
         console.log('[Setup Wizard] Response success flag:', checkoutRes.data?.success);
+        console.log('[Setup Wizard] Response message:', checkoutRes.data?.message);
         
         if (checkoutRes.data?.success === true) {
           // Payment already processed successfully (saved payment method used)
@@ -229,27 +232,44 @@ export default function NewSetupWizard({ testMode = false }) {
           setSaving(false);
           return;
         } else if (redirectUrl) {
-          // Redirect to payment page or success page
-          console.log('[Setup Wizard] ✅ Found payment URL, redirecting to:', redirectUrl);
-          // Use setTimeout to ensure state updates complete before redirect
-          setTimeout(() => {
+          // Check if this is a Helcim payment page URL or our success page
+          const isHelcimUrl = redirectUrl.includes('helcim.com') || redirectUrl.includes('myhelcim.com');
+          const isSuccessPage = redirectUrl.includes('/billing/success');
+          
+          if (isHelcimUrl) {
+            // Redirect to Helcim payment page
+            console.log('[Setup Wizard] ✅ Redirecting to Helcim payment page:', redirectUrl);
             window.location.href = redirectUrl;
-          }, 100);
-          return; // Stop execution - user will be redirected
+            return; // Stop execution - user will be redirected
+          } else if (isSuccessPage) {
+            // This means payment page URL is not configured, just continue to next step
+            console.log('[Setup Wizard] ⚠️ Payment page not configured, continuing to next step');
+            warning('Payment page not configured. You can complete payment later in billing settings.');
+            setCurrentStep(6);
+            setSaving(false);
+            return;
+          } else {
+            // Unknown URL, redirect anyway
+            console.log('[Setup Wizard] ✅ Redirecting to:', redirectUrl);
+            window.location.href = redirectUrl;
+            return;
+          }
         } else {
           // If no URL and no success, show error but allow continuing
           const errorMsg = checkoutRes.data?.error || 
                           checkoutRes.data?.message || 
                           'Failed to initiate payment. You can complete payment later in billing settings.';
           console.error('[Setup Wizard] ❌ No payment URL returned. Full response:', JSON.stringify(checkoutRes.data, null, 2));
-          showError(errorMsg);
+          warning(errorMsg);
           // Continue to next step even if payment fails
           setCurrentStep(6);
           setSaving(false);
           return;
         }
       } catch (paymentError) {
-        console.error('Payment initiation error:', paymentError);
+        console.error('[Setup Wizard] ❌ Payment initiation error:', paymentError);
+        console.error('[Setup Wizard] Error response:', paymentError.response);
+        console.error('[Setup Wizard] Error data:', paymentError.response?.data);
         const errorData = paymentError.response?.data || {};
         const errorMsg = errorData.error || 
                         errorData.message || 
@@ -262,7 +282,7 @@ export default function NewSetupWizard({ testMode = false }) {
           // Payment not configured
           warning('Payment processing is not fully configured. You can complete payment later in billing settings.');
         } else {
-          showError(errorMsg);
+          warning(errorMsg);
         }
         
         // Continue to next step even if payment fails
