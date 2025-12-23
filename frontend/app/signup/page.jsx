@@ -199,10 +199,10 @@ export default function SignupPage() {
           </div>
 
           <button
-            onClick={() => router.push('/dashboard')}
+            onClick={() => router.push('/dashboard/setup')}
             className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 font-medium"
           >
-            Go to Dashboard
+            Complete Setup Wizard
           </button>
         </div>
       </div>
