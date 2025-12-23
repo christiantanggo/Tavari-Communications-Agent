@@ -1,5 +1,5 @@
 import express from 'express';
-import { HelcimService } from '../services/helcim.js';
+import { StripeService } from '../services/stripe.js';
 import { authenticate } from '../middleware/auth.js';
 import { Business } from '../models/Business.js';
 import { PricingPackage } from '../models/PricingPackage.js';
@@ -51,6 +51,29 @@ router.post('/checkout', authenticate, async (req, res) => {
       });
     }
     
+    // Check if Stripe is configured
+    if (!process.env.STRIPE_SECRET_KEY) {
+      console.log('[Billing] ⚠️ STRIPE_SECRET_KEY not configured, updating package locally');
+      const pkg = await PricingPackage.findById(packageId);
+      if (!pkg) {
+        return res.status(404).json({ error: 'Package not found' });
+      }
+      
+      await Business.update(req.businessId, {
+        package_id: packageId,
+        plan_tier: pkg.name.toLowerCase(),
+        usage_limit_minutes: pkg.minutes_included,
+      });
+      
+      return res.json({ 
+        success: true,
+        packageId: packageId,
+        packageName: pkg.name,
+        message: 'Package selected. Payment can be completed later in billing settings.',
+        skipPayment: true
+      });
+    }
+    
     // Get package details
     const pkg = await PricingPackage.findById(packageId);
     if (!pkg) {
@@ -62,65 +85,23 @@ router.post('/checkout', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Business not found' });
     }
     
-    const successUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing/success?package_id=${packageId}&from_setup=true`;
+    const successUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing/success?package_id=${packageId}&from_setup=true&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/setup`;
     
-    // Check if Helcim payment page URL is configured
-    if (!process.env.HELCIM_PAYMENT_PAGE_URL) {
-      // If no payment page URL, just update the package locally and skip payment
-      console.log('[Billing] ⚠️ HELCIM_PAYMENT_PAGE_URL not configured, updating package locally and skipping payment');
-      await Business.update(req.businessId, {
-        package_id: packageId,
-        plan_tier: pkg.name.toLowerCase(),
-        usage_limit_minutes: pkg.minutes_included,
-      });
-      
-      // Return success flag so frontend continues to next step
-      return res.json({ 
-        success: true,
-        packageId: packageId,
-        packageName: pkg.name,
-        message: 'Package selected. Payment can be completed later in billing settings.',
-        skipPayment: true
-      });
-    }
+    // Create Stripe checkout session
+    console.log('[Billing] Creating Stripe checkout session for package:', packageId);
+    const checkoutSession = await StripeService.createCheckoutSession(
+      req.businessId,
+      packageId,
+      pkg.monthly_price,
+      pkg.name,
+      successUrl,
+      cancelUrl
+    );
     
-    // Get or create customer for payment page
-    let customerId = null;
-    if (process.env.HELCIM_API_TOKEN) {
-      try {
-        const customer = await HelcimService.getOrCreateCustomer(
-          req.businessId,
-          business.email,
-          business.name,
-          business.phone
-        );
-        customerId = customer.customerId || customer.id;
-      } catch (customerError) {
-        console.warn('[Billing] Could not get/create customer for payment page:', customerError.message);
-        // Continue without customer ID - payment page will still work
-      }
-    }
+    console.log('[Billing] ✅ Stripe checkout session created:', checkoutSession.sessionId);
     
-    // Build payment page URL with amount and package info
-    const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
-    const amount = pkg.monthly_price.toFixed(2);
-    const separator = paymentPageUrl.includes('?') ? '&' : '?';
-    
-    // Construct URL with amount and optional customer ID
-    let paymentUrlWithAmount = `${paymentPageUrl}${separator}amount=${amount}&package_id=${packageId}`;
-    if (customerId) {
-      paymentUrlWithAmount += `&customer_id=${customerId}`;
-    }
-    
-    // Add return URLs if payment page supports them
-    // Some payment pages support return_url and cancel_url parameters
-    paymentUrlWithAmount += `&return_url=${encodeURIComponent(successUrl)}`;
-    paymentUrlWithAmount += `&cancel_url=${encodeURIComponent(cancelUrl)}`;
-    
-    console.log('[Billing] ✅ Returning payment page URL:', paymentUrlWithAmount);
-    
-    // Update package locally (user will complete payment on Helcim page)
+    // Update package locally (will be confirmed via webhook)
     await Business.update(req.businessId, {
       package_id: packageId,
       plan_tier: pkg.name.toLowerCase(),
@@ -128,11 +109,10 @@ router.post('/checkout', authenticate, async (req, res) => {
     });
     
     return res.json({
-      url: paymentUrlWithAmount,
-      amount: amount,
+      url: checkoutSession.url,
+      sessionId: checkoutSession.sessionId,
       packageId: packageId,
       packageName: pkg.name,
-      customerId: customerId,
       message: 'Redirecting to payment page...'
     });
   } catch (error) {
@@ -145,66 +125,6 @@ router.post('/checkout', authenticate, async (req, res) => {
     });
     res.status(500).json({ 
       error: 'Failed to create checkout session', 
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-// Get hosted payment page URL for adding payment method
-router.get('/hosted-payment-page', authenticate, async (req, res) => {
-  try {
-    const business = await Business.findById(req.businessId);
-    if (!business) {
-      return res.status(404).json({ error: 'Business not found' });
-    }
-
-    // Check if we have a configured payment page URL
-    // If not, return instructions to create one in Helcim dashboard
-    const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
-    if (!paymentPageUrl) {
-      return res.status(503).json({ 
-        error: 'Payment page not configured',
-        message: 'Please create a payment page in your Helcim dashboard and set HELCIM_PAYMENT_PAGE_URL environment variable',
-        instructions: [
-          '1. Log into Helcim Dashboard',
-          '2. Go to "All Tools" → "Payment Pages"',
-          '3. Create a new "Customer Registration" or "Editable Amount" payment page',
-          '4. Add it to your backend environment variables as HELCIM_PAYMENT_PAGE_URL'
-        ]
-      });
-    }
-
-    // Get or create customer
-    let customerId = null;
-    if (process.env.HELCIM_API_TOKEN) {
-      try {
-        const customer = await HelcimService.getOrCreateCustomer(
-          req.businessId,
-          business.email,
-          business.name,
-          business.phone
-        );
-        customerId = customer.customerId || customer.id;
-      } catch (customerError) {
-        console.warn('[Billing] Could not get/create customer:', customerError.message);
-      }
-    }
-
-    // Build payment page URL with customer ID if available
-    const separator = paymentPageUrl.includes('?') ? '&' : '?';
-    let paymentUrl = paymentPageUrl;
-    if (customerId) {
-      paymentUrl += `${separator}customer_id=${customerId}`;
-    }
-
-    res.json({ 
-      url: paymentUrl,
-      customerId: customerId
-    });
-  } catch (error) {
-    console.error('Get hosted payment page error:', error);
-    res.status(500).json({ 
-      error: 'Failed to get payment page URL',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -230,8 +150,9 @@ router.get('/status', authenticate, async (req, res) => {
       package: packageDetails,
       planTier: business.plan_tier,
       usageLimitMinutes: business.usage_limit_minutes,
-      helcimCustomerId: business.helcim_customer_id,
-      helcimSubscriptionId: business.helcim_subscription_id,
+      stripeCustomerId: business.stripe_customer_id,
+      stripeSubscriptionId: business.stripe_subscription_id,
+      stripeSubscriptionStatus: business.stripe_subscription_status,
     });
   } catch (error) {
     console.error('Get subscription status error:', error);
@@ -242,25 +163,34 @@ router.get('/status', authenticate, async (req, res) => {
   }
 });
 
-// Webhook handler for Helcim events
-router.post('/webhook', async (req, res) => {
+// Webhook handler for Stripe events
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
   try {
-    const event = req.body;
-    console.log('[Billing Webhook] Received event:', event.type || event.eventType);
-    
-    // Verify webhook secret if configured
-    if (process.env.HELCIM_WEBHOOK_SECRET) {
-      const signature = req.headers['helcim-signature'] || req.headers['x-helcim-signature'];
-      // TODO: Implement webhook signature verification
-      // For now, we'll trust the webhook if secret is set
+    if (!webhookSecret) {
+      console.warn('[Billing Webhook] STRIPE_WEBHOOK_SECRET not configured, skipping signature verification');
+      // In development, accept events without verification
+      event = req.body;
+    } else {
+      const stripe = (await import('stripe')).default;
+      const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+      event = stripeInstance.webhooks.constructEvent(req.body, sig, webhookSecret);
     }
-    
-    // Handle the webhook event
-    await HelcimService.handleWebhook(event);
-    
+  } catch (err) {
+    console.error('[Billing Webhook] Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    console.log('[Billing Webhook] Received event:', event.type);
+    await StripeService.handleWebhook(event);
     res.json({ received: true });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('[Billing Webhook] Error processing webhook:', error);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });

@@ -237,19 +237,19 @@ export default function NewSetupWizard({ testMode = false }) {
           setSaving(false);
           return;
         } else if (redirectUrl) {
-          // Check if this is a Helcim payment page URL or our success page
-          const isHelcimUrl = redirectUrl.includes('helcim.com') || redirectUrl.includes('myhelcim.com');
+          // Check if this is a Stripe checkout URL or our success page
+          const isStripeUrl = redirectUrl.includes('checkout.stripe.com');
           const isSuccessPage = redirectUrl.includes('/billing/success');
           
-          if (isHelcimUrl) {
-            // Redirect to Helcim payment page
-            console.log('[Setup Wizard] ✅ Redirecting to Helcim payment page:', redirectUrl);
+          if (isStripeUrl) {
+            // Redirect to Stripe checkout page
+            console.log('[Setup Wizard] ✅ Redirecting to Stripe checkout:', redirectUrl);
             window.location.href = redirectUrl;
             return; // Stop execution - user will be redirected
           } else if (isSuccessPage) {
-            // This means payment page URL is not configured, just continue to next step
-            console.log('[Setup Wizard] ⚠️ Payment page not configured, continuing to next step');
-            warning('Payment page not configured. You can complete payment later in billing settings.');
+            // This means payment is not configured, just continue to next step
+            console.log('[Setup Wizard] ⚠️ Payment not configured, continuing to next step');
+            warning('Payment not configured. You can complete payment later in billing settings.');
             setCurrentStep(6);
             setSaving(false);
             return;
