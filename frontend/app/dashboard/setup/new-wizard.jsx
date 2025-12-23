@@ -173,8 +173,22 @@ export default function NewSetupWizard({ testMode = false }) {
   };
 
   const handleNext = async () => {
+    console.log('[Setup Wizard] ========== handleNext CALLED ==========');
+    console.log('[Setup Wizard] handleNext called, currentStep:', currentStep);
+    console.log('[Setup Wizard] formData.step5:', formData.step5);
+    console.log('[Setup Wizard] formData.step5.packageId:', formData.step5.packageId);
+    console.log('[Setup Wizard] testMode:', testMode);
+    console.log('[Setup Wizard] Condition check:', {
+      'currentStep === 5': currentStep === 5,
+      'formData.step5.packageId': !!formData.step5.packageId,
+      '!testMode': !testMode,
+      'all true': currentStep === 5 && formData.step5.packageId && !testMode
+    });
+    
     // Special handling for Step 5 (Package Selection) - redirect to payment if package selected
     if (currentStep === 5 && formData.step5.packageId && !testMode) {
+      console.log('[Setup Wizard] ✅ Step 5 payment flow triggered');
+      alert('DEBUG: Step 5 payment flow triggered! Check console for details.');
       if (!formData.step5.packageId) {
         showError('Please select a package before continuing.');
         return;
@@ -249,10 +263,15 @@ export default function NewSetupWizard({ testMode = false }) {
       }
     }
     
+    console.log('[Setup Wizard] Normal flow - saving step', currentStep);
     // Save current step before moving forward
     const saved = await saveStep(currentStep);
+    console.log('[Setup Wizard] Step saved:', saved);
     if (saved && currentStep < TOTAL_STEPS) {
+      console.log('[Setup Wizard] Moving to next step:', currentStep + 1);
       setCurrentStep(currentStep + 1);
+    } else {
+      console.log('[Setup Wizard] Not moving to next step. saved:', saved, 'currentStep:', currentStep, 'TOTAL_STEPS:', TOTAL_STEPS);
     }
   };
 
