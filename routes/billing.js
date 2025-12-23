@@ -73,60 +73,10 @@ router.post('/checkout', authenticate, async (req, res) => {
       });
     }
     
-    // SOLUTION: Use saved payment methods + API for fixed amounts (user cannot change amount)
-    // If customer has saved payment method, process payment directly via API
-    if (process.env.HELCIM_API_TOKEN) {
-      try {
-        const customer = await HelcimService.getOrCreateCustomer(
-          req.businessId,
-          business.email,
-          business.name,
-          business.phone
-        );
-        
-        const customerId = customer.customerId || customer.id;
-        
-        // Check if customer has saved payment methods
-        const paymentMethods = await HelcimService.getCustomerPaymentMethods(customerId);
-        
-        if (paymentMethods && paymentMethods.length > 0) {
-          // ✅ Customer has saved payment method - process payment via API with FIXED amount
-          console.log('[Billing] Processing payment with saved method (fixed amount)');
-          
-          const paymentResult = await HelcimService.processPaymentWithSavedMethod(
-            customerId,
-            paymentMethods[0].id, // Use first saved payment method
-            pkg.monthly_price,
-            `${pkg.name} - ${pkg.description || ''}`
-          );
-          
-          // Update business with package
-          await Business.update(req.businessId, {
-            package_id: packageId,
-            plan_tier: pkg.name.toLowerCase(),
-            usage_limit_minutes: pkg.minutes_included,
-          });
-          
-          res.json({ 
-            success: true,
-            transactionId: paymentResult.transactionId,
-            amount: pkg.monthly_price.toFixed(2),
-            packageId: packageId,
-            packageName: pkg.name,
-            message: 'Payment processed successfully!',
-            url: successUrl // Redirect to success page
-          });
-          return;
-        }
-      } catch (apiError) {
-        console.warn('[Billing] API payment processing failed:', apiError.message);
-        // Fall through to require payment method first
-      }
-    }
-    
-    // Customer doesn't have saved payment method - redirect to Helcim payment page
-    // The payment page will allow them to add a payment method and complete payment
+    // PRIORITY 1: If payment page URL is configured, use it (simplest and most reliable)
+    console.log('[Billing] Checking for HELCIM_PAYMENT_PAGE_URL:', !!process.env.HELCIM_PAYMENT_PAGE_URL);
     if (process.env.HELCIM_PAYMENT_PAGE_URL) {
+      console.log('[Billing] ✅ Using Helcim payment page URL (priority method)');
       const paymentPageUrl = process.env.HELCIM_PAYMENT_PAGE_URL;
       const amount = pkg.monthly_price.toFixed(2);
       const separator = paymentPageUrl.includes('?') ? '&' : '?';
@@ -167,49 +117,72 @@ router.post('/checkout', authenticate, async (req, res) => {
       });
     }
     
-    // Fallback to API-based subscription (if payment page not configured)
-    try {
-      // Create subscription with Helcim
-      const subscription = await HelcimService.createSubscription(
-        req.businessId,
-        pkg.monthly_price,
-        'monthly',
-        `${pkg.name} - ${pkg.description || ''}`
-      );
-      
-      // Update business with package
-      await Business.update(req.businessId, {
-        package_id: packageId,
-        plan_tier: pkg.name.toLowerCase(),
-        usage_limit_minutes: pkg.minutes_included,
-        helcim_subscription_id: subscription.subscriptionId || subscription.id,
-      });
-      
-      res.json({ 
-        subscriptionId: subscription.subscriptionId || subscription.id,
-        url: successUrl, // Redirect to success page
-        message: 'Subscription created successfully. Redirecting to payment...'
-      });
-    } catch (helcimError) {
-      // If Helcim account is under review or API fails, still update the package locally
-      // This allows the business to use the package while payment is being set up
-      console.error('Helcim subscription creation failed, updating package locally:', helcimError);
-      
-      // Update business with package anyway (payment can be set up later)
-      await Business.update(req.businessId, {
-        package_id: packageId,
-        plan_tier: pkg.name.toLowerCase(),
-        usage_limit_minutes: pkg.minutes_included,
-      });
-      
-      // Return a message indicating package was updated but payment setup needs attention
-      res.status(202).json({ 
-        subscriptionId: null,
-        url: successUrl,
-        message: 'Package updated successfully. Payment processing will be configured once your Helcim account is approved.',
-        warning: 'Helcim account is under review. Package is active but payment processing is pending.'
-      });
+    // PRIORITY 2: If API token is configured, try to use saved payment methods
+    if (process.env.HELCIM_API_TOKEN) {
+      try {
+        console.log('[Billing] Attempting to use saved payment method via API');
+        const customer = await HelcimService.getOrCreateCustomer(
+          req.businessId,
+          business.email,
+          business.name,
+          business.phone
+        );
+        
+        const customerId = customer.customerId || customer.id;
+        
+        // Check if customer has saved payment methods
+        const paymentMethods = await HelcimService.getCustomerPaymentMethods(customerId);
+        
+        if (paymentMethods && paymentMethods.length > 0) {
+          // ✅ Customer has saved payment method - process payment via API with FIXED amount
+          console.log('[Billing] Processing payment with saved method (fixed amount)');
+          
+          const paymentResult = await HelcimService.processPaymentWithSavedMethod(
+            customerId,
+            paymentMethods[0].id, // Use first saved payment method
+            pkg.monthly_price,
+            `${pkg.name} - ${pkg.description || ''}`
+          );
+          
+          // Update business with package
+          await Business.update(req.businessId, {
+            package_id: packageId,
+            plan_tier: pkg.name.toLowerCase(),
+            usage_limit_minutes: pkg.minutes_included,
+          });
+          
+          return res.json({ 
+            success: true,
+            transactionId: paymentResult.transactionId,
+            amount: pkg.monthly_price.toFixed(2),
+            packageId: packageId,
+            packageName: pkg.name,
+            message: 'Payment processed successfully!',
+            url: successUrl // Redirect to success page
+          });
+        }
+      } catch (apiError) {
+        console.warn('[Billing] API payment processing failed:', apiError.message);
+        // Fall through to fallback
+      }
     }
+    
+    // FALLBACK: Update package locally and return success URL (payment can be set up later)
+    console.log('[Billing] No payment method available, updating package locally');
+    await Business.update(req.businessId, {
+      package_id: packageId,
+      plan_tier: pkg.name.toLowerCase(),
+      usage_limit_minutes: pkg.minutes_included,
+    });
+    
+    // Return success URL so user can continue setup
+    return res.json({ 
+      url: successUrl,
+      packageId: packageId,
+      packageName: pkg.name,
+      message: 'Package selected. You can complete payment later in billing settings.',
+      warning: 'Payment processing will be configured once your Helcim account is set up.'
+    });
   } catch (error) {
     console.error('Create checkout error:', error);
     console.error('Error details:', {
