@@ -67,20 +67,21 @@ router.post('/checkout', authenticate, async (req, res) => {
     
     // Check if Helcim payment page URL is configured
     if (!process.env.HELCIM_PAYMENT_PAGE_URL) {
-      // If no payment page URL, just update the package locally and continue
-      console.log('[Billing] ⚠️ HELCIM_PAYMENT_PAGE_URL not configured, updating package locally');
+      // If no payment page URL, just update the package locally and skip payment
+      console.log('[Billing] ⚠️ HELCIM_PAYMENT_PAGE_URL not configured, updating package locally and skipping payment');
       await Business.update(req.businessId, {
         package_id: packageId,
         plan_tier: pkg.name.toLowerCase(),
         usage_limit_minutes: pkg.minutes_included,
       });
       
+      // Return success flag so frontend continues to next step
       return res.json({ 
-        url: successUrl,
+        success: true,
         packageId: packageId,
         packageName: pkg.name,
         message: 'Package selected. Payment can be completed later in billing settings.',
-        warning: 'HELCIM_PAYMENT_PAGE_URL is not configured. Please set it up to enable payment processing.'
+        skipPayment: true
       });
     }
     

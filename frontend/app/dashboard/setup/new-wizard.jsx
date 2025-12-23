@@ -223,10 +223,15 @@ export default function NewSetupWizard({ testMode = false }) {
         console.log('[Setup Wizard] Response success flag:', checkoutRes.data?.success);
         console.log('[Setup Wizard] Response message:', checkoutRes.data?.message);
         
-        if (checkoutRes.data?.success === true) {
-          // Payment already processed successfully (saved payment method used)
-          console.log('[Setup Wizard] Payment already processed, continuing to next step');
-          success('Payment processed successfully! Package activated.');
+        if (checkoutRes.data?.success === true || checkoutRes.data?.skipPayment === true) {
+          // Payment already processed OR payment skipped (not configured)
+          if (checkoutRes.data?.skipPayment) {
+            console.log('[Setup Wizard] Payment skipped (not configured), continuing to next step');
+            warning('Payment not configured. Package selected. You can complete payment later in billing settings.');
+          } else {
+            console.log('[Setup Wizard] Payment already processed, continuing to next step');
+            success('Payment processed successfully! Package activated.');
+          }
           // Continue to next step
           setCurrentStep(6);
           setSaving(false);
