@@ -186,7 +186,16 @@ export default function NewSetupWizard({ testMode = false }) {
     });
     
     // Special handling for Step 5 (Package Selection) - redirect to payment if package selected
-    if (currentStep === 5 && formData.step5.packageId && !testMode) {
+    // In test mode, we'll still show the payment flow but log that it's test mode
+    if (currentStep === 5 && formData.step5.packageId) {
+      if (testMode) {
+        console.log('[Setup Wizard] ⚠️  Step 5 payment flow triggered in TEST MODE - payment will be skipped');
+        alert('TEST MODE: Payment flow would trigger here, but payment is skipped in test mode.\n\nIn production, this would redirect to Helcim payment page.');
+        // Continue to next step in test mode
+        setCurrentStep(6);
+        return;
+      }
+      
       console.log('[Setup Wizard] ✅ Step 5 payment flow triggered');
       alert('DEBUG: Step 5 payment flow triggered! Check console for details.');
       if (!formData.step5.packageId) {
