@@ -148,6 +148,15 @@ router.post('/checkout', authenticate, async (req, res) => {
       // Build payment page URL with amount and customer info
       const paymentUrlWithAmount = `${paymentPageUrl}${separator}amount=${amount}&package_id=${packageId}${customerId ? `&customer_id=${customerId}` : ''}`;
       
+      console.log('[Billing] Returning payment page URL:', paymentUrlWithAmount);
+      console.log('[Billing] Response will include:', {
+        url: paymentUrlWithAmount,
+        amount: amount,
+        packageId: packageId,
+        packageName: pkg.name,
+        customerId: customerId
+      });
+      
       return res.json({
         url: paymentUrlWithAmount,
         amount: amount,

@@ -182,7 +182,11 @@ export default function NewSetupWizard({ testMode = false }) {
       
       setSaving(true);
       try {
+        console.log('[Setup Wizard] Creating checkout for package:', formData.step5.packageId);
         const checkoutRes = await billingAPI.createCheckout(formData.step5.packageId);
+        
+        console.log('[Setup Wizard] Full checkout response:', checkoutRes);
+        console.log('[Setup Wizard] Checkout response data:', checkoutRes.data);
         
         // Handle different response formats from billing API
         // The API returns { url: ... } for both payment pages and success pages
@@ -190,10 +194,12 @@ export default function NewSetupWizard({ testMode = false }) {
                            checkoutRes.data?.redirect_url || 
                            checkoutRes.data?.paymentUrl;
         
-        console.log('[Setup Wizard] Checkout response:', checkoutRes.data);
+        console.log('[Setup Wizard] Extracted redirect URL:', redirectUrl);
+        console.log('[Setup Wizard] Response success flag:', checkoutRes.data?.success);
         
         if (checkoutRes.data?.success === true) {
           // Payment already processed successfully (saved payment method used)
+          console.log('[Setup Wizard] Payment already processed, continuing to next step');
           success('Payment processed successfully! Package activated.');
           // Continue to next step
           setCurrentStep(6);
@@ -201,15 +207,18 @@ export default function NewSetupWizard({ testMode = false }) {
           return;
         } else if (redirectUrl) {
           // Redirect to payment page or success page
-          console.log('[Setup Wizard] Redirecting to payment:', redirectUrl);
-          window.location.href = redirectUrl;
+          console.log('[Setup Wizard] ✅ Found payment URL, redirecting to:', redirectUrl);
+          // Use setTimeout to ensure state updates complete before redirect
+          setTimeout(() => {
+            window.location.href = redirectUrl;
+          }, 100);
           return; // Stop execution - user will be redirected
         } else {
           // If no URL and no success, show error but allow continuing
           const errorMsg = checkoutRes.data?.error || 
                           checkoutRes.data?.message || 
                           'Failed to initiate payment. You can complete payment later in billing settings.';
-          console.error('[Setup Wizard] No payment URL returned:', checkoutRes.data);
+          console.error('[Setup Wizard] ❌ No payment URL returned. Full response:', JSON.stringify(checkoutRes.data, null, 2));
           showError(errorMsg);
           // Continue to next step even if payment fails
           setCurrentStep(6);
