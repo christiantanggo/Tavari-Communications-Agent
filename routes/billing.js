@@ -168,7 +168,10 @@ router.post('/checkout', authenticate, async (req, res) => {
     }
     
     // FALLBACK: Update package locally and return success URL (payment can be set up later)
-    console.log('[Billing] No payment method available, updating package locally');
+    console.log('[Billing] ⚠️ No payment method available, updating package locally');
+    console.log('[Billing] HELCIM_PAYMENT_PAGE_URL is:', process.env.HELCIM_PAYMENT_PAGE_URL ? 'SET' : 'NOT SET');
+    console.log('[Billing] HELCIM_API_TOKEN is:', process.env.HELCIM_API_TOKEN ? 'SET' : 'NOT SET');
+    
     await Business.update(req.businessId, {
       package_id: packageId,
       plan_tier: pkg.name.toLowerCase(),
@@ -176,6 +179,8 @@ router.post('/checkout', authenticate, async (req, res) => {
     });
     
     // Return success URL so user can continue setup
+    // IMPORTANT: Always return a URL so frontend can redirect
+    console.log('[Billing] Returning fallback response with success URL:', successUrl);
     return res.json({ 
       url: successUrl,
       packageId: packageId,
