@@ -6,6 +6,18 @@ import { PricingPackage } from '../models/PricingPackage.js';
 
 const router = express.Router();
 
+// Check if Stripe is in test mode (public endpoint for setup wizard)
+router.get('/test-mode', async (req, res) => {
+  try {
+    const { isStripeTestMode } = await import('../services/stripe.js');
+    const testMode = isStripeTestMode();
+    res.json({ testMode });
+  } catch (error) {
+    console.error('Get Stripe test mode error:', error);
+    res.status(500).json({ error: 'Failed to check Stripe mode' });
+  }
+});
+
 // Get available packages (public packages for customers)
 router.get('/packages', authenticate, async (req, res) => {
   try {
@@ -163,6 +175,56 @@ router.get('/status', authenticate, async (req, res) => {
   }
 });
 
+// Verify Stripe checkout session
+router.get('/verify-session', authenticate, async (req, res) => {
+  try {
+    const sessionId = req.query.session_id;
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Session ID is required' });
+    }
+
+    const { getStripeInstance } = await import('../services/stripe.js');
+    const stripeInstance = getStripeInstance();
+    
+    // Retrieve the checkout session
+    const session = await stripeInstance.checkout.sessions.retrieve(sessionId);
+    
+    // Verify the session belongs to this business
+    const businessId = session.metadata?.business_id;
+    if (businessId !== req.businessId) {
+      return res.status(403).json({ error: 'Session does not belong to this business' });
+    }
+
+    // Check if payment was successful
+    if (session.payment_status === 'paid' && session.status === 'complete') {
+      // The webhook should have already updated the subscription, but verify it's set
+      const business = await Business.findById(req.businessId);
+      
+      return res.json({
+        success: true,
+        sessionId: session.id,
+        paymentStatus: session.payment_status,
+        subscriptionId: business.stripe_subscription_id,
+        packageId: business.package_id,
+      });
+    }
+
+    return res.json({
+      success: false,
+      sessionId: session.id,
+      paymentStatus: session.payment_status,
+      status: session.status,
+    });
+  } catch (error) {
+    console.error('Verify session error:', error);
+    res.status(500).json({ 
+      error: 'Failed to verify session',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // Webhook handler for Stripe events
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -176,8 +238,9 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       // In development, accept events without verification
       event = req.body;
     } else {
-      const stripe = (await import('stripe')).default;
-      const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+      // Use the same Stripe instance logic as the service
+      const { getStripeInstance } = await import('../services/stripe.js');
+      const stripeInstance = getStripeInstance();
       event = stripeInstance.webhooks.constructEvent(req.body, sig, webhookSecret);
     }
   } catch (err) {

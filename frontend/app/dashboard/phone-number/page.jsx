@@ -93,7 +93,7 @@ function PhoneNumberPage() {
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <h2 className="text-2xl font-bold mb-4 text-gray-900">Choose Your Tavari Phone Number</h2>
             <p className="text-gray-600 mb-6">
-              Select a phone number for your AI phone agent. This number will receive forwarded calls from your business phone.
+              Select a toll-free phone number for your AI phone agent. Your first phone number is included in your subscription. Additional numbers beyond the first will be charged separately.
             </p>
 
             {error && (
@@ -144,7 +144,7 @@ function PhoneNumberPage() {
           <div className="bg-gray-50 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-gray-900 mb-2">What happens next?</h3>
             <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
-              <li>Your selected phone number will be purchased and configured</li>
+              <li>Your selected toll-free phone number will be provisioned and configured (included in subscription)</li>
               <li>The AI assistant will be linked to this number</li>
               <li>You'll receive your Tavari phone number to forward calls to</li>
               <li>The setup checklist will be updated automatically</li>

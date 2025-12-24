@@ -160,4 +160,30 @@ export class Business {
     if (error && error.code !== 'PGRST116') throw error;
     return data && data.length > 0 ? data[0] : null;
   }
+
+  static async findByStripeCustomerId(customerId) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('businesses')
+        .select('*')
+        .eq('stripe_customer_id', customerId)
+        .is('deleted_at', null)
+        .single();
+      
+      if (error) {
+        if (error.message && (error.message.includes('column') || error.message.includes('does not exist'))) {
+          console.warn('⚠️ stripe_customer_id column missing. Run migrations/add_stripe_fields.sql');
+          return null;
+        }
+        if (error.code !== 'PGRST116') throw error;
+      }
+      return data;
+    } catch (err) {
+      if (err.message && (err.message.includes('column') || err.message.includes('does not exist'))) {
+        console.warn('⚠️ stripe_customer_id column missing. Run migrations/add_stripe_fields.sql');
+        return null;
+      }
+      throw err;
+    }
+  }
 }

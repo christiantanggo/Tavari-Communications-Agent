@@ -74,4 +74,27 @@ export class User {
     if (error) throw error;
     return data;
   }
+
+  static async update(id, data) {
+    const updateData = { ...data };
+    
+    // Remove undefined values
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] === undefined) {
+        delete updateData[key];
+      }
+    });
+    
+    // Only add updated_at if the column exists (check by trying to update without it first)
+    // If that fails, we'll know updated_at doesn't exist
+    const { data: user, error } = await supabaseClient
+      .from('users')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return user;
+  }
 }

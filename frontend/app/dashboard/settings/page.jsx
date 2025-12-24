@@ -30,6 +30,22 @@ function SettingsPage() {
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState('');
   const [purchaseNew, setPurchaseNew] = useState(false);
   
+  // Login Credentials state
+  const [users, setUsers] = useState([]);
+  const [currentEmail, setCurrentEmail] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({
+    email: '',
+    password: '',
+    first_name: '',
+    last_name: '',
+    role: 'user',
+  });
+  
   // Business info state
   const [businessInfo, setBusinessInfo] = useState({
     name: '',
@@ -261,6 +277,20 @@ function SettingsPage() {
             };
         console.log('[Settings Load] Setting voiceSettings:', loadedVoiceSettings);
         setVoiceSettings(loadedVoiceSettings);
+      }
+      
+      // Load users for Login Credentials tab
+      if (userRes.data?.user) {
+        setCurrentEmail(userRes.data.user.email);
+        setNewEmail(userRes.data.user.email);
+        
+        // Load all users for the business
+        try {
+          const usersResponse = await authAPI.getUsers();
+          setUsers(usersResponse.data.users || []);
+        } catch (error) {
+          console.error('Failed to load users:', error);
+        }
       }
     } catch (error) {
       console.error('Failed to load settings data:', error);
@@ -576,6 +606,7 @@ function SettingsPage() {
     { id: 'faqs', label: 'FAQs' },
     { id: 'ai', label: 'AI Settings' },
     { id: 'notifications', label: 'Notifications' },
+    { id: 'credentials', label: 'Login Credentials' },
   ];
 
   if (loading) {
@@ -646,43 +677,12 @@ function SettingsPage() {
                   <div className="text-center py-8">Loading available numbers...</div>
                 ) : (
                   <>
-                    {/* Unassigned Numbers (Free) */}
-                    {availableNumbers.unassigned && availableNumbers.unassigned.length > 0 && (
-                      <div className="mb-6">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available Numbers (Already Purchased - Free)</h4>
-                        <div className="space-y-2 max-h-48 overflow-y-auto">
-                          {availableNumbers.unassigned.map((num, idx) => (
-                            <label
-                              key={idx}
-                              className={`flex items-center p-3 border rounded-md cursor-pointer hover:bg-gray-50 ${
-                                selectedPhoneNumber === num.phone_number ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name="phoneNumber"
-                                value={num.phone_number}
-                                checked={selectedPhoneNumber === num.phone_number}
-                                onChange={(e) => {
-                                  setSelectedPhoneNumber(e.target.value);
-                                  setPurchaseNew(false);
-                                }}
-                                className="mr-3"
-                              />
-                              <div className="flex-1">
-                                <div className="font-medium text-gray-900">{num.phone_number}</div>
-                                <div className="text-xs text-gray-500">No additional cost</div>
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
+                    {/* Note: Already-purchased numbers are automatically assigned during signup, not shown here */}
+                    
                     {/* Available to Purchase */}
                     {availableNumbers.available && availableNumbers.available.length > 0 && (
                       <div className="mb-6">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available to Purchase</h4>
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available Toll-Free Numbers (First Number Included in Subscription)</h4>
                         <div className="space-y-2 max-h-48 overflow-y-auto">
                           {availableNumbers.available.map((num, idx) => (
                             <label
@@ -704,8 +704,8 @@ function SettingsPage() {
                               />
                               <div className="flex-1">
                                 <div className="font-medium text-gray-900">{num.phone_number}</div>
-                                <div className="text-xs text-gray-500">
-                                  ${(parseFloat(num.cost) || 0).toFixed(2)} one-time purchase
+                                <div className="text-xs text-green-600 font-medium">
+                                  Included in subscription
                                 </div>
                               </div>
                             </label>
@@ -1237,6 +1237,280 @@ function SettingsPage() {
                         </div>
                       </div>
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* Login Credentials Tab */}
+              {activeTab === 'credentials' && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-bold text-gray-900 mb-4">Login Credentials</h2>
+                  
+                  {/* Change Email */}
+                  <div className="border-b border-gray-200 pb-6">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">Change Email</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Current Email</label>
+                        <input
+                          type="email"
+                          value={currentEmail}
+                          disabled
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600 cursor-not-allowed"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">This is your current login email</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">New Email</label>
+                        <input
+                          type="email"
+                          value={newEmail}
+                          onChange={(e) => setNewEmail(e.target.value)}
+                          placeholder="Enter your new email address"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        />
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!newEmail || newEmail.trim() === '') {
+                            showError('Please enter a new email address');
+                            return;
+                          }
+                          if (newEmail === currentEmail) {
+                            showError('New email must be different from your current email');
+                            return;
+                          }
+                          try {
+                            await authAPI.updateEmail(newEmail);
+                            success('Email updated successfully');
+                            setCurrentEmail(newEmail);
+                            // Reload user data
+                            const userRes = await authAPI.getMe();
+                            if (userRes.data?.user) {
+                              setCurrentEmail(userRes.data.user.email);
+                              setNewEmail(userRes.data.user.email);
+                            }
+                          } catch (error) {
+                            showError(error.response?.data?.error || 'Failed to update email');
+                          }
+                        }}
+                        disabled={!newEmail || newEmail === currentEmail}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        Update Email
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Change Password */}
+                  <div className="border-b border-gray-200 pb-6">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">Change Password</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+                        <input
+                          type="password"
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                        <input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Must be at least 8 characters</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                        <input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        />
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!currentPassword || !newPassword) {
+                            showError('Please fill in all password fields');
+                            return;
+                          }
+                          if (newPassword.length < 8) {
+                            showError('Password must be at least 8 characters');
+                            return;
+                          }
+                          if (newPassword !== confirmPassword) {
+                            showError('New passwords do not match');
+                            return;
+                          }
+                          try {
+                            await authAPI.updatePassword(currentPassword, newPassword);
+                            success('Password updated successfully');
+                            setCurrentPassword('');
+                            setNewPassword('');
+                            setConfirmPassword('');
+                          } catch (error) {
+                            showError(error.response?.data?.error || 'Failed to update password');
+                          }
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                      >
+                        Update Password
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Additional Users (only for owners) */}
+                  {user?.role === 'owner' && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-800">Additional Users</h3>
+                        <button
+                          onClick={() => {
+                            setShowAddUser(true);
+                            setNewUser({ email: '', password: '', first_name: '', last_name: '', role: 'user' });
+                          }}
+                          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium"
+                        >
+                          Add User
+                        </button>
+                      </div>
+                      
+                      {showAddUser && (
+                        <div className="mb-6 p-4 border border-gray-300 rounded-lg bg-gray-50">
+                          <h4 className="font-semibold text-gray-800 mb-3">Add New User</h4>
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                                <input
+                                  type="text"
+                                  value={newUser.first_name}
+                                  onChange={(e) => setNewUser({ ...newUser, first_name: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                                <input
+                                  type="text"
+                                  value={newUser.last_name}
+                                  onChange={(e) => setNewUser({ ...newUser, last_name: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                              <input
+                                type="email"
+                                value={newUser.email}
+                                onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+                              <input
+                                type="password"
+                                value={newUser.password}
+                                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                                required
+                              />
+                              <p className="text-xs text-gray-500 mt-1">Must be at least 8 characters</p>
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                              <select
+                                value={newUser.role}
+                                onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                              >
+                                <option value="user">User</option>
+                                <option value="manager">Manager</option>
+                              </select>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={async () => {
+                                  if (!newUser.email || !newUser.password) {
+                                    showError('Email and password are required');
+                                    return;
+                                  }
+                                  if (newUser.password.length < 8) {
+                                    showError('Password must be at least 8 characters');
+                                    return;
+                                  }
+                                  try {
+                                    const response = await authAPI.createUser(newUser);
+                                    success('User created successfully');
+                                    setUsers([...users, response.data.user]);
+                                    setShowAddUser(false);
+                                    setNewUser({ email: '', password: '', first_name: '', last_name: '', role: 'user' });
+                                  } catch (error) {
+                                    showError(error.response?.data?.error || 'Failed to create user');
+                                  }
+                                }}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                              >
+                                Create User
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowAddUser(false);
+                                  setNewUser({ email: '', password: '', first_name: '', last_name: '', role: 'user' });
+                                }}
+                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="space-y-3">
+                        {users.map((u) => (
+                          <div key={u.id} className="p-4 border border-gray-300 rounded-lg flex items-center justify-between">
+                            <div>
+                              <div className="font-medium text-gray-900">
+                                {u.first_name} {u.last_name} {u.first_name || u.last_name ? '' : '(No name)'}
+                              </div>
+                              <div className="text-sm text-gray-600">{u.email}</div>
+                              <div className="text-xs text-gray-500 capitalize">{u.role}</div>
+                            </div>
+                            {u.id !== user.id && (
+                              <button
+                                onClick={async () => {
+                                  if (confirm('Are you sure you want to delete this user?')) {
+                                    try {
+                                      await authAPI.deleteUser(u.id);
+                                      success('User deleted successfully');
+                                      setUsers(users.filter(us => us.id !== u.id));
+                                    } catch (error) {
+                                      showError(error.response?.data?.error || 'Failed to delete user');
+                                    }
+                                  }
+                                }}
+                                className="px-3 py-1 text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        {users.length === 0 && (
+                          <p className="text-gray-500 text-sm">No additional users. Click "Add User" to create one.</p>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               )}

@@ -77,6 +77,12 @@ export const authAPI = {
   login: (data) => api.post('/auth/login', data),
   logout: () => api.post('/auth/logout'),
   getMe: () => api.get('/auth/me'),
+  updateEmail: (email) => api.put('/auth/me/email', { email }),
+  updatePassword: (currentPassword, newPassword) => api.put('/auth/me/password', { currentPassword, newPassword }),
+  getUsers: () => api.get('/auth/users'),
+  createUser: (data) => api.post('/auth/users', data),
+  updateUser: (userId, data) => api.put(`/auth/users/${userId}`, data),
+  deleteUser: (userId) => api.delete(`/auth/users/${userId}`),
 };
 
 // Agents API

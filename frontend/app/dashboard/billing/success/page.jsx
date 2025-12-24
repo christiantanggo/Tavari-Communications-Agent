@@ -15,32 +15,65 @@ function BillingSuccessContent() {
   const fromSetup = searchParams.get('from_setup') === 'true';
 
   useEffect(() => {
-    // If coming from setup wizard, redirect back to setup wizard
-    if (fromSetup && packageId) {
-      const timer = setTimeout(() => {
-        router.push('/dashboard/setup');
-      }, 2000);
-      setLoading(false);
-      return () => clearTimeout(timer);
-    }
+    const verifySession = async () => {
+      // If coming from setup wizard without session_id, just redirect to step 6
+      if (fromSetup && packageId && !sessionId) {
+        const timer = setTimeout(() => {
+          router.push('/dashboard/setup?step=6&payment_completed=true');
+        }, 2000);
+        setLoading(false);
+        return () => clearTimeout(timer);
+      }
 
-    // Legacy flow: require session_id
-    if (!sessionId) {
-      setError('No session ID found');
-      setLoading(false);
-      return;
-    }
+      // If we have a session_id, verify it
+      if (sessionId) {
+        try {
+          const { billingAPI } = await import('@/lib/api');
+          const response = await billingAPI.verifyStripeSession(sessionId);
+          
+          if (response.data.success) {
+            console.log('[Billing Success] Session verified:', response.data);
+            
+            // If coming from setup wizard, redirect back to setup at step 6
+            if (fromSetup) {
+              const timer = setTimeout(() => {
+                router.push('/dashboard/setup?step=6&payment_completed=true');
+              }, 2000);
+              setLoading(false);
+              return () => clearTimeout(timer);
+            }
+            
+            // Otherwise redirect to billing page
+            const timer = setTimeout(() => {
+              router.push('/dashboard/billing');
+            }, 3000);
+            setLoading(false);
+            return () => clearTimeout(timer);
+          } else {
+            setError('Payment verification failed. Please contact support if payment was processed.');
+            setLoading(false);
+          }
+        } catch (err) {
+          console.error('[Billing Success] Error verifying session:', err);
+          // Still redirect after delay even if verification fails (webhook may have processed it)
+          const timer = setTimeout(() => {
+            if (fromSetup) {
+              router.push('/dashboard/setup?step=6&payment_completed=true');
+            } else {
+              router.push('/dashboard/billing');
+            }
+          }, 3000);
+          setLoading(false);
+          return () => clearTimeout(timer);
+        }
+      } else {
+        // No session_id - might be legacy flow or error
+        setError('No session ID found');
+        setLoading(false);
+      }
+    };
 
-    // Verify the checkout session was successful
-    // The webhook should have already updated the subscription
-    // Just redirect after a short delay
-    const timer = setTimeout(() => {
-      router.push('/dashboard/billing');
-    }, 3000);
-
-    setLoading(false);
-
-    return () => clearTimeout(timer);
+    verifySession();
   }, [sessionId, packageId, fromSetup, router]);
 
   if (loading) {

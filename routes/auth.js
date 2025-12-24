@@ -4,6 +4,7 @@ import { User } from '../models/User.js';
 import { AIAgent } from '../models/AIAgent.js';
 import { hashPassword, comparePassword, generateToken } from '../utils/auth.js';
 import { authenticate } from '../middleware/auth.js';
+import { supabaseClient } from '../config/database.js';
 
 const router = express.Router();
 
@@ -527,6 +528,259 @@ router.get('/me', authenticate, async (req, res) => {
 // Logout (client-side token removal, but we can track it)
 router.post('/logout', authenticate, (req, res) => {
   res.json({ message: 'Logged out successfully' });
+});
+
+// Update current user's email
+router.put('/me/email', authenticate, async (req, res) => {
+  try {
+    const { email } = req.body;
+    const userId = req.user.id;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+    
+    // Check if email is already taken by another user
+    const existingUser = await User.findByEmail(email);
+    if (existingUser && existingUser.id !== userId) {
+      return res.status(400).json({ error: 'Email is already in use' });
+    }
+    
+    // Update user email directly using Supabase (avoiding updated_at if column doesn't exist)
+    const { data: updatedUser, error: updateError } = await supabaseClient
+      .from('users')
+      .update({ email })
+      .eq('id', userId)
+      .select()
+      .single();
+    
+    if (updateError) {
+      console.error('[Update Email] Database error:', updateError);
+      throw updateError;
+    }
+    
+    res.json({ success: true, message: 'Email updated successfully' });
+  } catch (error) {
+    console.error('[Update Email] Error:', error);
+    console.error('[Update Email] Error details:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    res.status(500).json({ 
+      error: 'Failed to update email',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Update current user's password
+router.put('/me/password', authenticate, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+    
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current password and new password are required' });
+    }
+    
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+    
+    // Get current user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Verify current password
+    const isValid = await comparePassword(currentPassword, user.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    
+    // Hash new password
+    const password_hash = await hashPassword(newPassword);
+    
+    // Update password directly using Supabase
+    const { error: updateError } = await supabaseClient
+      .from('users')
+      .update({ password_hash })
+      .eq('id', userId);
+    
+    if (updateError) {
+      console.error('[Update Password] Database error:', updateError);
+      throw updateError;
+    }
+    
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('[Update Password] Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to update password',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get all users for current business
+router.get('/users', authenticate, async (req, res) => {
+  try {
+    const users = await User.findByBusinessId(req.businessId);
+    
+    // Remove password_hash from response
+    const safeUsers = users.map(user => {
+      const { password_hash, ...safeUser } = user;
+      return safeUser;
+    });
+    
+    res.json({ users: safeUsers });
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ error: 'Failed to get users' });
+  }
+});
+
+// Create additional user (only for owners)
+router.post('/users', authenticate, async (req, res) => {
+  try {
+    // Check if current user is owner
+    const currentUser = req.user;
+    if (currentUser.role !== 'owner') {
+      return res.status(403).json({ error: 'Only owners can create additional users' });
+    }
+    
+    const { email, password, first_name, last_name, role = 'user' } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    
+    // Check if email is already taken
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email is already in use' });
+    }
+    
+    // Hash password
+    const password_hash = await hashPassword(password);
+    
+    // Create user
+    const user = await User.create({
+      business_id: req.businessId,
+      email,
+      password_hash,
+      first_name: first_name || '',
+      last_name: last_name || '',
+      role: role === 'owner' ? 'user' : role, // Prevent creating another owner
+    });
+    
+    // Remove password_hash from response
+    const { password_hash: _, ...safeUser } = user;
+    
+    res.json({ success: true, user: safeUser });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// Update user (only for owners, or users updating themselves)
+router.put('/users/:userId', authenticate, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUser = req.user;
+    const currentUserId = req.user.id;
+    
+    // Users can only update themselves unless they're owners
+    if (currentUser.role !== 'owner' && userId !== currentUserId) {
+      return res.status(403).json({ error: 'You can only update your own account' });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user || user.business_id !== req.businessId) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const { email, password, first_name, last_name, role } = req.body;
+    const updateData = {};
+    
+    if (email && email !== user.email) {
+      // Check if email is already taken
+      const existingUser = await User.findByEmail(email);
+      if (existingUser && existingUser.id !== userId) {
+        return res.status(400).json({ error: 'Email is already in use' });
+      }
+      updateData.email = email;
+    }
+    
+    if (password) {
+      if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters' });
+      }
+      updateData.password_hash = await hashPassword(password);
+    }
+    
+    if (first_name !== undefined) updateData.first_name = first_name;
+    if (last_name !== undefined) updateData.last_name = last_name;
+    
+    // Only owners can change roles, and can't change to owner
+    if (currentUser.role === 'owner' && role && role !== 'owner') {
+      updateData.role = role;
+    }
+    
+    const updatedUser = await User.update(userId, updateData);
+    
+    // Remove password_hash from response
+    const { password_hash: _, ...safeUser } = updatedUser;
+    
+    res.json({ success: true, user: safeUser });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+// Delete user (only for owners)
+router.delete('/users/:userId', authenticate, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUser = req.user;
+    const currentUserId = req.user.id;
+    
+    if (currentUser.role !== 'owner') {
+      return res.status(403).json({ error: 'Only owners can delete users' });
+    }
+    
+    if (userId === currentUserId) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user || user.business_id !== req.businessId) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Soft delete
+    await User.update(userId, { deleted_at: new Date().toISOString() });
+    
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
 });
 
 export default router;

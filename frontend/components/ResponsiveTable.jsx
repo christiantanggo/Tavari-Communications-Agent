@@ -67,3 +67,6 @@ export default function ResponsiveTable({ columns, data, keyField = 'id', emptyM
 
 
 
+
+
+

@@ -11,15 +11,12 @@ const countries = [
   { code: 'MX', name: 'Mexico' },
 ];
 
-const phoneTypes = [
-  { value: 'local', label: 'Local' },
-  { value: 'toll-free', label: 'Toll-Free' },
-  { value: 'mobile', label: 'Mobile' },
-];
+// Only toll-free numbers are available (included in subscription)
+// Additional numbers beyond the first one will be charged separately
 
 export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, countryCode: initialCountryCode = 'US', areaCode: initialAreaCode = null }) {
   const [countryCode, setCountryCode] = useState(initialCountryCode);
-  const [phoneType, setPhoneType] = useState('toll-free');
+  const phoneType = 'toll-free'; // Always use toll-free numbers
   const [phoneNumberSearch, setPhoneNumberSearch] = useState('');
   const [searchMode, setSearchMode] = useState('browse'); // 'browse' or 'search'
   const [locality, setLocality] = useState(''); // City/Region
@@ -27,7 +24,6 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
   const [areaCode, setAreaCode] = useState(initialAreaCode || ''); // Area Code (pre-filled from business phone if provided)
   const [availableNumbers, setAvailableNumbers] = useState([]);
   const [filteredNumbers, setFilteredNumbers] = useState([]);
-  const [sortBy, setSortBy] = useState('none'); // 'none', 'price'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -39,21 +35,10 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
     }
   }, [countryCode, phoneType, searchMode, areaCode]);
 
-  // Filter and sort numbers when they change or sort option changes
+  // Filter numbers when they change
   useEffect(() => {
-    let filtered = [...availableNumbers];
-    
-    // Apply sorting
-    if (sortBy === 'price') {
-      filtered.sort((a, b) => {
-        const priceA = a.phone_price || 0;
-        const priceB = b.phone_price || 0;
-        return priceA - priceB;
-      });
-    }
-    
-    setFilteredNumbers(filtered);
-  }, [availableNumbers, sortBy]);
+    setFilteredNumbers([...availableNumbers]);
+  }, [availableNumbers]);
 
   const searchNumbers = async () => {
     setLoading(true);
@@ -94,7 +79,7 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
         if (searchMode === 'search') {
           setError(`No phone numbers found matching "${phoneNumberSearch}". Try a different number or browse available numbers.`);
         } else {
-          setError(`No ${phoneType} numbers available for ${countries.find(c => c.code === countryCode)?.name || countryCode}.`);
+          setError(`No toll-free numbers available for ${countries.find(c => c.code === countryCode)?.name || countryCode}.`);
         }
         setShowManualEntry(true);
       } else {
@@ -205,24 +190,6 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
                 ))}
               </select>
             </div>
-            <div>
-              <label htmlFor="phoneType" className="block text-sm font-medium text-gray-700 mb-1">
-                Type:
-              </label>
-              <select
-                id="phoneType"
-                value={phoneType}
-                onChange={(e) => setPhoneType(e.target.value)}
-                className="mt-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
-                disabled={loading}
-              >
-                {phoneTypes.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
-            </div>
             <div className="flex items-end">
               <button
                 onClick={searchNumbers}
@@ -314,23 +281,11 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
             </div>
           </div>
           
-          {/* Sort Options */}
+          {/* Number Count */}
           {availableNumbers.length > 0 && (
             <div className="flex items-center space-x-4">
-              <label htmlFor="sortBy" className="block text-sm font-medium text-gray-700">
-                Sort by:
-              </label>
-              <select
-                id="sortBy"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900 bg-white"
-              >
-                <option value="none">No sorting</option>
-                <option value="price">Price (Low to High)</option>
-              </select>
               <span className="text-sm text-gray-600">
-                Showing {filteredNumbers.length} number{filteredNumbers.length !== 1 ? 's' : ''}
+                Showing {filteredNumbers.length} toll-free number{filteredNumbers.length !== 1 ? 's' : ''} (included in your subscription)
               </span>
             </div>
           )}
@@ -356,8 +311,8 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
               }`}
             >
               <p className="text-lg font-semibold text-gray-900">{number.phone_number}</p>
-              <p className="text-sm text-gray-600">
-                {number.phone_price ? `$${number.phone_price} / month` : 'Price N/A'}
+              <p className="text-sm text-green-600 font-medium">
+                Included in subscription
               </p>
               <p className="text-xs text-gray-500">
                 {number.locality && number.administrative_area 

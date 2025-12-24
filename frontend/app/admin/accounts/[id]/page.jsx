@@ -611,7 +611,7 @@ function AdminAccountDetailPage() {
                     {/* Unassigned Numbers (Free) */}
                     {availableNumbers.unassigned && availableNumbers.unassigned.length > 0 && (
                       <div className="mb-6">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available Numbers (Already Purchased - Free)</h4>
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available Numbers (Already Purchased - Included in Subscription)</h4>
                         <div className="space-y-2 max-h-48 overflow-y-auto">
                           {availableNumbers.unassigned.map((num, idx) => (
                             <label
@@ -633,7 +633,7 @@ function AdminAccountDetailPage() {
                               />
                               <div className="flex-1">
                                 <div className="font-medium text-gray-900">{num.phone_number}</div>
-                                <div className="text-xs text-gray-500">No additional cost</div>
+                                <div className="text-xs text-green-600 font-medium">Included in subscription</div>
                               </div>
                             </label>
                           ))}
@@ -644,7 +644,7 @@ function AdminAccountDetailPage() {
                     {/* Available to Purchase */}
                     {availableNumbers.available && availableNumbers.available.length > 0 && (
                       <div className="mb-6">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available to Purchase</h4>
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Available Toll-Free Numbers (First Number Included in Subscription)</h4>
                         <div className="space-y-2 max-h-48 overflow-y-auto">
                           {availableNumbers.available.map((num, idx) => (
                             <label
@@ -666,8 +666,8 @@ function AdminAccountDetailPage() {
                               />
                               <div className="flex-1">
                                 <div className="font-medium text-gray-900">{num.phone_number}</div>
-                                <div className="text-xs text-gray-500">
-                                  ${(parseFloat(num.cost) || 0).toFixed(2)} one-time purchase
+                                <div className="text-xs text-green-600 font-medium">
+                                  Included in subscription
                                 </div>
                               </div>
                             </label>

@@ -17,11 +17,11 @@
  * Each step has a skip button with warning
  */
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
-import { agentsAPI, authAPI, telnyxPhoneNumbersAPI, billingAPI } from '@/lib/api';
+import { agentsAPI, authAPI, telnyxPhoneNumbersAPI, billingAPI, phoneNumbersAPI } from '@/lib/api';
 import api from '@/lib/api';
 import TelnyxPhoneNumberSelector from '@/components/TelnyxPhoneNumberSelector';
 import TimeInput12Hour from '@/components/TimeInput12Hour';
@@ -29,12 +29,179 @@ import { useToast } from '@/components/ToastProvider';
 
 const TOTAL_STEPS = 9;
 
-export default function NewSetupWizard({ testMode = false }) {
+// Step 6: Phone Number Component with Auto-Assignment
+function Step6PhoneNumber({ 
+  business, 
+  selectedPhoneNumber, 
+  setSelectedPhoneNumber, 
+  phoneNumberCountry, 
+  updateFormData, 
+  success, 
+  warning,
+  setBusiness 
+}) {
+  const [autoAssigning, setAutoAssigning] = useState(true);
+  const [autoAssigned, setAutoAssigned] = useState(false);
+  const [showSelector, setShowSelector] = useState(false);
+
+  useEffect(() => {
+    const tryAutoAssign = async () => {
+      // Wait for business data to load
+      if (business === null) {
+        return; // Still loading
+      }
+
+      // Check if business already has a phone number
+      if (business?.vapi_phone_number || business?.telnyx_number) {
+        const existingNumber = business.vapi_phone_number || business.telnyx_number;
+        setSelectedPhoneNumber(existingNumber);
+        updateFormData('step6', 'phoneNumber', existingNumber);
+        setAutoAssigned(true); // Show as assigned
+        setShowSelector(false);
+        setAutoAssigning(false);
+        return;
+      }
+
+      // Try to auto-assign an unassigned number
+      try {
+        console.log('[Step 6] Attempting to auto-assign unassigned phone number...');
+        const response = await phoneNumbersAPI.autoAssign();
+        
+        if (response.data.assigned) {
+          console.log('[Step 6] ✅ Auto-assigned phone number:', response.data.phone_number);
+          setSelectedPhoneNumber(response.data.phone_number);
+          updateFormData('step6', 'phoneNumber', response.data.phone_number);
+          setAutoAssigned(true);
+          setShowSelector(false);
+          
+          // Update business state
+          if (setBusiness) {
+            setBusiness(prev => ({
+              ...prev,
+              vapi_phone_number: response.data.phone_number,
+            }));
+          }
+          
+          success(`Phone number ${response.data.phone_number} has been automatically assigned to your account.`);
+        } else {
+          console.log('[Step 6] No unassigned numbers available, showing selector');
+          setAutoAssigned(false);
+          setShowSelector(true);
+        }
+      } catch (error) {
+        console.error('[Step 6] Auto-assign failed:', error);
+        setAutoAssigned(false);
+        setShowSelector(true);
+        // Don't show error - just show selector as fallback
+      } finally {
+        setAutoAssigning(false);
+      }
+    };
+
+    tryAutoAssign();
+  }, [business, setSelectedPhoneNumber, updateFormData, success, setBusiness]);
+
+  if (autoAssigning) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold mb-4 text-gray-900">Phone Number Configuration</h2>
+        <div className="flex items-center justify-center py-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Checking for available phone numbers...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show assigned number (either existing or newly assigned)
+  if (selectedPhoneNumber && (autoAssigned || business?.vapi_phone_number || business?.telnyx_number)) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold mb-4 text-gray-900">Phone Number Configuration</h2>
+        <div className="p-6 bg-green-50 border-2 border-green-200 rounded-lg">
+          <div className="flex items-start">
+            <svg className="w-6 h-6 text-green-600 mr-3 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <div>
+              <h3 className="text-lg font-semibold text-green-800 mb-2">Phone Number Assigned</h3>
+              <p className="text-green-700 mb-2">
+                <strong>Your phone number:</strong> {selectedPhoneNumber}
+              </p>
+              <p className="text-sm text-green-600">
+                This toll-free number {autoAssigned ? 'has been automatically assigned' : 'is assigned'} to your account and is ready to receive calls.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showSelector) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold mb-4 text-gray-900">Phone Number Configuration</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Select a phone number for your AI agent. This number will receive calls and the webhook will be configured automatically.
+        </p>
+        <TelnyxPhoneNumberSelector
+          onSelect={(number) => {
+            setSelectedPhoneNumber(number);
+            updateFormData('step6', 'phoneNumber', number);
+          }}
+          selectedNumber={selectedPhoneNumber}
+          countryCode={phoneNumberCountry}
+        />
+        {selectedPhoneNumber && (
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>Selected:</strong> {selectedPhoneNumber}
+              <br />
+              This number will be purchased and configured automatically.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function SetupWizardContent({ testMode = false }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { success, error: showError, warning } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
+  
+  // Get initial step from URL params (for payment redirect)
+  const urlStep = searchParams.get('step');
+  const paymentCompleted = searchParams.get('payment_completed') === 'true';
+  // Validate step is between 1 and TOTAL_STEPS
+  const parsedStep = urlStep ? parseInt(urlStep, 10) : null;
+  const initialStep = parsedStep && parsedStep >= 1 && parsedStep <= TOTAL_STEPS ? parsedStep : 1;
+  const [currentStep, setCurrentStep] = useState(initialStep);
+  
+  // Log test mode status on mount
+  useEffect(() => {
+    console.log('[Setup Wizard] Test mode status:', testMode);
+    if (testMode) {
+      console.warn('[Setup Wizard] ⚠️  Running in TEST MODE - payments and purchases will be skipped');
+    }
+  }, [testMode]);
+  
+  // Show success message if payment was completed
+  useEffect(() => {
+    if (paymentCompleted && currentStep === 6) {
+      success('Payment completed successfully! Continue with phone number selection.');
+      // Clean up URL params
+      router.replace('/dashboard/setup', { scroll: false });
+    }
+  }, [paymentCompleted, currentStep, success, router]);
   const [business, setBusiness] = useState(null);
   const [agent, setAgent] = useState(null);
   const [packages, setPackages] = useState([]);
@@ -190,14 +357,13 @@ export default function NewSetupWizard({ testMode = false }) {
     if (currentStep === 5 && formData.step5.packageId) {
       if (testMode) {
         console.log('[Setup Wizard] ⚠️  Step 5 payment flow triggered in TEST MODE - payment will be skipped');
-        alert('TEST MODE: Payment flow would trigger here, but payment is skipped in test mode.\n\nIn production, this would redirect to Helcim payment page.');
+        alert('TEST MODE: Payment flow would trigger here, but payment is skipped in test mode.\n\nIn production, this would redirect to Stripe payment page.');
         // Continue to next step in test mode
         setCurrentStep(6);
         return;
       }
       
       console.log('[Setup Wizard] ✅ Step 5 payment flow triggered');
-      alert('DEBUG: Step 5 payment flow triggered! Check console for details.');
       if (!formData.step5.packageId) {
         showError('Please select a package before continuing.');
         return;
@@ -413,10 +579,21 @@ export default function NewSetupWizard({ testMode = false }) {
       // Handle phone number purchase if selected
       if (selectedPhoneNumber && !business?.telnyx_number && !business?.vapi_phone_number) {
         try {
-          await telnyxPhoneNumbersAPI.purchase(selectedPhoneNumber, phoneNumberCountry);
+          console.log('[Setup Wizard] Provisioning phone number:', selectedPhoneNumber);
+          const provisionResult = await telnyxPhoneNumbersAPI.purchase(selectedPhoneNumber, phoneNumberCountry);
+          console.log('[Setup Wizard] Phone number provisioned:', provisionResult);
+          if (provisionResult?.data?.success) {
+            success('Phone number provisioned successfully!');
+          }
         } catch (phoneError) {
           console.error('Phone number purchase error:', phoneError);
-          warning('Setup completed but phone number purchase failed. You can add a phone number later.');
+          const errorMsg = phoneError.response?.data?.error || phoneError.message || 'Unknown error';
+          console.error('Phone error details:', {
+            message: errorMsg,
+            status: phoneError.response?.status,
+            data: phoneError.response?.data,
+          });
+          warning(`Setup completed but phone number provisioning failed: ${errorMsg}. You can add a phone number later in settings.`);
         }
       }
       
@@ -427,9 +604,11 @@ export default function NewSetupWizard({ testMode = false }) {
       });
       
       success('Setup complete! Your AI agent is ready to go.');
-      if (!testMode) {
+      
+      // Navigate to dashboard after a short delay so user can see the success message
+      setTimeout(() => {
         router.push('/dashboard');
-      }
+      }, 1500);
     } catch (error) {
       showError(error.response?.data?.error || 'Failed to finalize setup');
     } finally {
@@ -450,6 +629,11 @@ export default function NewSetupWizard({ testMode = false }) {
   return (
     <AuthGuard>
       <div className="min-h-screen bg-gray-50">
+        {testMode && (
+          <div className="bg-yellow-100 border-b border-yellow-400 text-yellow-800 px-4 py-3 text-center">
+            <strong>⚠️ TEST MODE ACTIVE:</strong> Payments and purchases will be skipped. This is for testing only.
+          </div>
+        )}
         {!testMode && <DashboardHeader />}
         
         <main className="container mx-auto px-4 py-8 max-w-4xl">
@@ -895,29 +1079,16 @@ export default function NewSetupWizard({ testMode = false }) {
 
               {/* Step 6: Phone Number */}
               {currentStep === 6 && (
-                <div className="space-y-4">
-                  <h2 className="text-2xl font-bold mb-4 text-gray-900">Phone Number Configuration</h2>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Select a phone number for your AI agent. This number will receive calls and the webhook will be configured automatically.
-                  </p>
-                  <TelnyxPhoneNumberSelector
-                    onSelect={(number) => {
-                      setSelectedPhoneNumber(number);
-                      updateFormData('step6', 'phoneNumber', number);
-                    }}
-                    selectedNumber={selectedPhoneNumber}
-                    countryCode={phoneNumberCountry}
-                  />
-                  {selectedPhoneNumber && (
-                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-sm text-blue-800">
-                        <strong>Selected:</strong> {selectedPhoneNumber}
-                        <br />
-                        This number will be purchased and configured automatically.
-                      </p>
-                    </div>
-                  )}
-                </div>
+                <Step6PhoneNumber
+                  business={business}
+                  selectedPhoneNumber={selectedPhoneNumber}
+                  setSelectedPhoneNumber={setSelectedPhoneNumber}
+                  phoneNumberCountry={phoneNumberCountry}
+                  updateFormData={updateFormData}
+                  success={success}
+                  warning={warning}
+                  setBusiness={setBusiness}
+                />
               )}
 
               {/* Step 7: Greetings */}
@@ -1121,6 +1292,20 @@ export default function NewSetupWizard({ testMode = false }) {
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function NewSetupWizard({ testMode = false }) {
+  return (
+    <Suspense fallback={
+      <AuthGuard>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-lg">Loading...</div>
+        </div>
+      </AuthGuard>
+    }>
+      <SetupWizardContent testMode={testMode} />
+    </Suspense>
   );
 }
 
