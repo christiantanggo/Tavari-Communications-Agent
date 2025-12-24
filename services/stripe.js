@@ -43,10 +43,7 @@ function createStripeInstance() {
   if (!secretKey) {
     console.warn('[StripeService] ⚠️ Stripe secret key not configured. Stripe features will not work.');
     console.warn('[StripeService] Set STRIPE_SECRET_KEY, STRIPE_SECRET_KEY_TEST, or STRIPE_SECRET_KEY_LIVE environment variable.');
-    // Return a dummy instance that will throw when used, but won't crash server startup
-    return new Stripe('sk_test_dummy_key_for_startup', {
-      apiVersion: '2024-12-18.acacia',
-    });
+    return null; // Return null instead of creating instance
   }
   
   return new Stripe(secretKey, {
@@ -59,8 +56,11 @@ function createStripeInstance() {
 let stripeInstance = null;
 
 export function getStripeInstance() {
-  if (!stripeInstance) {
+  if (stripeInstance === null) {
     stripeInstance = createStripeInstance();
+  }
+  if (!stripeInstance) {
+    throw new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY, STRIPE_SECRET_KEY_TEST, or STRIPE_SECRET_KEY_LIVE environment variable.');
   }
   return stripeInstance;
 }
