@@ -222,32 +222,33 @@ router.post('/signup', async (req, res) => {
         // Step 2: No unassigned numbers, purchase a new one matching area code
         console.log('[Signup] No unassigned numbers found, purchasing new number...');
         
+        // Only purchase toll-free numbers (first number is included in subscription)
         if (preferredAreaCode) {
-          console.log(`[Signup] Searching for available numbers with area code ${preferredAreaCode}...`);
-          const availableNumbers = await searchAvailablePhoneNumbers('US', 'local', 5, preferredAreaCode);
+          console.log(`[Signup] Searching for available toll-free numbers with area code ${preferredAreaCode}...`);
+          const availableNumbers = await searchAvailablePhoneNumbers('US', 'toll-free', 5, preferredAreaCode);
           
           if (availableNumbers.length > 0) {
             phoneNumber = availableNumbers[0].phone_number;
-            console.log(`[Signup] Found available number with area code ${preferredAreaCode}: ${phoneNumber}`);
+            console.log(`[Signup] Found available toll-free number with area code ${preferredAreaCode}: ${phoneNumber}`);
           } else {
             // Try without area code
-            console.log(`[Signup] No numbers found with area code ${preferredAreaCode}, trying any area code...`);
-            const fallbackNumbers = await searchAvailablePhoneNumbers('US', 'local', 5, null);
+            console.log(`[Signup] No toll-free numbers found with area code ${preferredAreaCode}, trying any area code...`);
+            const fallbackNumbers = await searchAvailablePhoneNumbers('US', 'toll-free', 5, null);
             if (fallbackNumbers.length > 0) {
               phoneNumber = fallbackNumbers[0].phone_number;
-              console.log(`[Signup] Found available number: ${phoneNumber}`);
+              console.log(`[Signup] Found available toll-free number: ${phoneNumber}`);
             } else {
-              throw new Error('No available phone numbers found. Please try again or contact support.');
+              throw new Error('No available toll-free phone numbers found. Please try again or contact support.');
             }
           }
         } else {
-          // No preferred area code, get any available number
-          const availableNumbers = await searchAvailablePhoneNumbers('US', 'local', 5, null);
+          // No preferred area code, get any available toll-free number
+          const availableNumbers = await searchAvailablePhoneNumbers('US', 'toll-free', 5, null);
           if (availableNumbers.length > 0) {
             phoneNumber = availableNumbers[0].phone_number;
-            console.log(`[Signup] Found available number: ${phoneNumber}`);
+            console.log(`[Signup] Found available toll-free number: ${phoneNumber}`);
           } else {
-            throw new Error('No available phone numbers found. Please try again or contact support.');
+            throw new Error('No available toll-free phone numbers found. Please try again or contact support.');
           }
         }
         
@@ -267,7 +268,7 @@ router.post('/signup', async (req, res) => {
         try {
           // Purchase the number from Telnyx
           console.log(`[Signup] Purchasing number ${phoneNumber} from Telnyx...`);
-          await purchaseTelnyxNumber(phoneNumber, businessId);
+          await purchaseTelnyxNumber(phoneNumber, business.id);
           console.log(`[Signup] ✅ Number purchased from Telnyx`);
           
           // Provision to VAPI
@@ -304,6 +305,7 @@ router.post('/signup', async (req, res) => {
         allow_call_transfer: business.allow_call_transfer ?? true,
         opening_greeting: agent.greeting_text,
         voice_settings: agent.voice_settings || {},
+        businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
       });
       
       if (!assistant || !assistant.id) {

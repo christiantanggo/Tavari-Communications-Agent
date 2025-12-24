@@ -185,13 +185,17 @@ router.get("/phone-numbers/search", authenticate, async (req, res) => {
   try {
     const { 
       countryCode = 'US', 
-      phoneType = 'local', 
+      phoneType, // Ignore frontend phoneType - always use toll-free
       limit = 20, 
       areaCode,
       locality,
       administrativeArea,
       phoneNumber 
     } = req.query;
+    
+    // Always use toll-free numbers (included in subscription)
+    // Additional numbers beyond the first will be charged separately
+    const enforcedPhoneType = 'toll-free';
     
     const { searchAvailablePhoneNumbers } = await import("../services/vapi.js");
     
@@ -204,7 +208,7 @@ router.get("/phone-numbers/search", authenticate, async (req, res) => {
     
     const numbers = await searchAvailablePhoneNumbers(
       countryCode,
-      phoneType,
+      enforcedPhoneType, // Always toll-free
       parseInt(limit),
       searchAreaCode || null
     );
@@ -229,16 +233,26 @@ router.get("/phone-numbers/search", authenticate, async (req, res) => {
 // Provision selected phone number
 router.post("/phone-numbers/provision", authenticate, async (req, res) => {
   try {
+    console.log('[Business Provision] ========== PROVISION REQUEST START ==========');
+    console.log('[Business Provision] Business ID:', req.businessId);
+    console.log('[Business Provision] Request body:', req.body);
+    
     const { phoneNumber } = req.body;
     
     if (!phoneNumber) {
+      console.error('[Business Provision] ❌ Phone number missing in request');
       return res.status(400).json({ error: "Phone number is required" });
     }
     
+    console.log('[Business Provision] Phone number to provision:', phoneNumber);
+    
     const business = await Business.findById(req.businessId);
     if (!business) {
+      console.error('[Business Provision] ❌ Business not found:', req.businessId);
       return res.status(404).json({ error: "Business not found" });
     }
+    
+    console.log('[Business Provision] Business found:', business.name);
 
     // If phone number already exists, return it
     if (business.vapi_phone_number) {
@@ -250,13 +264,19 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
     }
 
     // Create VAPI assistant if it doesn't exist
+    console.log('[Business Provision] Step 1: Loading services...');
     const { createAssistant, provisionPhoneNumber, linkAssistantToNumber, purchaseTelnyxNumber } = await import("../services/vapi.js");
     const { initializeBillingCycle } = await import("../services/billing.js");
     const { AIAgent } = await import("../models/AIAgent.js");
+    
+    console.log('[Business Provision] Step 2: Finding AI agent...');
     const agent = await AIAgent.findByBusinessId(req.businessId);
+    console.log('[Business Provision] Agent found:', agent ? 'Yes' : 'No');
 
+    console.log('[Business Provision] Step 3: Checking for existing assistant...');
     let assistant;
     if (!business.vapi_assistant_id) {
+      console.log('[Business Provision] No assistant found, creating new one...');
       // Create VAPI assistant
       assistant = await createAssistant({
         name: business.name,
@@ -273,19 +293,24 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
         personality: agent?.personality || 'professional',
         voice_provider: agent?.voice_provider || '11labs',
         voice_id: agent?.voice_id || '21m00Tcm4TlvDq8ikWAM',
+        businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
       });
       
       // Store assistant ID
+      console.log('[Business Provision] ✅ Assistant created:', assistant.id);
       await Business.update(req.businessId, { vapi_assistant_id: assistant.id });
     } else {
+      console.log('[Business Provision] Using existing assistant:', business.vapi_assistant_id);
       // Fetch existing assistant
       const { getVapiClient } = await import("../services/vapi.js");
       const vapiClient = getVapiClient();
       const assistantResponse = await vapiClient.get(`/assistant/${business.vapi_assistant_id}`);
       assistant = assistantResponse.data;
+      console.log('[Business Provision] ✅ Assistant retrieved');
     }
 
     // Check for unassigned numbers first, then purchase if needed
+    console.log('[Business Provision] Step 4: Checking for phone numbers...');
     let telnyxNumber;
     let numberToUse = phoneNumber;
     
@@ -294,11 +319,14 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
     if (business.public_phone_number) {
       const { extractAreaCode } = await import("../utils/phoneFormatter.js");
       preferredAreaCode = extractAreaCode(business.public_phone_number);
+      console.log('[Business Provision] Preferred area code:', preferredAreaCode);
     }
     
     // First, check if the selected number already exists in Telnyx (might be unassigned)
+    console.log('[Business Provision] Checking for unassigned numbers...');
     const { findUnassignedTelnyxNumbers } = await import("../services/vapi.js");
     const unassignedNumbers = await findUnassignedTelnyxNumbers(preferredAreaCode);
+    console.log('[Business Provision] Found unassigned numbers:', unassignedNumbers.length);
     
     // Check if the selected number is in the unassigned list
     const selectedNumberNormalized = phoneNumber.replace(/[^0-9+]/g, '');
@@ -326,10 +354,12 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
     }
     
     // Provision phone number to VAPI (this will use the Telnyx number)
+    console.log('[Business Provision] Step 5: Provisioning phone number to VAPI:', numberToUse);
     const vapiPhoneNumber = await provisionPhoneNumber(
       numberToUse, // Use the number (reused or purchased)
       business.public_phone_number // Business phone for area code matching
     );
+    console.log('[Business Provision] ✅ Phone number provisioned to VAPI:', vapiPhoneNumber);
 
     // Extract phone number from response
     const provisionedNumber =
@@ -452,13 +482,41 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error("Provision phone number error:", error);
-    let errorMessage = error.message;
-    if (error.message.includes("credentialId") || error.response?.data?.message?.includes("credentialId")) {
+    console.error("Error stack:", error.stack);
+    console.error("Error response:", error.response?.data);
+    
+    let errorMessage = error.message || "Failed to provision phone number";
+    
+    // Check for common issues
+    if (!process.env.VAPI_API_KEY) {
+      errorMessage = "VAPI_API_KEY is not configured. Please contact support.";
+    } else if (!process.env.TELNYX_API_KEY) {
+      errorMessage = "TELNYX_API_KEY is not configured. Please contact support.";
+    } else if (error.message.includes("credentialId") || error.response?.data?.message?.includes("credentialId")) {
       errorMessage = "VAPI phone provisioning requires a Telnyx credential. Please contact support.";
     } else if (error.response?.data?.message) {
       errorMessage = `VAPI error: ${error.response.data.message}`;
+    } else if (error.response?.status === 401) {
+      errorMessage = "Authentication failed. Please check API keys.";
+    } else if (error.response?.status === 404) {
+      errorMessage = "Resource not found. Please try again.";
     }
-    res.status(500).json({ error: errorMessage });
+    
+    // Include more details in development
+    const isDevelopment = process.env.NODE_ENV !== "production";
+    const errorResponse = {
+      error: errorMessage,
+      ...(isDevelopment && {
+        details: {
+          message: error.message,
+          stack: error.stack,
+          response: error.response?.data,
+          status: error.response?.status,
+        },
+      }),
+    };
+    
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -563,6 +621,7 @@ router.post("/retry-activation", authenticate, async (req, res) => {
       address: business.address || "",
       allow_call_transfer: business.allow_call_transfer ?? true,
       after_hours_behavior: business.after_hours_behavior || "take_message",
+      businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
     });
 
     // Provision phone number

@@ -22,6 +22,154 @@ import { canAssignPhoneNumber } from '../utils/phonePreflight.js';
 
 const router = express.Router();
 
+// Auto-assign unassigned phone number if available (for setup wizard)
+router.post('/auto-assign', authenticate, async (req, res) => {
+  try {
+    const preflightCheck = await canAssignPhoneNumber();
+    if (!preflightCheck.canAssign) {
+      return res.status(503).json({
+        error: 'Phone number assignment is currently unavailable',
+        reason: preflightCheck.reason,
+        details: preflightCheck.details,
+      });
+    }
+
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    // Check if business already has a phone number
+    if (business.vapi_phone_number || business.telnyx_number) {
+      return res.json({
+        assigned: false,
+        reason: 'Business already has a phone number',
+        phone_number: business.vapi_phone_number || business.telnyx_number,
+      });
+    }
+
+    // Find unassigned toll-free numbers
+    const unassignedNumbers = await findUnassignedTelnyxNumbers(null);
+    
+    if (unassignedNumbers.length === 0) {
+      return res.json({
+        assigned: false,
+        reason: 'No unassigned numbers available',
+      });
+    }
+
+    // Get the first available number
+    const selectedNumber = unassignedNumbers[0];
+    const phoneNumber = selectedNumber.phoneNumber || selectedNumber.phone_number || selectedNumber.number;
+    
+    if (!phoneNumber) {
+      return res.json({
+        assigned: false,
+        reason: 'Invalid number format',
+      });
+    }
+
+    // Normalize phone number
+    let phoneNumberE164 = phoneNumber.replace(/[^0-9+]/g, '');
+    if (!phoneNumberE164.startsWith('+')) {
+      phoneNumberE164 = '+' + phoneNumberE164;
+    }
+
+    // Acquire lock
+    const lockAcquired = await acquirePhoneLock(phoneNumberE164, 60000);
+    if (!lockAcquired) {
+      return res.json({
+        assigned: false,
+        reason: 'Number is currently being assigned to another account',
+      });
+    }
+
+    try {
+      // Check if already in VAPI
+      let phoneNumberId = null;
+      const existingVapiNumber = await checkIfNumberProvisionedInVAPI(phoneNumberE164);
+      
+      if (existingVapiNumber) {
+        phoneNumberId = existingVapiNumber.id || existingVapiNumber.phoneNumberId;
+        console.log(`[Auto-Assign] Number already in VAPI, reusing ID: ${phoneNumberId}`);
+      } else {
+        // Provision to VAPI
+        console.log(`[Auto-Assign] Provisioning number to VAPI...`);
+        const provisionedNumber = await provisionPhoneNumber(phoneNumberE164, business.public_phone_number);
+        phoneNumberId = provisionedNumber.id || provisionedNumber.phoneNumberId || provisionedNumber.phone_number_id;
+        
+        if (!phoneNumberId) {
+          const vapiCheck = await checkIfNumberProvisionedInVAPI(phoneNumberE164);
+          if (vapiCheck) {
+            phoneNumberId = vapiCheck.id || vapiCheck.phoneNumberId;
+          }
+        }
+      }
+
+      // Get or create assistant
+      let assistant = null;
+      if (business.vapi_assistant_id) {
+        console.log(`[Auto-Assign] Using existing assistant: ${business.vapi_assistant_id}`);
+      } else {
+        // Create new assistant
+        const { AIAgent } = await import('../models/AIAgent.js');
+        const agent = await AIAgent.findByBusinessId(business.id);
+        console.log(`[Auto-Assign] Creating new assistant...`);
+        assistant = await createAssistant({
+          name: business.name,
+          public_phone_number: business.public_phone_number || '',
+          timezone: business.timezone,
+          business_hours: agent?.business_hours || {},
+          faqs: agent?.faqs || [],
+          contact_email: business.email,
+          address: business.address || '',
+          allow_call_transfer: business.allow_call_transfer ?? true,
+          opening_greeting: agent?.greeting_text,
+          voice_settings: agent?.voice_settings || {},
+          businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
+        });
+      }
+
+      const assistantId = assistant?.id || business.vapi_assistant_id;
+
+      // Link assistant to phone number
+      if (phoneNumberId && assistantId) {
+        console.log(`[Auto-Assign] Linking assistant ${assistantId} to phone number ${phoneNumberId}...`);
+        await linkAssistantToNumber(assistantId, phoneNumberId);
+      }
+
+      // Update business
+      await Business.update(business.id, {
+        vapi_phone_number: phoneNumberE164,
+        vapi_assistant_id: assistantId,
+      });
+
+      // Rebuild assistant to ensure it's up to date
+      if (assistantId) {
+        try {
+          await rebuildAssistant(business.id);
+        } catch (rebuildError) {
+          console.warn('[Auto-Assign] Assistant rebuild failed (non-critical):', rebuildError.message);
+        }
+      }
+
+      releasePhoneLock(phoneNumberE164);
+
+      res.json({
+        assigned: true,
+        phone_number: phoneNumberE164,
+        assistant_id: assistantId,
+      });
+    } catch (error) {
+      releasePhoneLock(phoneNumberE164);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Auto-assign phone number error:', error);
+    res.status(500).json({ error: error.message || 'Failed to auto-assign phone number' });
+  }
+});
+
 // Get available phone numbers for selection (customer)
 router.get('/available', authenticate, async (req, res) => {
   try {
@@ -36,22 +184,18 @@ router.get('/available', authenticate, async (req, res) => {
 
     const { areaCode } = req.query;
     
-    // Get unassigned numbers
-    const unassignedNumbers = await findUnassignedTelnyxNumbers(areaCode || null);
-    
-    // Also search for available numbers to purchase
-    const availableToPurchase = await searchAvailablePhoneNumbers('US', 'local', 10, areaCode || null);
+    // Don't show already-purchased numbers - they should be automatically assigned during signup
+    // Only show numbers that need to be purchased
+    // Search for available toll-free numbers to purchase (first number is included in subscription)
+    // Only toll-free numbers are available - local numbers are not offered
+    const availableToPurchase = await searchAvailablePhoneNumbers('US', 'toll-free', 10, areaCode || null);
     
     res.json({
-      unassigned: unassignedNumbers.map(num => ({
-        phone_number: num.phoneNumber || num.phone_number || num.number,
-        source: 'existing',
-        cost: 0, // Already purchased
-      })),
+      unassigned: [], // Already-purchased numbers are automatically assigned during signup, not shown here
       available: availableToPurchase.map(num => ({
         phone_number: num.phone_number,
         source: 'purchase',
-        cost: num.phone_price || 0,
+        cost: 0, // First number is included in subscription, additional numbers will be charged separately
         region: num.region_information,
       })),
     });
@@ -146,6 +290,7 @@ router.post('/assign', authenticate, async (req, res) => {
           allow_call_transfer: business.allow_call_transfer ?? true,
           opening_greeting: agent?.greeting_text,
           voice_settings: agent?.voice_settings || {},
+          businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
         });
       }
 
@@ -270,6 +415,7 @@ router.post('/admin/assign/:businessId', authenticateAdmin, async (req, res) => 
           allow_call_transfer: business.allow_call_transfer ?? true,
           opening_greeting: agent?.greeting_text,
           voice_settings: agent?.voice_settings || {},
+          businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
         });
       }
 
@@ -395,6 +541,7 @@ router.post('/admin/change/:businessId', authenticateAdmin, async (req, res) => 
           allow_call_transfer: business.allow_call_transfer ?? true,
           opening_greeting: agent?.greeting_text,
           voice_settings: agent?.voice_settings || {},
+          businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
         });
       }
 
@@ -453,19 +600,21 @@ router.get('/admin/available', authenticateAdmin, async (req, res) => {
   try {
     const { areaCode } = req.query;
     
+    // Admin can see unassigned numbers for manual assignment
     const unassignedNumbers = await findUnassignedTelnyxNumbers(areaCode || null);
-    const availableToPurchase = await searchAvailablePhoneNumbers('US', 'local', 20, areaCode || null);
+    // Only toll-free numbers are available (first number included in subscription)
+    const availableToPurchase = await searchAvailablePhoneNumbers('US', 'toll-free', 20, areaCode || null);
     
     res.json({
       unassigned: unassignedNumbers.map(num => ({
         phone_number: num.phoneNumber || num.phone_number || num.number,
         source: 'existing',
-        cost: 0,
+        cost: 0, // Included in subscription
       })),
       available: availableToPurchase.map(num => ({
         phone_number: num.phone_number,
         source: 'purchase',
-        cost: num.phone_price || 0,
+        cost: 0, // First number included in subscription, additional numbers charged separately
         region: num.region_information,
       })),
     });

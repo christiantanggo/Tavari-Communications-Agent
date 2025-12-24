@@ -16,11 +16,61 @@ const app = express();
 // Trust proxy for Railway/behind reverse proxy (fixes rate limiter warnings)
 app.set('trust proxy', true);
 
-// Basic middleware
-app.use(helmet());
+// Basic middleware - configure helmet to not interfere with CORS
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS configuration - allow requests from frontend
+const allowedOrigins = [
+  'https://tavarios.com',
+  'https://www.tavarios.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  process.env.FRONTEND_URL,
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "*",
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log(`[CORS] Request with no origin, allowing`);
+      return callback(null, true);
+    }
+    
+    console.log(`[CORS] Checking origin: ${origin}`);
+    console.log(`[CORS] Allowed origins:`, allowedOrigins);
+    console.log(`[CORS] NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`[CORS] FRONTEND_URL: ${process.env.FRONTEND_URL}`);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log(`[CORS] ✅ Origin ${origin} is in allowed list`);
+      return callback(null, true);
+    }
+    
+    // If FRONTEND_URL is set to "*", allow all origins
+    if (process.env.FRONTEND_URL === "*") {
+      console.log(`[CORS] ✅ FRONTEND_URL is "*", allowing all origins`);
+      return callback(null, true);
+    }
+    
+    // In development, allow all origins for easier testing
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[CORS] ✅ Development mode, allowing origin ${origin}`);
+      return callback(null, true);
+    }
+    
+    // In production, only allow origins from the allowed list
+    console.warn(`[CORS] ❌ Blocked request from origin: ${origin}`);
+    console.warn(`[CORS] Allowed origins:`, allowedOrigins);
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
 }));
 
 // Body parsing
@@ -42,6 +92,32 @@ app.get("/health", (_req, res) => {
     timestamp: new Date().toISOString(),
     webhook: "/api/vapi/webhook",
   });
+});
+
+// Handle all OPTIONS requests for CORS preflight (must be before rate limiters)
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  
+  // Check if origin is allowed
+  let allowOrigin = '*';
+  if (origin) {
+    if (allowedOrigins.includes(origin) || 
+        process.env.FRONTEND_URL === "*" ||
+        process.env.NODE_ENV !== 'production') {
+      allowOrigin = origin;
+    } else if (process.env.NODE_ENV === 'production') {
+      // In production, only allow from allowed list
+      console.warn(`[CORS OPTIONS] Blocked preflight from origin: ${origin}`);
+      return res.status(403).end();
+    }
+  }
+  
+  res.header('Access-Control-Allow-Origin', allowOrigin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
+  res.status(200).end();
 });
 
 // Direct environment variable check - shows what server actually sees
@@ -124,6 +200,7 @@ import analyticsRoutes from "./routes/analytics.js";
 import phoneNumbersRoutes from "./routes/phone-numbers.js";
 import bulkSMSRoutes from "./routes/bulkSMS.js";
 import contactsRoutes from "./routes/contacts.js";
+import diagnosticsRoutes from "./routes/diagnostics.js";
 
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
@@ -158,6 +235,7 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api/phone-numbers", phoneNumbersRoutes);
 app.use("/api/bulk-sms", bulkSMSRoutes);
 app.use("/api/contacts", contactsRoutes);
+app.use("/api/diagnostics", diagnosticsRoutes);
 
 // Legacy Telnyx phone numbers endpoint (for backwards compatibility)
 app.get("/api/telnyx-phone-numbers/search", async (req, res, next) => {

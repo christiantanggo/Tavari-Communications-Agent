@@ -62,6 +62,13 @@ api.interceptors.response.use(
   }
 );
 
+// Diagnostics API
+export const diagnosticsAPI = {
+  getDashboard: () => api.get('/diagnostics/dashboard'),
+  rebuildAssistant: () => api.post('/diagnostics/rebuild-assistant'),
+  getRecentActivity: () => api.get('/diagnostics/recent-activity'),
+};
+
 export default api;
 
 // Auth API
@@ -116,8 +123,10 @@ export const billingAPI = {
   getPortal: () => api.get('/billing/portal'),
   getPackages: () => api.get('/billing/packages'),
   createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
+  verifyStripeSession: (sessionId) => api.get('/billing/verify-session', { params: { session_id: sessionId } }),
   getHostedPayment: () => api.get('/billing/hosted-payment'),
   getHostedPaymentCheckout: (packageId) => api.get(`/billing/hosted-payment/checkout?packageId=${packageId}`),
+  getTestMode: () => api.get('/billing/test-mode'),
 };
 
 // Invoices API
@@ -167,6 +176,7 @@ export const phoneNumbersAPI = {
   getAvailable: (areaCode) => api.get('/phone-numbers/available', { params: areaCode ? { areaCode } : {} }),
   assign: (phoneNumber, purchaseNew = false) => api.post('/phone-numbers/assign', { phone_number: phoneNumber, purchase_new: purchaseNew }),
   provision: (phoneNumber) => api.post('/phone-numbers/provision', { phoneNumber }),
+  autoAssign: () => api.post('/phone-numbers/auto-assign'),
 };
 
 // Telnyx Phone Numbers API (legacy - used in setup wizard)

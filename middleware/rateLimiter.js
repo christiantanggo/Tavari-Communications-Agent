@@ -24,8 +24,8 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator, // Use custom key generator
   skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health' || req.path === '/ready';
+    // Skip rate limiting for health checks and CORS preflight requests
+    return req.path === '/health' || req.path === '/ready' || req.method === 'OPTIONS';
   },
 });
 
@@ -38,6 +38,10 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   keyGenerator, // Use custom key generator
+  skip: (req) => {
+    // Skip rate limiting for CORS preflight requests
+    return req.method === 'OPTIONS';
+  },
 });
 
 // Admin rate limiter

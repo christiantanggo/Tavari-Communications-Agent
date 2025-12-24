@@ -121,6 +121,10 @@ export async function createAssistant(businessData) {
         "function-call",      // Function calls during the call
         "hang",               // Call hangup events
       ],
+      // CRITICAL: Add businessId to metadata so webhook can find the business
+      metadata: businessData.businessId ? {
+        businessId: businessData.businessId,
+      } : undefined,
       // Transcriber settings - reduce sensitivity to background noise
       transcriber: {
         provider: "deepgram",
@@ -460,33 +464,16 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
     
     console.log(`[VAPI] Unassigned numbers breakdown: ${localNumbers.length} local, ${tollFreeNumbers.length} toll-free`);
     
-    // If preferred area code is provided, prioritize numbers with that area code
-    if (preferredAreaCode && unassignedNumbers.length > 0) {
-      const cleanAreaCode = preferredAreaCode.replace(/\D/g, '');
-      const preferred = unassignedNumbers.filter(num => {
-        const phone = (num.phoneNumber || num.phone_number || num.number || '').replace(/[^0-9]/g, '');
-        return phone.startsWith(cleanAreaCode) || phone.startsWith('1' + cleanAreaCode);
-      });
-      
-      if (preferred.length > 0) {
-        console.log(`[VAPI] Found ${preferred.length} unassigned numbers with preferred area code ${cleanAreaCode}`);
-        return preferred;
-      }
-    }
-    
-    // Prioritize local numbers over toll-free for automatic assignment
-    // Toll-free numbers are more expensive and should be assigned manually
-    if (localNumbers.length > 0) {
-      console.log(`[VAPI] Prioritizing ${localNumbers.length} local numbers over ${tollFreeNumbers.length} toll-free numbers`);
-      return localNumbers;
-    }
-    
-    // If no local numbers available, return toll-free (but log a warning)
+    // Only return toll-free numbers (first number is included in subscription)
+    // Local numbers are not offered - all numbers must be toll-free
     if (tollFreeNumbers.length > 0) {
-      console.warn(`[VAPI] ⚠️  Only toll-free numbers available for assignment. Consider assigning manually.`);
+      console.log(`[VAPI] Returning ${tollFreeNumbers.length} unassigned toll-free numbers`);
+      return tollFreeNumbers;
     }
     
-    return unassignedNumbers;
+    // If no toll-free numbers available, return empty array
+    console.warn(`[VAPI] ⚠️  No unassigned toll-free numbers available.`);
+    return [];
   } catch (error) {
     console.error('[VAPI] Error finding unassigned numbers:', error.message);
     return [];
@@ -1243,6 +1230,10 @@ export async function rebuildAssistant(businessId) {
       startSpeakingPlan: {
         waitSeconds: 0.8,
         smartEndpointingEnabled: false, // Keep disabled to prevent premature cutoffs
+      },
+      // CRITICAL: Add businessId to metadata so webhook can find the business
+      metadata: {
+        businessId: businessId,
       },
     };
     

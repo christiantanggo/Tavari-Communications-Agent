@@ -214,6 +214,7 @@ router.post("/accounts/:id/retry-activation", authenticateAdmin, async (req, res
       contact_email: business.email,
       address: business.address || "",
       allow_call_transfer: business.allow_call_transfer ?? true,
+      businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
     });
     
     const phoneNumber = await provisionPhoneNumber();
