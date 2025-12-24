@@ -32,18 +32,30 @@ router.get('/check-webhook', authenticate, async (req, res) => {
     const assistant = assistantResponse.data;
 
     // Expected webhook URL
-    const backendUrl = process.env.BACKEND_URL || 
+    let backendUrl = process.env.BACKEND_URL || 
                       process.env.RAILWAY_PUBLIC_DOMAIN || 
                       process.env.VERCEL_URL || 
                       process.env.SERVER_URL ||
                       "https://api.tavarios.com";
+    
+    // Ensure URL has https:// protocol
+    if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
+      backendUrl = `https://${backendUrl}`;
+    }
+    
     const expectedWebhookUrl = `${backendUrl}/api/vapi/webhook`;
+
+    // Normalize URLs for comparison (remove trailing slashes, lowercase)
+    const normalizeUrl = (url) => {
+      if (!url) return '';
+      return url.toLowerCase().replace(/\/$/, '');
+    };
 
     // Check for issues
     const issues = [];
     if (!assistant.serverUrl) {
       issues.push('❌ CRITICAL: serverUrl is NOT SET - webhooks will not be sent!');
-    } else if (assistant.serverUrl !== expectedWebhookUrl) {
+    } else if (normalizeUrl(assistant.serverUrl) !== normalizeUrl(expectedWebhookUrl)) {
       issues.push(`⚠️ serverUrl mismatch: expected ${expectedWebhookUrl}, got ${assistant.serverUrl}`);
     }
 
@@ -76,7 +88,7 @@ router.get('/check-webhook', authenticate, async (req, res) => {
         serverMessages: ['status-update', 'end-of-call-report', 'function-call', 'hang'],
       },
       status: {
-        webhookUrlConfigured: assistant.serverUrl === expectedWebhookUrl,
+        webhookUrlConfigured: normalizeUrl(assistant.serverUrl) === normalizeUrl(expectedWebhookUrl),
         serverMessagesConfigured: assistant.serverMessages && assistant.serverMessages.length > 0,
         hasBusinessIdInMetadata: !!assistant.metadata?.businessId,
         allGood: issues.length === 0,
