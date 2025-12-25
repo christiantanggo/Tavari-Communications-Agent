@@ -80,6 +80,31 @@ router.post('/signup', async (req, res) => {
       });
     }
     
+    // Mark demo email as signed up if this email was used for a demo
+    try {
+      const { data: demoEmail } = await supabaseClient
+        .from('demo_emails')
+        .select('id')
+        .eq('email', email)
+        .eq('signed_up', false)
+        .single();
+      
+      if (demoEmail) {
+        await supabaseClient
+          .from('demo_emails')
+          .update({
+            signed_up: true,
+            signed_up_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', demoEmail.id);
+        console.log(`[Signup] ✅ Marked demo email as signed up: ${email}`);
+      }
+    } catch (demoError) {
+      // Non-critical - just log it
+      console.log(`[Signup] Note: Could not check demo emails table (may not exist yet):`, demoError.message);
+    }
+    
     // Hash password
     const password_hash = await hashPassword(password);
     

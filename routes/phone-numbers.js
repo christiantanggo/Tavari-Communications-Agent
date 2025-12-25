@@ -508,18 +508,46 @@ router.post('/admin/change/:businessId', authenticateAdmin, async (req, res) => 
 
       // Check if already in VAPI
       let phoneNumberId = null;
+      let provisioningWarning = null;
+      
       const existingVapiNumber = await checkIfNumberProvisionedInVAPI(phoneNumberE164);
       
       if (existingVapiNumber) {
         phoneNumberId = existingVapiNumber.id || existingVapiNumber.phoneNumberId;
+        console.log(`[Admin Phone Change] Number ${phoneNumberE164} already in VAPI, reusing ID: ${phoneNumberId}`);
       } else {
-        const provisionedNumber = await provisionPhoneNumber(phoneNumberE164, business.public_phone_number);
-        phoneNumberId = provisionedNumber.id || provisionedNumber.phoneNumberId || provisionedNumber.phone_number_id;
-        
-        if (!phoneNumberId) {
-          const vapiCheck = await checkIfNumberProvisionedInVAPI(phoneNumberE164);
-          if (vapiCheck) {
-            phoneNumberId = vapiCheck.id || vapiCheck.phoneNumberId;
+        // Number exists in Telnyx but not in VAPI - try to provision it
+        try {
+          console.log(`[Admin Phone Change] Number ${phoneNumberE164} exists in Telnyx but not in VAPI, provisioning...`);
+          const provisionedNumber = await provisionPhoneNumber(phoneNumberE164, business.public_phone_number);
+          phoneNumberId = provisionedNumber.id || provisionedNumber.phoneNumberId || provisionedNumber.phone_number_id;
+          
+          if (!phoneNumberId) {
+            // Try to get it from VAPI after provisioning
+            const vapiCheck = await checkIfNumberProvisionedInVAPI(phoneNumberE164);
+            if (vapiCheck) {
+              phoneNumberId = vapiCheck.id || vapiCheck.phoneNumberId;
+              console.log(`[Admin Phone Change] Retrieved phoneNumberId from VAPI check: ${phoneNumberId}`);
+            }
+          }
+        } catch (provisionError) {
+          // If provisioning fails due to credential issues, this is CRITICAL - AI agent won't work
+          const errorMessage = provisionError.message || '';
+          if (errorMessage.includes('Credential') || errorMessage.includes('credential')) {
+            console.error(`[Admin Phone Change] ❌ CRITICAL: Provisioning failed due to credential issue: ${errorMessage}`);
+            console.error(`[Admin Phone Change] ❌ The AI agent will NOT work until this is fixed!`);
+            provisioningWarning = `⚠️ CRITICAL: Phone number assigned but VAPI provisioning failed. THE AI AGENT WILL NOT ANSWER CALLS until this is fixed. Error: ${errorMessage}. Please configure VAPI_TELNYX_CREDENTIAL_ID in your .env file. See VAPI_CREDENTIAL_SETUP.md for instructions.`;
+            
+            // Check one more time if it got provisioned despite the error
+            const vapiCheck = await checkIfNumberProvisionedInVAPI(phoneNumberE164);
+            if (vapiCheck) {
+              phoneNumberId = vapiCheck.id || vapiCheck.phoneNumberId;
+              console.log(`[Admin Phone Change] ✅ Number was provisioned despite error, using ID: ${phoneNumberId}`);
+              provisioningWarning = null; // Clear warning if it worked
+            }
+          } else {
+            // Re-throw other errors
+            throw provisionError;
           }
         }
       }
@@ -547,16 +575,34 @@ router.post('/admin/change/:businessId', authenticateAdmin, async (req, res) => 
 
       const assistantId = assistant.id;
 
-      // Link assistant to new phone number
+      // Link assistant to new phone number (only if we have phoneNumberId)
       if (phoneNumberId && assistantId) {
-        await linkAssistantToNumber(assistantId, phoneNumberId);
+        try {
+          await linkAssistantToNumber(assistantId, phoneNumberId);
+          console.log(`[Admin Phone Change] ✅ Linked assistant ${assistantId} to phone number ${phoneNumberId}`);
+        } catch (linkError) {
+          console.warn(`[Admin Phone Change] ⚠️  Failed to link assistant to number (non-critical): ${linkError.message}`);
+          if (!provisioningWarning) {
+            provisioningWarning = `Phone number assigned but failed to link to assistant: ${linkError.message}`;
+          }
+        }
+      } else if (!phoneNumberId) {
+        if (!provisioningWarning) {
+          provisioningWarning = `⚠️ CRITICAL: Phone number assigned but not provisioned in VAPI. THE AI AGENT WILL NOT ANSWER CALLS. Please configure VAPI_TELNYX_CREDENTIAL_ID in your .env file and try again.`;
+        }
       }
 
-      // Update business
+      // Update business (always update, even if VAPI provisioning failed)
       await Business.update(business.id, {
         vapi_phone_number: phoneNumberE164,
         vapi_assistant_id: assistantId,
       });
+      
+      // If phoneNumberId is missing, warn but don't fail
+      if (!phoneNumberId) {
+        console.warn(`[Admin Phone Change] ⚠️  Phone number ${phoneNumberE164} saved to business but not provisioned in VAPI.`);
+        console.warn(`[Admin Phone Change] ⚠️  You may need to manually configure this number in VAPI dashboard.`);
+      }
 
       // Rebuild assistant
       try {
@@ -579,12 +625,19 @@ router.post('/admin/change/:businessId', authenticateAdmin, async (req, res) => 
 
       releasePhoneLock(phoneNumberE164);
 
-      res.json({
+      const response = {
         success: true,
         old_phone_number: oldPhoneNumber,
         new_phone_number: phoneNumberE164,
         assistant_id: assistantId,
-      });
+      };
+      
+      // Include warning if provisioning had issues
+      if (provisioningWarning) {
+        response.warning = provisioningWarning;
+      }
+
+      res.json(response);
     } catch (error) {
       releasePhoneLock(phoneNumberE164);
       throw error;
@@ -600,23 +653,137 @@ router.get('/admin/available', authenticateAdmin, async (req, res) => {
   try {
     const { areaCode } = req.query;
     
-    // Admin can see unassigned numbers for manual assignment
-    const unassignedNumbers = await findUnassignedTelnyxNumbers(areaCode || null);
-    // Only toll-free numbers are available (first number included in subscription)
+    // Admin can see ALL unassigned numbers (both toll-free and local) that are already purchased
+    // We need to get all unassigned numbers, not just toll-free
+    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+    const TELNYX_API_BASE_URL = process.env.TELNYX_API_BASE_URL || 'https://api.telnyx.com/v2';
+    const axios = (await import("axios")).default;
+    const { supabaseClient } = await import("../config/database.js");
+    const { isTollFree } = await import("../utils/phoneFormatter.js");
+    
+    // Get all phone numbers from Telnyx
+    const telnyxResponse = await axios.get(`${TELNYX_API_BASE_URL}/phone_numbers`, {
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+      },
+      params: {
+        'page[size]': 100,
+      },
+    });
+    
+    const allTelnyxNumbers = telnyxResponse.data?.data || [];
+    
+    // Get all assigned numbers
+    const assignedNumbers = new Set();
+    
+    // Check businesses table
+    const { data: businesses } = await supabaseClient
+      .from('businesses')
+      .select('vapi_phone_number, telnyx_number')
+      .is('deleted_at', null);
+    
+    (businesses || []).forEach(b => {
+      if (b.vapi_phone_number) {
+        let normalized = b.vapi_phone_number.replace(/[^0-9+]/g, '');
+        if (!normalized.startsWith('+')) normalized = '+' + normalized;
+        assignedNumbers.add(normalized);
+      }
+      if (b.telnyx_number) {
+        let normalized = b.telnyx_number.replace(/[^0-9+]/g, '');
+        if (!normalized.startsWith('+')) normalized = '+' + normalized;
+        assignedNumbers.add(normalized);
+      }
+    });
+    
+    // Check business_phone_numbers table
+    try {
+      const { data: businessPhoneNumbers } = await supabaseClient
+        .from('business_phone_numbers')
+        .select('phone_number')
+        .eq('is_active', true);
+      
+      (businessPhoneNumbers || []).forEach(bpn => {
+        if (bpn.phone_number) {
+          let normalized = bpn.phone_number.replace(/[^0-9+]/g, '');
+          if (!normalized.startsWith('+')) normalized = '+' + normalized;
+          assignedNumbers.add(normalized);
+        }
+      });
+    } catch (error) {
+      // Table might not exist, continue
+    }
+    
+    // Find all unassigned numbers (both toll-free and local)
+    const allUnassignedNumbers = allTelnyxNumbers.filter(telnyxNum => {
+      const telnyxPhone = telnyxNum.phone_number || telnyxNum.number;
+      if (!telnyxPhone) return false;
+      
+      let normalized = telnyxPhone.replace(/[^0-9+]/g, '');
+      if (!normalized.startsWith('+')) normalized = '+' + normalized;
+      
+      return !assignedNumbers.has(normalized);
+    });
+    
+    // Only toll-free numbers are available for purchase (first number included in subscription)
     const availableToPurchase = await searchAvailablePhoneNumbers('US', 'toll-free', 20, areaCode || null);
     
+    // Deduplicate unassigned numbers by normalizing phone numbers
+    // Show ALL purchased numbers (both toll-free and local)
+    const seenUnassigned = new Set();
+    const uniqueUnassigned = [];
+    
+    for (const num of allUnassignedNumbers) {
+      const phoneNumber = num.phone_number || num.number;
+      if (!phoneNumber) continue;
+      
+      // Normalize phone number for comparison
+      let normalized = phoneNumber.replace(/[^0-9+]/g, '');
+      if (!normalized.startsWith('+')) {
+        normalized = '+' + normalized;
+      }
+      
+      // Only add if we haven't seen this number before
+      if (!seenUnassigned.has(normalized)) {
+        seenUnassigned.add(normalized);
+        const isTollFreeNum = isTollFree(phoneNumber);
+        uniqueUnassigned.push({
+          phone_number: phoneNumber,
+          source: 'existing',
+          cost: 0, // Included in subscription
+          is_toll_free: isTollFreeNum,
+        });
+      }
+    }
+    
+    // Deduplicate available to purchase numbers
+    const seenAvailable = new Set();
+    const uniqueAvailable = [];
+    
+    for (const num of availableToPurchase) {
+      const phoneNumber = num.phone_number;
+      if (!phoneNumber) continue;
+      
+      // Normalize phone number for comparison
+      let normalized = phoneNumber.replace(/[^0-9+]/g, '');
+      if (!normalized.startsWith('+')) {
+        normalized = '+' + normalized;
+      }
+      
+      // Only add if we haven't seen this number before (and it's not in unassigned)
+      if (!seenAvailable.has(normalized) && !seenUnassigned.has(normalized)) {
+        seenAvailable.add(normalized);
+        uniqueAvailable.push({
+          phone_number: phoneNumber,
+          source: 'purchase',
+          cost: 0, // First number included in subscription, additional numbers charged separately
+          region: num.region_information,
+        });
+      }
+    }
+    
     res.json({
-      unassigned: unassignedNumbers.map(num => ({
-        phone_number: num.phoneNumber || num.phone_number || num.number,
-        source: 'existing',
-        cost: 0, // Included in subscription
-      })),
-      available: availableToPurchase.map(num => ({
-        phone_number: num.phone_number,
-        source: 'purchase',
-        cost: 0, // First number included in subscription, additional numbers charged separately
-        region: num.region_information,
-      })),
+      unassigned: uniqueUnassigned,
+      available: uniqueAvailable,
     });
   } catch (error) {
     console.error('Admin get available phone numbers error:', error);

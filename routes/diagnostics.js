@@ -10,7 +10,129 @@ import { UsageMinutes } from '../models/UsageMinutes.js';
 
 const router = express.Router();
 
-// Check assistant webhook configuration without rebuilding
+// Get the actual assistant prompt from VAPI
+router.get('/assistant-prompt', authenticate, async (req, res) => {
+  try {
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    if (!business.vapi_assistant_id) {
+      return res.status(400).json({ 
+        error: 'No VAPI assistant ID found',
+        message: 'Please provision a phone number first'
+      });
+    }
+
+    const { getVapiClient } = await import('../services/vapi.js');
+    const vapiClient = getVapiClient();
+    const assistantResponse = await vapiClient.get(`/assistant/${business.vapi_assistant_id}`);
+    const assistant = assistantResponse.data;
+
+    // Extract the system prompt from the model messages
+    const systemPrompt = assistant.model?.messages?.find(msg => msg.role === 'system')?.content || 'Not found';
+
+    // Extract business hours section from the prompt
+    const hoursMatch = systemPrompt.match(/Regular Business Hours:[\s\S]*?(?=Holiday Hours|CURRENT TIME|FREQUENTLY|INSTRUCTIONS|$)/i);
+    const hoursSection = hoursMatch ? hoursMatch[0] : 'Not found';
+
+    res.json({
+      business: {
+        id: business.id,
+        name: business.name,
+        vapi_assistant_id: business.vapi_assistant_id,
+      },
+      assistant: {
+        id: assistant.id,
+        name: assistant.name,
+      },
+      prompt_sections: {
+        hours_section: hoursSection,
+        full_prompt_length: systemPrompt.length,
+      },
+      // Show first 2000 chars of prompt for debugging
+      prompt_preview: systemPrompt.substring(0, 2000) + (systemPrompt.length > 2000 ? '...' : ''),
+    });
+  } catch (error) {
+    console.error('[Diagnostics] Error in assistant-prompt:', error);
+    res.status(500).json({ 
+      error: 'Failed to get assistant prompt',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Check business hours configuration
+router.get('/business-hours', authenticate, async (req, res) => {
+  try {
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    const AIAgent = (await import('../models/AIAgent.js')).AIAgent;
+    const agent = await AIAgent.findByBusinessId(business.id);
+
+    // Format business hours manually (since formatBusinessHours is not exported)
+    const businessHours = agent?.business_hours || {};
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const formatted = [];
+    
+    // Helper to convert 24-hour to 12-hour format
+    const convertTo12Hour = (time24) => {
+      if (!time24) return "9:00 AM";
+      const [hours, minutes] = time24.split(':').map(Number);
+      const period = hours >= 12 ? 'PM' : 'AM';
+      const hours12 = hours % 12 || 12;
+      return `${hours12}:${String(minutes || 0).padStart(2, '0')} ${period}`;
+    };
+
+    for (const day of days) {
+      const dayLower = day.toLowerCase();
+      const hours = businessHours[dayLower];
+      
+      if (!hours || hours.closed) {
+        formatted.push(`${day}: Closed`);
+      } else {
+        const open12 = convertTo12Hour(hours.open || "09:00");
+        const close12 = convertTo12Hour(hours.close || "17:00");
+        formatted.push(`${day}: ${open12} to ${close12}`);
+      }
+    }
+
+    const hoursText = formatted.join("\n");
+
+    res.json({
+      business: {
+        id: business.id,
+        name: business.name,
+        timezone: business.timezone,
+      },
+      agent: {
+        id: agent?.id || 'N/A',
+        business_hours: agent?.business_hours || {},
+        formatted_hours: hoursText,
+      },
+      raw_hours: JSON.stringify(agent?.business_hours || {}, null, 2),
+      // Add detailed breakdown for easier debugging
+      detailed_hours: Object.keys(businessHours).map(day => ({
+        day,
+        hours: businessHours[day],
+        formatted: businessHours[day]?.closed 
+          ? 'Closed' 
+          : `${convertTo12Hour(businessHours[day]?.open)} to ${convertTo12Hour(businessHours[day]?.close)}`
+      })),
+    });
+  } catch (error) {
+    console.error('[Diagnostics] Error in business-hours:', error);
+    res.status(500).json({ 
+      error: 'Failed to get business hours',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 router.get('/check-webhook', authenticate, async (req, res) => {
   try {
     const business = await Business.findById(req.businessId);

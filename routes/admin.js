@@ -193,6 +193,36 @@ router.post("/accounts/:id/pricing", authenticateAdmin, async (req, res) => {
   }
 });
 
+// Remove VAPI phone number from business
+router.post("/accounts/:id/remove-phone", authenticateAdmin, async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    // Update business to remove phone number
+    await Business.update(req.params.id, {
+      vapi_phone_number: null,
+    });
+
+    // Log admin activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      business_id: req.params.id,
+      action: "remove_phone_number",
+      details: { 
+        removed_phone_number: business.vapi_phone_number,
+      },
+    });
+
+    res.json({ success: true, message: "Phone number removed successfully" });
+  } catch (error) {
+    console.error("Remove phone number error:", error);
+    res.status(500).json({ error: "Failed to remove phone number" });
+  }
+});
+
 // Retry activation
 router.post("/accounts/:id/retry-activation", authenticateAdmin, async (req, res) => {
   try {
@@ -1533,6 +1563,289 @@ router.delete("/phone-numbers/business/:businessId/:phoneNumberId", authenticate
   } catch (error) {
     console.error("Remove SMS number error:", error);
     res.status(500).json({ error: error.message || "Failed to remove SMS number" });
+  }
+});
+
+// Rebuild a single AI assistant for a specific business
+router.post("/accounts/:id/rebuild-assistant", authenticateAdmin, async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+    
+    if (!business.vapi_assistant_id) {
+      return res.status(400).json({ error: "No VAPI assistant found for this business" });
+    }
+    
+    const { rebuildAssistant } = await import("../services/vapi.js");
+    
+    console.log(`[Admin] Rebuilding assistant for business: ${business.name} (${business.id})`);
+    await rebuildAssistant(business.id);
+    
+    // Log activity
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: req.params.id,
+        action: "rebuild_assistant",
+        details: { 
+          assistant_id: business.vapi_assistant_id,
+          business_name: business.name,
+        },
+      });
+    } catch (logError) {
+      console.warn('[Admin] Failed to log activity (non-blocking):', logError.message);
+    }
+    
+    res.json({
+      success: true,
+      message: `Assistant rebuilt successfully for ${business.name}`,
+    });
+  } catch (error) {
+    console.error("Rebuild assistant error:", error);
+    res.status(500).json({ 
+      error: "Failed to rebuild assistant",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Rebuild all AI assistants (for global changes)
+router.post("/rebuild-all-assistants", authenticateAdmin, async (req, res) => {
+  try {
+    const { supabaseClient } = await import("../config/database.js");
+    const { rebuildAssistant } = await import("../services/vapi.js");
+    
+    // Get all businesses with VAPI assistants
+    const { data: businesses, error } = await supabaseClient
+      .from("businesses")
+      .select("id, name, vapi_assistant_id")
+      .is("deleted_at", null)
+      .not("vapi_assistant_id", "is", null);
+    
+    if (error) throw error;
+    
+    if (!businesses || businesses.length === 0) {
+      return res.json({
+        success: true,
+        message: "No businesses with VAPI assistants found",
+        total: 0,
+        successful: 0,
+        failed: 0,
+        results: [],
+      });
+    }
+    
+    console.log(`[Admin] Rebuilding ${businesses.length} AI assistants...`);
+    
+    const results = [];
+    let successful = 0;
+    let failed = 0;
+    
+    // Rebuild assistants sequentially to avoid rate limits
+    for (const business of businesses) {
+      try {
+        console.log(`[Admin] Rebuilding assistant for business: ${business.name} (${business.id})`);
+        await rebuildAssistant(business.id);
+        results.push({
+          business_id: business.id,
+          business_name: business.name,
+          status: "success",
+        });
+        successful++;
+      } catch (error) {
+        console.error(`[Admin] Failed to rebuild assistant for ${business.name}:`, error.message);
+        results.push({
+          business_id: business.id,
+          business_name: business.name,
+          status: "failed",
+          error: error.message,
+        });
+        failed++;
+      }
+    }
+    
+    // Log activity
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "rebuild_all_assistants",
+        details: {
+          total: businesses.length,
+          successful,
+          failed,
+        },
+      });
+    } catch (logError) {
+      console.warn('[Admin] Failed to log activity (non-blocking):', logError.message);
+    }
+    
+    res.json({
+      success: true,
+      message: `Rebuilt ${successful} of ${businesses.length} assistants`,
+      total: businesses.length,
+      successful,
+      failed,
+      results,
+    });
+  } catch (error) {
+    console.error("Rebuild all assistants error:", error);
+    res.status(500).json({ 
+      error: "Failed to rebuild all assistants",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get agent data for a business (admin)
+router.get("/accounts/:id/agent", authenticateAdmin, async (req, res) => {
+  try {
+    const { AIAgent } = await import("../models/AIAgent.js");
+    const business = await Business.findById(req.params.id);
+    
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+    
+    const agent = await AIAgent.findByBusinessId(req.params.id);
+    
+    res.json({ 
+      agent: agent || null,
+      business: {
+        id: business.id,
+        name: business.name,
+        email: business.email,
+        address: business.address,
+        timezone: business.timezone,
+        public_phone_number: business.public_phone_number,
+      },
+    });
+  } catch (error) {
+    console.error("Get agent data error:", error);
+    res.status(500).json({ error: "Failed to get agent data" });
+  }
+});
+
+// Update agent data for a business (admin)
+router.put("/accounts/:id/agent", authenticateAdmin, async (req, res) => {
+  try {
+    const { AIAgent } = await import("../models/AIAgent.js");
+    const { rebuildAssistant } = await import("../services/vapi.js");
+    const business = await Business.findById(req.params.id);
+    
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+    
+    const {
+      business_hours,
+      faqs,
+      opening_greeting,
+      ending_greeting,
+      holiday_hours,
+      voice_settings,
+    } = req.body;
+    
+    // Normalize holiday hours dates to ensure they're in YYYY-MM-DD format
+    let normalizedHolidayHours = holiday_hours;
+    if (holiday_hours && Array.isArray(holiday_hours)) {
+      normalizedHolidayHours = holiday_hours.map(h => {
+        if (!h || !h.date) return h;
+        
+        // Ensure date is in YYYY-MM-DD format (timezone-agnostic)
+        let dateStr = h.date;
+        
+        // If it's a Date object, extract the date parts in local timezone
+        if (dateStr instanceof Date) {
+          const year = dateStr.getFullYear();
+          const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+          const day = String(dateStr.getDate()).padStart(2, '0');
+          dateStr = `${year}-${month}-${day}`;
+        } 
+        // If it's an ISO string with time, extract just the date part
+        else if (typeof dateStr === 'string' && dateStr.includes('T')) {
+          dateStr = dateStr.split('T')[0];
+        }
+        // If it's already in YYYY-MM-DD format, use it as-is
+        else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          // Already in correct format, use as-is
+          dateStr = dateStr;
+        }
+        // If it's in a different format, try to parse it
+        else if (typeof dateStr === 'string') {
+          // Try to extract YYYY-MM-DD from various formats
+          const dateMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (dateMatch) {
+            dateStr = dateMatch[0]; // Use the matched YYYY-MM-DD
+          } else {
+            console.warn(`[Admin Agent Update] Could not parse holiday date: ${dateStr}, using as-is`);
+          }
+        }
+        
+        return { ...h, date: dateStr };
+      });
+    }
+    
+    // Get existing agent or create one
+    let agent = await AIAgent.findByBusinessId(req.params.id);
+    
+    const updateData = {};
+    if (business_hours !== undefined) updateData.business_hours = business_hours;
+    if (faqs !== undefined) updateData.faqs = faqs;
+    if (opening_greeting !== undefined) updateData.opening_greeting = opening_greeting;
+    if (ending_greeting !== undefined) updateData.ending_greeting = ending_greeting;
+    if (normalizedHolidayHours !== undefined) updateData.holiday_hours = normalizedHolidayHours;
+    if (voice_settings !== undefined) updateData.voice_settings = voice_settings;
+    
+    if (agent) {
+      // Update existing agent
+      agent = await AIAgent.update(req.params.id, updateData);
+    } else {
+      // Create new agent
+      agent = await AIAgent.create({
+        business_id: req.params.id,
+        ...updateData,
+      });
+    }
+    
+    // Rebuild assistant to apply changes
+    if (business.vapi_assistant_id) {
+      try {
+        await rebuildAssistant(req.params.id);
+        console.log(`[Admin] Assistant rebuilt after agent update for business: ${business.name}`);
+      } catch (rebuildError) {
+        console.error(`[Admin] Failed to rebuild assistant (non-blocking):`, rebuildError.message);
+        // Don't fail the request if rebuild fails
+      }
+    }
+    
+    // Log activity
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: req.params.id,
+        action: "update_agent_data",
+        details: {
+          fields_updated: Object.keys(updateData),
+          business_name: business.name,
+        },
+      });
+    } catch (logError) {
+      console.warn('[Admin] Failed to log activity (non-blocking):', logError.message);
+    }
+    
+    res.json({ 
+      success: true,
+      agent,
+      message: "Agent data updated successfully",
+    });
+  } catch (error) {
+    console.error("Update agent data error:", error);
+    res.status(500).json({ 
+      error: "Failed to update agent data",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

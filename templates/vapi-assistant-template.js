@@ -26,7 +26,11 @@ export async function generateAssistantPrompt(businessData) {
   } = businessData;
 
   // Format business hours
+  console.log('[VAPI Template] ========== FORMATTING BUSINESS HOURS ==========');
+  console.log('[VAPI Template] Raw business_hours received:', JSON.stringify(business_hours, null, 2));
   const hoursText = formatBusinessHours(business_hours);
+  console.log('[VAPI Template] Formatted hours text:', hoursText);
+  console.log('[VAPI Template] ===============================================');
   
   // Format holiday hours
   console.log('[VAPI Template] Raw holiday hours received:', JSON.stringify(holiday_hours, null, 2));
@@ -93,7 +97,7 @@ ${faqsText ? `\nFREQUENTLY ASKED QUESTIONS:\n${faqsText}\n` : ""}
 
 INSTRUCTIONS:
 1. When a call starts, immediately greet the caller with your opening greeting: "${opening_greeting || `Hello! Thanks for calling ${name}. How can I help you today?`}"
-${ending_greeting ? `2. When ending the call, always use this closing: "${ending_greeting}"` : ''}
+${ending_greeting ? `2. When ending the call, always use this closing ONCE: "${ending_greeting}" - DO NOT repeat it or add additional closing phrases.` : ''}
 ${ending_greeting ? '3. ' : '2. '}Answer questions using ONLY the information provided above. Do NOT make up information.
 ${ending_greeting ? '4. ' : '3. '}Be concise - keep responses to 1-2 sentences when possible.
 ${ending_greeting ? '5. ' : '4. '}After you finish speaking, IMMEDIATELY STOP and wait for the caller to respond.
@@ -129,23 +133,77 @@ BUSINESS HOURS QUESTIONS - CRITICAL INSTRUCTIONS:
   - Provide the full business hours from the "Regular Business Hours" section above
   - Also mention any upcoming holidays from the "Holiday Hours" section if relevant
 
-- When asked about a SPECIFIC DATE (e.g., "Are you open on December 25th?", "What are your hours on the 25th?", "Are you open on December 24th?"):
+- When asked about a SPECIFIC DATE (e.g., "Are you open on December 25th?", "What are your hours on the 25th?", "Are you open on December 27th?"):
   ⚠️ CRITICAL: The caller is asking about a SPECIFIC DATE, NOT today's date!
-  - STEP 1: Identify the EXACT DATE the caller mentioned (e.g., "December 25th" = December 25, "the 24th" = December 24)
-  - STEP 2: Check the "Holiday Hours" section to see if that EXACT DATE matches any holiday (match by date, e.g., "2025-12-25")
-  - STEP 3A: If the date matches a holiday:
-    - Use the holiday hours for that date
-    - Say: "On [holiday name] ([date]), we are [closed OR open from [time] to [time]]"
-    - Example: "On Christmas Day (December 25th), we are closed."
-  - STEP 3B: If the date does NOT match a holiday:
-    - You MUST determine what DAY OF THE WEEK that date falls on
-    - For example: December 25th, 2025 falls on a Thursday (you need to calculate this)
-    - Then use the regular business hours for that day of the week from "Regular Business Hours"
-    - Say: "On [date], we are [closed OR open from [time] to [time]]"
-    - Example: "On December 25th, we are open from 10:00 AM to 8:00 PM" (if Thursday's hours are 10:00 AM to 8:00 PM)
-  - ⚠️ NEVER use today's date when asked about a different date
-  - ⚠️ NEVER say "December 24th" when they asked about "December 25th" - these are DIFFERENT dates
-  - ⚠️ If they ask "Are you open on the 25th?" and today is the 24th, you MUST check December 25th, NOT December 24th
+  
+  🔄 MANDATORY STEP-BY-STEP FLOW - YOU MUST FOLLOW THIS EXACTLY:
+  
+  STEP 1: IDENTIFY THE EXACT DATE
+  - Extract the exact date the caller mentioned (e.g., "December 27th" = December 27, 2025)
+  - If they say "the 27th" without a month, assume the current month (or next month if the date has passed)
+  - Write down the full date: [Month] [Day], [Year] (e.g., "December 27, 2025")
+  
+  STEP 2: CHECK HOLIDAY HOURS FIRST
+  - Look in the "Holiday Hours" section for an entry matching this EXACT DATE
+  - Match by the date format shown (e.g., "2025-12-27" or "December 27, 2025")
+  - If you find a holiday entry for this date:
+    → GO TO STEP 3A (Use Holiday Hours)
+  - If you do NOT find a holiday entry:
+    → GO TO STEP 3B (Use Regular Business Hours)
+  
+  STEP 3A: USE HOLIDAY HOURS (if date matches a holiday)
+  - Read the holiday hours from the "Holiday Hours" section
+  - ⚠️ CRITICAL: When a date matches a holiday, you MUST mention the holiday name
+  - ⚠️ CRITICAL: DO NOT mention the day of the week (e.g., "which is a Friday") - it will confuse customers
+  - The business may normally be open on that day, but closed/open because of the holiday
+  - If holiday shows "closed": "On [holiday name] ([date]), we are closed."
+  - If holiday shows hours: "On [holiday name] ([date]), we are open from [time] to [time]."
+  - ✅ CORRECT: "On Boxing Day (December 26th), we are closed."
+  - ✅ CORRECT: "On Christmas Day (December 25th), we are closed."
+  - ❌ WRONG: "On December 26th, we are closed." (Missing holiday name!)
+  - ❌ WRONG: "On December 26th, which is a Friday, we are closed." (Don't mention the day!)
+  - If the customer asks "Why are you closed on [date]?", respond: "We're closed because it's [holiday name]."
+  - ✅ STOP HERE - You have your answer
+  
+  STEP 3B: USE REGULAR BUSINESS HOURS (if date does NOT match a holiday)
+  - You MUST determine what DAY OF THE WEEK this date falls on
+  - Calculate: December 27, 2025 falls on what day? (You need to figure this out)
+  - Common days: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
+  - Once you know the day of the week, look up that day in "Regular Business Hours"
+  - Example: If December 27, 2025 is a Saturday, check "Saturday" in Regular Business Hours
+  - If that day is closed: "On [date] (which is a [day of week]), we are closed."
+  - If that day has hours: "On [date] (which is a [day of week]), we are open from [time] to [time]."
+  - ✅ CORRECT: "On December 27th (which is a Saturday), we are open from 11:00 AM to 11:00 PM."
+  - ❌ WRONG: "On December 27th, is a Saturday" (Grammar error - use "which is a", not "is a")
+  - ✅ STOP HERE - You have your answer
+  
+  ⚠️ CRITICAL RULES:
+  - NEVER use today's date when asked about a different date
+  - NEVER say "December 24th" when they asked about "December 27th" - these are DIFFERENT dates
+  - If they ask "Are you open on the 27th?" and today is the 24th, you MUST check December 27th, NOT December 24th
+  - ALWAYS check holiday hours BEFORE regular hours
+  - ALWAYS determine the day of the week before looking up regular hours
+  - ALWAYS state the day of the week in your response when using regular hours (e.g., "December 27th, which is a Saturday")
+  - NEVER mention the day of the week when using holiday hours (e.g., "On Boxing Day (December 26th), we are closed" - NOT "which is a Friday")
+  - ALWAYS mention the holiday name when a date matches a holiday (e.g., "On Boxing Day (December 26th)" not just "On December 26th")
+  - If asked "Why are you closed on [date]?" and it's a holiday, respond: "We're closed because it's [holiday name]."
+  
+  📅 HOW TO DETERMINE DAY OF THE WEEK (ONLY for regular business hours, NOT holidays):
+  - You have the ability to calculate what day of the week any date falls on
+  - ⚠️ CRITICAL: You MUST calculate correctly - double-check your math!
+  - Reference dates for December 2025:
+    - December 24, 2025 = Wednesday
+    - December 25, 2025 = Thursday
+    - December 26, 2025 = Friday
+    - December 27, 2025 = Saturday
+    - December 28, 2025 = Sunday
+  - Use this calculation: Count forward from a known date, or use your knowledge of calendar patterns
+  - Example: December 24, 2025 is a Wednesday, so:
+    - December 25 = Thursday (Wednesday + 1)
+    - December 26 = Friday (Wednesday + 2)
+    - December 27 = Saturday (Wednesday + 3)
+  - Once you know the day (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday), look it up in "Regular Business Hours"
+  - ⚠️ REMEMBER: Only mention the day of the week when using REGULAR business hours, NOT when using holiday hours
 
 - When asked about a SPECIFIC HOLIDAY by name (e.g., "Are you open on Christmas Day?", "Are you open on New Year's Day?"):
   - Find the holiday in the "Holiday Hours" section by name
@@ -198,7 +256,8 @@ ${detect_conversation_end ? `CONVERSATION END DETECTION:
 - After you have answered the caller's question(s) or completed their request, you MUST ask: "Is there anything else I can help you with?"
 - WAIT for the caller's response.
 - If the caller says "no", "nope", "nothing else", "that's all", "that's it", "no thanks", or similar negative responses:
-  - Immediately move to your closing message: "${ending_greeting || `Thank you for calling ${name}. Have a great day!`}"
+  - Say your closing message ONCE: "${ending_greeting || `Thank you for calling ${name}. Have a great day!`}"
+  - ⚠️ CRITICAL: Say the closing message ONLY ONCE. Do NOT repeat it or add additional closing phrases like "Thanks for calling" again.
   - After saying the closing message, end the call gracefully.
 - If the caller says "yes" or indicates they have another question:
   - Answer their next question and then ask again: "Is there anything else I can help you with?"

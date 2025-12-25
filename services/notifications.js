@@ -114,7 +114,7 @@ export async function sendSMSDirect(fromNumber, toNumber, messageText, businessN
 /**
  * Send email using Supabase Edge Function (mail-send)
  */
-async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = null, businessId = null, attachments = null) {
+export async function sendEmail(to, subject, bodyText, bodyHtml = null, displayName = null, businessId = null, attachments = null) {
   console.log("[Notifications] ========== SEND EMAIL START ==========");
   console.log("[Notifications] To:", to);
   console.log("[Notifications] Subject:", subject);

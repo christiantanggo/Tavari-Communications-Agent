@@ -7,6 +7,8 @@ import Link from 'next/link';
 function AdminDashboardPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState(null);
 
   useEffect(() => {
     loadStats();
@@ -30,7 +32,6 @@ function AdminDashboardPage() {
       const data = await response.json();
       setStats(data.stats);
     } catch (error) {
-      console.error('Failed to load stats:', error);
       setStats({
         total_accounts: 0,
         active_accounts: 0,
@@ -39,6 +40,48 @@ function AdminDashboardPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRebuildAllAssistants = async () => {
+    if (!confirm('Are you sure you want to rebuild all AI assistants? This may take several minutes.')) {
+      return;
+    }
+
+    setRebuilding(true);
+    setRebuildResult(null);
+
+    try {
+      const token = getAdminToken();
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+      const response = await fetch(`${API_URL}/api/admin/rebuild-all-assistants`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setRebuildResult({
+        success: true,
+        message: data.message,
+        total: data.total,
+        successful: data.successful,
+        failed: data.failed,
+      });
+    } catch (error) {
+      setRebuildResult({
+        success: false,
+        error: error.message || 'Failed to rebuild assistants',
+      });
+    } finally {
+      setRebuilding(false);
     }
   };
 
@@ -123,6 +166,35 @@ function AdminDashboardPage() {
                 <p className="text-sm text-gray-600">Pro</p>
               </div>
             </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-bold mb-4 text-gray-900">AI Assistant Management</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Rebuild all AI assistants to apply global changes (e.g., interruption settings, prompt updates).
+            </p>
+            <button
+              onClick={handleRebuildAllAssistants}
+              disabled={rebuilding}
+              className="px-6 py-3 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {rebuilding ? 'Rebuilding...' : 'Rebuild All AI Agents'}
+            </button>
+            {rebuildResult && (
+              <div className={`mt-4 p-4 rounded-md ${rebuildResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                <p className={`font-medium ${rebuildResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                  {rebuildResult.success ? '✓ Success' : '✗ Error'}
+                </p>
+                <p className={`text-sm mt-2 ${rebuildResult.success ? 'text-green-700' : 'text-red-700'}`}>
+                  {rebuildResult.message || rebuildResult.error}
+                </p>
+                {rebuildResult.success && (
+                  <p className="text-sm text-green-700 mt-2">
+                    {rebuildResult.successful} successful, {rebuildResult.failed} failed out of {rebuildResult.total} total
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-4 flex-wrap">

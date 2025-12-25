@@ -77,8 +77,17 @@ export async function createAssistant(businessData) {
       temperature = 0.9;
     }
     
+    // VAPI has a 40 character limit on assistant names
+    // For demos, use just the business name (truncate to 40 chars)
+    // For regular assistants, use " - Tavari" suffix (9 chars), so business name can be up to 31 chars
+    const suffix = businessData.isDemo ? '' : ' - Tavari';
+    const maxBusinessNameLength = businessData.isDemo ? 40 : 31;
+    const truncatedBusinessName = businessData.name.length > maxBusinessNameLength 
+      ? businessData.name.substring(0, maxBusinessNameLength).trim() 
+      : businessData.name;
+    
     const assistantConfig = {
-      name: `${businessData.name} - Tavari Assistant`,
+      name: businessData.isDemo ? truncatedBusinessName : `${truncatedBusinessName}${suffix}`,
       model: {
         provider: "openai",
         model: "gpt-4o-mini", // Using mini for lower cost (~80% cheaper than gpt-4o)
@@ -122,8 +131,13 @@ export async function createAssistant(businessData) {
         "hang",               // Call hangup events
       ],
       // CRITICAL: Add businessId to metadata so webhook can find the business
+      // For demo assistants, include demo metadata
       metadata: businessData.businessId ? {
         businessId: businessData.businessId,
+      } : businessData.isDemo ? {
+        isDemo: true,
+        demoEmail: businessData.contact_email,
+        demoBusinessName: businessData.name,
       } : undefined,
       // Transcriber settings - reduce sensitivity to background noise
       transcriber: {
@@ -133,9 +147,9 @@ export async function createAssistant(businessData) {
       },
       // Enable background denoising to filter out ambient noise
       backgroundDenoisingEnabled: true,
-      // Prevent interruptions during AI speech - stops background voices from cutting off AI
-      interruptionsEnabled: false, // Disable interruptions - AI will finish speaking before listening
-      firstMessageInterruptionsEnabled: false, // Also disable for first message
+      // Allow users to interrupt AI speech - users can cut off the AI mid-response
+      interruptionsEnabled: true, // Enable interruptions - users can interrupt AI responses
+      firstMessageInterruptionsEnabled: false, // Keep first message protected - users cannot interrupt initial greeting
       // Start speaking plan - wait a bit before speaking to avoid interrupting caller
       startSpeakingPlan: {
         waitSeconds: 0.8,
@@ -767,38 +781,40 @@ export async function provisionPhoneNumber(specificNumber = null, businessPhoneN
       number: phoneNumberToProvision, // Must be in E.164 format (e.g., +15551234567)
     };
     
-    // Try to get credential ID from environment first
-    let credentialId = process.env.VAPI_TELNYX_CREDENTIAL_ID;
+    // Try to get credential ID automatically (prioritize auto-detection)
+    let credentialId = null;
     
-    // If not set, try to get the first available Telnyx credential
-    if (!credentialId) {
-      try {
-        console.log("[VAPI] Auto-detecting Telnyx credential...");
-        const credentials = await getTelnyxCredentials();
-        console.log(`[VAPI] Found ${credentials.length} Telnyx credential(s)`);
-        if (credentials.length > 0) {
-          credentialId = credentials[0].id;
-          console.log(`[VAPI] ✅ Using auto-detected Telnyx credential: ${credentialId}`);
-        } else {
-          console.warn("[VAPI] ⚠️  No Telnyx credentials found via API.");
-          console.warn("[VAPI] VAPI may auto-detect credentials during provisioning.");
-          console.warn("[VAPI] Attempting provisioning without explicit credentialId...");
-        }
-      } catch (error) {
-        // Credentials endpoint might not be accessible, but provisioning might still work
-        console.warn("[VAPI] ⚠️  Could not fetch credentials (this is OK if VAPI auto-detects)");
-        console.warn("[VAPI] Attempting provisioning without credentialId - VAPI may auto-detect it");
+    // First, try to auto-detect from VAPI (this is the preferred method)
+    try {
+      console.log("[VAPI] Auto-detecting Telnyx credential from VAPI...");
+      const credentials = await getTelnyxCredentials();
+      console.log(`[VAPI] Found ${credentials.length} Telnyx credential(s) in VAPI`);
+      if (credentials.length > 0) {
+        credentialId = credentials[0].id;
+        console.log(`[VAPI] ✅ Auto-detected Telnyx credential: ${credentialId}`);
+      } else {
+        console.log("[VAPI] No Telnyx credentials found in VAPI. Will try environment variable or auto-detection.");
       }
-    } else {
-      console.log(`[VAPI] Using configured Telnyx credential: ${credentialId}`);
+    } catch (error) {
+      console.warn("[VAPI] ⚠️  Could not auto-detect credentials from VAPI API (this is OK, will try other methods)");
+      console.warn("[VAPI] Error:", error.message);
     }
     
-    // Add credentialId if we have one (VAPI may auto-detect if not provided)
+    // Fallback to environment variable if auto-detection didn't work
+    if (!credentialId) {
+      credentialId = process.env.VAPI_TELNYX_CREDENTIAL_ID;
+      if (credentialId) {
+        console.log(`[VAPI] Using Telnyx credential from environment variable: ${credentialId}`);
+      }
+    }
+    
+    // Add credentialId if we have one (VAPI may also auto-detect if not provided)
     if (credentialId) {
       requestBody.credentialId = credentialId;
       console.log(`[VAPI] Provisioning phone number with credentialId: ${credentialId}`);
     } else {
-      console.log("[VAPI] Provisioning phone number without credentialId - VAPI will auto-detect if available");
+      console.log("[VAPI] No credentialId specified - VAPI will attempt to auto-detect from your account");
+      console.log("[VAPI] If this fails, you may need to add a Telnyx credential in VAPI Dashboard → Settings → Credentials");
     }
     
     console.log("[VAPI] Request body:", JSON.stringify(requestBody, null, 2));
@@ -858,20 +874,46 @@ export async function provisionPhoneNumber(specificNumber = null, businessPhoneN
       status: error.response?.status,
     });
     
-    // Provide helpful error message
-    if (errorMessage.includes("credentialId") || errorMessage.includes("UUID")) {
-      const helpMessage = process.env.VAPI_TELNYX_CREDENTIAL_ID
-        ? `VAPI credential ID is set but may be invalid. Please verify VAPI_TELNYX_CREDENTIAL_ID in your .env file matches the credential UUID from VAPI dashboard (Settings → Credentials).`
-        : `VAPI phone provisioning requires a Telnyx credential. Please:
+    // Provide helpful error message for credential issues
+    if (errorMessage.includes("credentialId") || errorMessage.includes("UUID") || errorMessage.includes("Credential")) {
+      // First, try to auto-detect credentials one more time (in case they were just added)
+      let autoDetectedCreds = [];
+      try {
+        console.log("[VAPI] Credential error detected - attempting to auto-detect credentials again...");
+        autoDetectedCreds = await getTelnyxCredentials();
+        if (autoDetectedCreds.length > 0) {
+          console.log(`[VAPI] ✅ Found ${autoDetectedCreds.length} credential(s) - the credential may be invalid or have insufficient permissions`);
+        }
+      } catch (retryError) {
+        // If retry also fails, continue with error message
+      }
+      
+      let helpMessage;
+      if (autoDetectedCreds.length > 0) {
+        helpMessage = `VAPI credential error. Found ${autoDetectedCreds.length} Telnyx credential(s) in your VAPI account, but provisioning failed. 
+
+Possible issues:
+1. The Telnyx API key in your VAPI credential may be invalid or expired
+2. The Telnyx API key may not have permission to provision phone numbers
+3. The credential may not be properly configured
+
+Please check your Telnyx API key in VAPI Dashboard → Settings → Credentials and ensure it's valid.
+
+Original error: ${errorMessage}`;
+      } else {
+        helpMessage = `VAPI phone provisioning requires a Telnyx credential. The system attempted to auto-detect credentials but none were found.
+
+To fix this automatically (no .env changes needed):
 1. Go to VAPI Dashboard → Settings → Credentials
 2. Add a Telnyx credential (use your Telnyx API key from portal.telnyx.com)
-3. Copy the credential ID (UUID format)
-4. Add to .env: VAPI_TELNYX_CREDENTIAL_ID=your-uuid-here
-5. Restart server
+3. The system will automatically detect and use this credential on the next attempt
 
-See VAPI_CREDENTIAL_SETUP.md for detailed instructions.`;
+Alternatively, you can manually set VAPI_TELNYX_CREDENTIAL_ID in your .env file with the credential UUID.
+
+Original error: ${errorMessage}`;
+      }
       
-      throw new Error(`${helpMessage}\n\nOriginal error: ${errorMessage}`);
+      throw new Error(helpMessage);
     }
     
     throw new Error(`Failed to provision phone number: ${errorMessage}`);
@@ -1079,6 +1121,17 @@ export async function rebuildAssistant(businessId) {
     
     const businessHours = agentRecord?.business_hours || {};
     
+    // Log business hours for debugging
+    console.log(`[VAPI Rebuild] ========== BUSINESS HOURS FROM DATABASE ==========`);
+    console.log(`[VAPI Rebuild] Raw business_hours:`, JSON.stringify(businessHours, null, 2));
+    if (businessHours && typeof businessHours === 'object') {
+      Object.keys(businessHours).forEach(day => {
+        const hours = businessHours[day];
+        console.log(`[VAPI Rebuild] ${day}:`, hours);
+      });
+    }
+    console.log(`[VAPI Rebuild] ================================================`);
+    
     // CRITICAL: Normalize holiday hours dates to ensure they're in YYYY-MM-DD format
     // This prevents timezone issues when dates are stored/retrieved from the database
     let holidayHours = agentRecord?.holiday_hours || [];
@@ -1176,8 +1229,16 @@ export async function rebuildAssistant(businessId) {
     // Build a clean payload with ONLY the fields VAPI accepts for updates
     // VAPI rejects updates with read-only fields (orgId, id, createdAt, isServerUrlSecretSet, etc.)
     // We build a fresh payload instead of spreading currentAssistant to avoid read-only fields
+    // VAPI has a 40 character limit on assistant names
+    // Use " - Tavari" suffix (9 chars), so business name can be up to 31 chars
+    const suffix = ' - Tavari';
+    const maxBusinessNameLength = 31;
+    const truncatedBusinessName = businessName.length > maxBusinessNameLength 
+      ? businessName.substring(0, maxBusinessNameLength).trim() 
+      : businessName;
+    
     const updatePayload = {
-      name: `${businessName} - Tavari Assistant`,
+      name: `${truncatedBusinessName}${suffix}`,
       // FORCE model to gpt-4o-mini (cheaper) - this is critical for cost reduction
       model: {
         provider: "openai",
@@ -1224,9 +1285,9 @@ export async function rebuildAssistant(businessId) {
       },
       // Enable background denoising to filter out ambient noise
       backgroundDenoisingEnabled: true,
-      // Prevent interruptions during AI speech - stops background voices from cutting off AI
-      interruptionsEnabled: false, // Disable interruptions - AI will finish speaking before listening
-      firstMessageInterruptionsEnabled: false, // Also disable for first message
+      // Allow users to interrupt AI speech - users can cut off the AI mid-response
+      interruptionsEnabled: true, // Enable interruptions - users can interrupt AI responses
+      firstMessageInterruptionsEnabled: false, // Keep first message protected - users cannot interrupt initial greeting
       startSpeakingPlan: {
         waitSeconds: 0.8,
         smartEndpointingEnabled: false, // Keep disabled to prevent premature cutoffs
@@ -1297,6 +1358,28 @@ export async function rebuildAssistant(businessId) {
     if (!updatedAssistant.serverUrl || updatedAssistant.serverUrl !== updatePayload.serverUrl) {
       console.error(`[VAPI Rebuild] ❌❌❌ CRITICAL WARNING: Webhook URL not set correctly!`);
       console.error(`[VAPI Rebuild] This will prevent call tracking, usage recording, and message creation!`);
+    }
+    
+    // Update the business record with the rebuild timestamp
+    try {
+      const updatedBusiness = await Business.update(businessId, {
+        vapi_assistant_rebuilt_at: new Date().toISOString(),
+      });
+      console.log(`[VAPI Rebuild] ✅ Updated rebuild timestamp for business: ${businessId}`);
+      console.log(`[VAPI Rebuild] Rebuild timestamp value:`, updatedBusiness?.vapi_assistant_rebuilt_at);
+    } catch (timestampError) {
+      // Non-blocking - don't fail the rebuild if timestamp update fails
+      console.error(`[VAPI Rebuild] ⚠️  Failed to update rebuild timestamp (non-blocking):`, {
+        message: timestampError.message,
+        code: timestampError.code,
+        details: timestampError.details,
+        hint: timestampError.hint,
+      });
+      // If column doesn't exist, log a helpful message
+      if (timestampError.message && (timestampError.message.includes('column') || timestampError.message.includes('does not exist'))) {
+        console.error(`[VAPI Rebuild] ❌ Column 'vapi_assistant_rebuilt_at' does not exist in businesses table.`);
+        console.error(`[VAPI Rebuild] Run this SQL to add it: ALTER TABLE businesses ADD COLUMN IF NOT EXISTS vapi_assistant_rebuilt_at TIMESTAMP;`);
+      }
     }
     
     return response.data;

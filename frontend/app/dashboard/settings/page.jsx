@@ -1101,7 +1101,7 @@ function SettingsPage() {
                         AI Phone Agent Enabled
                       </label>
                       <p className="text-xs text-gray-500">
-                        When enabled, AI answers calls after X rings. When disabled, calls are immediately forwarded.
+                        When enabled, the AI answers calls immediately. When disabled, calls are forwarded to your business number.
                       </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -1117,23 +1117,6 @@ function SettingsPage() {
 
                   {aiSettings.ai_enabled && (
                     <>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-1">
-                          Answer after X rings
-                        </label>
-                        <select
-                          value={aiSettings.call_forward_rings}
-                          onChange={(e) => setAiSettings({ ...aiSettings, call_forward_rings: parseInt(e.target.value) })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                        >
-                          <option value={2}>2 rings</option>
-                          <option value={3}>3 rings</option>
-                          <option value={4}>4 rings</option>
-                          <option value={5}>5 rings</option>
-                          <option value={6}>6 rings</option>
-                        </select>
-                      </div>
-
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-1">
                           After-hours behavior

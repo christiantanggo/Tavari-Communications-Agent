@@ -193,11 +193,38 @@ export const telnyxPhoneNumbersAPI = {
   getCurrent: () => api.get('/phone-numbers/available'),
 };
 
-// Admin Phone Numbers API
+// Admin Phone Numbers API (uses regular api client but with admin token)
+// Note: These routes are at /api/phone-numbers/admin/*, not /api/admin/phone-numbers/*
+const getAdminToken = () => {
+  if (typeof document !== 'undefined') {
+    const cookies = document.cookie.split(';');
+    const tokenCookie = cookies.find(c => c.trim().startsWith('admin_token='));
+    return tokenCookie ? tokenCookie.split('=')[1] : null;
+  }
+  return null;
+};
+
+// Create an admin phone numbers API client that uses the regular API base but with admin token
+const adminPhoneNumbersApiClient = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add admin token interceptor
+adminPhoneNumbersApiClient.interceptors.request.use((config) => {
+  const token = getAdminToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const adminPhoneNumbersAPI = {
-  getAvailable: (areaCode) => api.get('/phone-numbers/admin/available', { params: areaCode ? { areaCode } : {} }),
-  assign: (businessId, phoneNumber, purchaseNew = false) => api.post(`/phone-numbers/admin/assign/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
-  change: (businessId, phoneNumber, purchaseNew = false) => api.post(`/phone-numbers/admin/change/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
+  getAvailable: (areaCode) => adminPhoneNumbersApiClient.get('/api/phone-numbers/admin/available', { params: areaCode ? { areaCode } : {} }),
+  assign: (businessId, phoneNumber, purchaseNew = false) => adminPhoneNumbersApiClient.post(`/api/phone-numbers/admin/assign/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
+  change: (businessId, phoneNumber, purchaseNew = false) => adminPhoneNumbersApiClient.post(`/api/phone-numbers/admin/change/${businessId}`, { phone_number: phoneNumber, purchase_new: purchaseNew }),
 };
 
 // Admin API (uses admin token from cookie)
@@ -246,6 +273,11 @@ export const adminSMSNumbersAPI = {
   removeNumber: (businessId, phoneNumberId) => adminApi.delete(`/phone-numbers/business/${businessId}/${phoneNumberId}`),
   migrateToTelnyx: (businessId) => adminApi.post(`/phone-numbers/migrate-to-telnyx/${businessId}`),
   verify: () => adminApi.get('/phone-numbers/verify'),
+};
+
+// Admin AI Assistants API
+export const adminAssistantsAPI = {
+  rebuildAll: () => adminApi.post('/rebuild-all-assistants'),
 };
 
 // Bulk SMS API

@@ -663,6 +663,22 @@ async function handleCallStart(event) {
       return;
     }
 
+    // Check if this is a demo assistant first
+    const { demoAssistants } = await import("./demo.js");
+    const demoData = demoAssistants.get(assistantId);
+    
+    if (demoData) {
+      console.log(`[VAPI Webhook] 🎧 Demo assistant detected: ${assistantId}`);
+      // Handle demo call - we'll process it in the call-end handler
+      // For now, just log it and continue (call-end handler will check for demo)
+    }
+    
+    // If it's a demo assistant, skip call-start processing (we'll handle it in call-end)
+    if (demoData) {
+      console.log(`[VAPI Webhook] 🎧 Demo assistant call-start - skipping CallSession creation (will handle in call-end)`);
+      return; // Demo calls don't need CallSession tracking
+    }
+    
     // Find business by assistant ID
     console.log(`[VAPI Webhook] Looking up business for assistant: ${assistantId}`);
     const business = await Business.findByVapiAssistantId(assistantId);
@@ -835,7 +851,32 @@ async function handleCallEnd(event) {
     callId: callId,
   });
 
-  // Find call session
+  // Check if this is a demo assistant call
+  const { demoAssistants } = await import("./demo.js");
+  const assistantId = call.assistant?.id || call.assistantId || event.message?.assistant?.id;
+  
+  console.log(`[VAPI Webhook] Checking for demo assistant:`, {
+    assistantId,
+    callAssistantId: call.assistant?.id,
+    callAssistantIdField: call.assistantId,
+    messageAssistantId: event.message?.assistant?.id,
+    demoAssistantsKeys: Array.from(demoAssistants.keys()),
+  });
+  
+  const demoData = assistantId ? demoAssistants.get(assistantId) : null;
+  
+  if (demoData) {
+    console.log(`[VAPI Webhook] 🎧 Demo call detected for assistant: ${assistantId}`);
+    console.log(`[VAPI Webhook] Demo email: ${demoData.email}`);
+    
+    // For browser-based demo calls, webhooks might not be reliable
+    // The frontend endpoint (/api/demo/send-summary) handles sending the email
+    // Skip webhook handler entirely for demos to prevent duplicate emails
+    console.log(`[VAPI Webhook] Demo call - skipping webhook handler (frontend will handle email via /api/demo/send-summary)`);
+    return;
+  }
+
+  // Find call session (for regular business calls)
   const callSession = await CallSession.findByVapiCallId(callId);
   if (!callSession) {
     console.error(`[VAPI Webhook] Call session not found for call: ${callId}`);
