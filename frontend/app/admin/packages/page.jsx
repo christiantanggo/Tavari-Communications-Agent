@@ -29,6 +29,13 @@ function PackagesPage() {
     stripe_price_id: '',
     is_active: true,
     is_public: true,
+    sale_name: '',
+    sale_start_date: '',
+    sale_end_date: '',
+    sale_max_quantity: '',
+    sale_sold_count: 0,
+    sale_price: '',
+    sale_duration_months: '',
   });
 
   useEffect(() => {
@@ -61,6 +68,14 @@ function PackagesPage() {
         emails_included: parseInt(formData.emails_included) || 0,
         emails_overage_price: parseFloat(formData.emails_overage_price) || 0,
         max_faqs: parseInt(formData.max_faqs) || 5,
+        // Sale fields - set to null/empty to clear sale, or set values to activate
+        sale_name: formData.sale_name || null,
+        sale_start_date: formData.sale_start_date || null,
+        sale_end_date: formData.sale_end_date || null,
+        sale_max_quantity: formData.sale_max_quantity ? parseInt(formData.sale_max_quantity) : null,
+        sale_sold_count: parseInt(formData.sale_sold_count) || 0,
+        sale_price: formData.sale_price ? parseFloat(formData.sale_price) : null,
+        sale_duration_months: formData.sale_duration_months ? parseInt(formData.sale_duration_months) : null,
       };
 
       if (editingPackage) {
@@ -97,6 +112,13 @@ function PackagesPage() {
       stripe_price_id: pkg.stripe_price_id || '',
       is_active: pkg.is_active ?? true,
       is_public: pkg.is_public ?? true,
+      sale_name: pkg.sale_name || '',
+      sale_start_date: pkg.sale_start_date || '',
+      sale_end_date: pkg.sale_end_date || '',
+      sale_max_quantity: pkg.sale_max_quantity || '',
+      sale_sold_count: pkg.sale_sold_count || 0,
+      sale_price: pkg.sale_price || '',
+      sale_duration_months: pkg.sale_duration_months || '',
     });
     setShowForm(true);
   };
@@ -132,6 +154,13 @@ function PackagesPage() {
       stripe_price_id: '',
       is_active: true,
       is_public: true,
+      sale_name: '',
+      sale_start_date: '',
+      sale_end_date: '',
+      sale_max_quantity: '',
+      sale_sold_count: 0,
+      sale_price: '',
+      sale_duration_months: '',
     });
   };
 
@@ -335,6 +364,92 @@ function PackagesPage() {
                     <span className="text-sm text-gray-700">Public (Available for new signups)</span>
                   </label>
                 </div>
+                
+                {/* Sale/Promotion Section */}
+                <div className="border-t pt-4 mt-4">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Sale/Promotion Settings</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Sale Name</label>
+                      <input
+                        type="text"
+                        value={formData.sale_name}
+                        onChange={(e) => setFormData({ ...formData, sale_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        placeholder="e.g., Black Friday Sale"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Leave empty to disable sale</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Start Date (Optional)</label>
+                      <input
+                        type="date"
+                        value={formData.sale_start_date}
+                        onChange={(e) => setFormData({ ...formData, sale_start_date: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Sale starts immediately if not set</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">End Date (Optional)</label>
+                      <input
+                        type="date"
+                        value={formData.sale_end_date}
+                        onChange={(e) => setFormData({ ...formData, sale_end_date: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Leave empty for quantity-only sales (runs until max quantity reached)</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Max Quantity (Optional)</label>
+                      <input
+                        type="number"
+                        value={formData.sale_max_quantity}
+                        onChange={(e) => setFormData({ ...formData, sale_max_quantity: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        placeholder="Leave empty for unlimited"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Maximum number of plans to sell during this sale</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Sale Price ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={formData.sale_price}
+                        onChange={(e) => setFormData({ ...formData, sale_price: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        placeholder="Leave empty to use regular price"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Discounted price during sale (if empty, uses regular monthly price)</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Duration (Months)</label>
+                      <input
+                        type="number"
+                        value={formData.sale_duration_months}
+                        onChange={(e) => setFormData({ ...formData, sale_duration_months: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        placeholder="Leave empty for indefinite"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">How long customers keep the sale price (empty = forever)</p>
+                    </div>
+                    {editingPackage && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">Sold Count</label>
+                        <input
+                          type="number"
+                          value={formData.sale_sold_count}
+                          onChange={(e) => setFormData({ ...formData, sale_sold_count: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                          readOnly
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Automatically tracked - shows current count sold</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
                 <div className="flex gap-2">
                   <button
                     type="submit"

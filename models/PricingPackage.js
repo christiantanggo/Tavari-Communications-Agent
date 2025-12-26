@@ -20,31 +20,49 @@ export class PricingPackage {
       stripe_price_id,
       is_active = true,
       is_public = true,
+      sale_name,
+      sale_start_date,
+      sale_end_date,
+      sale_max_quantity,
+      sale_sold_count = 0,
+      sale_price,
+      sale_duration_months,
     } = data;
 
     if (!name || !monthly_price) {
       throw new Error('Name and monthly price are required');
     }
 
+    const insertData = {
+      name,
+      description,
+      monthly_price,
+      minutes_included,
+      overage_price_per_minute,
+      sms_included,
+      sms_overage_price,
+      emails_included,
+      emails_overage_price,
+      max_faqs,
+      stripe_product_id,
+      stripe_price_id,
+      is_active,
+      is_public,
+      updated_at: new Date().toISOString(),
+    };
+    
+    // Add sale fields if provided
+    if (sale_name !== undefined) insertData.sale_name = sale_name;
+    if (sale_start_date !== undefined) insertData.sale_start_date = sale_start_date;
+    if (sale_end_date !== undefined) insertData.sale_end_date = sale_end_date;
+    if (sale_max_quantity !== undefined) insertData.sale_max_quantity = sale_max_quantity;
+    if (sale_sold_count !== undefined) insertData.sale_sold_count = sale_sold_count;
+    if (sale_price !== undefined) insertData.sale_price = sale_price;
+    if (sale_duration_months !== undefined) insertData.sale_duration_months = sale_duration_months;
+    
     const { data: pkg, error } = await supabaseClient
       .from('pricing_packages')
-      .insert({
-        name,
-        description,
-        monthly_price,
-        minutes_included,
-        overage_price_per_minute,
-        sms_included,
-        sms_overage_price,
-        emails_included,
-        emails_overage_price,
-        max_faqs,
-        stripe_product_id,
-        stripe_price_id,
-        is_active,
-        is_public,
-        updated_at: new Date().toISOString(),
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -83,7 +101,86 @@ export class PricingPackage {
     const { data, error } = await query.order('monthly_price', { ascending: true });
 
     if (error) throw error;
-    return data || [];
+    
+    // Add sale status to each package
+    const packages = (data || []).map(pkg => {
+      const isOnSale = PricingPackage.isSaleActive(pkg);
+      const saleAvailable = PricingPackage.isSaleAvailable(pkg);
+      return {
+        ...pkg,
+        isOnSale,
+        saleAvailable,
+      };
+    });
+    
+    return packages;
+  }
+
+  /**
+   * Check if a sale is currently active for a package
+   * Sale is active if:
+   * - Has sale_name
+   * - Current date is after sale_start_date (if set)
+   * - Current date is before sale_end_date (if set)
+   * - Not sold out (if max_quantity is set)
+   */
+  static isSaleActive(pkg) {
+    if (!pkg.sale_name) {
+      return false;
+    }
+    
+    const now = new Date();
+    now.setHours(0, 0, 0, 0); // Start of today
+    
+    // Check start date (if set)
+    if (pkg.sale_start_date) {
+      const startDate = new Date(pkg.sale_start_date);
+      startDate.setHours(0, 0, 0, 0);
+      if (now < startDate) {
+        return false; // Sale hasn't started yet
+      }
+    }
+    
+    // Check end date (if set - optional for quantity-only sales)
+    if (pkg.sale_end_date) {
+      const endDate = new Date(pkg.sale_end_date);
+      endDate.setHours(23, 59, 59, 999); // End of sale end date
+      if (now > endDate) {
+        return false; // Sale has ended
+      }
+    }
+    
+    return true;
+  }
+
+  /**
+   * Check if a sale is available (active and not sold out)
+   */
+  static isSaleAvailable(pkg) {
+    if (!PricingPackage.isSaleActive(pkg)) {
+      return false;
+    }
+    
+    // If max_quantity is null, sale is unlimited
+    if (pkg.sale_max_quantity === null || pkg.sale_max_quantity === undefined) {
+      return true;
+    }
+    
+    const soldCount = pkg.sale_sold_count || 0;
+    return soldCount < pkg.sale_max_quantity;
+  }
+
+  /**
+   * Increment the sale sold count when a package is purchased during a sale
+   */
+  static async incrementSaleCount(packageId) {
+    const pkg = await PricingPackage.findById(packageId);
+    if (!pkg || !PricingPackage.isSaleActive(pkg)) {
+      return;
+    }
+    
+    const newCount = (pkg.sale_sold_count || 0) + 1;
+    await PricingPackage.update(packageId, { sale_sold_count: newCount });
   }
 
   static async update(id, data) {

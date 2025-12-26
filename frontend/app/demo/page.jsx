@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import Vapi from '@vapi-ai/web';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, '');
@@ -359,21 +360,33 @@ export default function DemoPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div className="min-h-screen bg-white">
       {/* Navigation */}
-      <nav className="container mx-auto px-4 py-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-blue-600">Tavari AI</h1>
-          <div className="space-x-4">
-            <Link href="/login" className="text-gray-700 hover:text-blue-600">
-              Login
+      <nav className="border-b border-gray-200 bg-white sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex justify-between items-center">
+            <Link href="/" className="flex items-center">
+              <Image
+                src="/tavari-logo.png"
+                alt="Tavari AI"
+                width={400}
+                height={114}
+                className="h-28 w-auto"
+                style={{ width: 'auto', height: '7rem' }}
+                priority
+              />
             </Link>
-            <Link
-              href="/signup"
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-            >
-              Get Started
-            </Link>
+            <div className="flex items-center space-x-6">
+              <Link href="/login" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
+                Login
+              </Link>
+              <Link
+                href="/signup"
+                className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-semibold transition-all shadow-sm hover:shadow-md"
+              >
+                Get Started
+              </Link>
+            </div>
           </div>
         </div>
       </nav>
@@ -391,15 +404,21 @@ export default function DemoPage() {
             </h2>
             <div className="space-y-2 text-gray-600">
               <p className="flex items-center">
-                <span className="text-green-600 mr-2">✓</span>
+                <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
                 No signup
               </p>
               <p className="flex items-center">
-                <span className="text-green-600 mr-2">✓</span>
+                <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
                 No credit card
               </p>
               <p className="flex items-center">
-                <span className="text-green-600 mr-2">✓</span>
+                <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
                 Live instantly
               </p>
             </div>
@@ -539,7 +558,11 @@ export default function DemoPage() {
             ) : (
               <div className="space-y-6">
                 <div className="text-center">
-                  <div className="text-4xl mb-4">🎧</div>
+                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">
                     Your AI assistant is ready
                   </h3>
@@ -572,10 +595,18 @@ export default function DemoPage() {
                             Connecting to AI...
                           </>
                         ) : callCompleted ? (
-                          '✓ Demo Completed'
+                          <span className="flex items-center gap-2">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Demo Completed
+                          </span>
                         ) : (
                           <>
-                            ▶️ Talk to AI Assistant
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                            </svg>
+                            Talk to AI Assistant
                           </>
                         )}
                       </button>
@@ -589,20 +620,27 @@ export default function DemoPage() {
                           onClick={handleEndCall}
                           className="px-8 py-4 bg-red-600 text-white rounded-md hover:bg-red-700 font-semibold text-lg flex items-center justify-center gap-2 mx-auto"
                         >
-                          🔴 End Call
+                          <div className="w-3 h-3 bg-white rounded-full"></div>
+                          End Call
                         </button>
                       </div>
                     )}
                     
                     {callError && (
-                      <p className="text-sm text-red-600 font-medium">
-                        ⚠️ {callError}
+                      <p className="text-sm text-red-600 font-medium flex items-center justify-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        {callError}
                       </p>
                     )}
                     
                     {callCompleted && !callError && (
-                      <p className="text-sm text-green-600 font-medium">
-                        ✓ Call summary sent to {formData.email}
+                      <p className="text-sm text-green-600 font-medium flex items-center justify-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Call summary sent to {formData.email}
                       </p>
                     )}
                   </div>
@@ -650,19 +688,35 @@ export default function DemoPage() {
           </h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="text-center">
-              <div className="text-3xl mb-2">📞</div>
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </div>
               <p className="font-semibold text-gray-900">Answers calls 24/7</p>
             </div>
             <div className="text-center">
-              <div className="text-3xl mb-2">📧</div>
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
               <p className="font-semibold text-gray-900">Sends call summaries automatically</p>
             </div>
             <div className="text-center">
-              <div className="text-3xl mb-2">🚨</div>
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
               <p className="font-semibold text-gray-900">Flags urgent calls instantly</p>
             </div>
             <div className="text-center">
-              <div className="text-3xl mb-2">⚡</div>
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
               <p className="font-semibold text-gray-900">Live in minutes, not days</p>
             </div>
           </div>

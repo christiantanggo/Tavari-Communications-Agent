@@ -282,6 +282,16 @@ export class StripeService {
     const { PricingPackage } = await import('../models/PricingPackage.js');
     const pkg = await PricingPackage.findById(packageId);
 
+    // Check if package is on sale and track purchase details
+    const isOnSale = pkg ? PricingPackage.isSaleActive(pkg) : false;
+    let salePriceExpiresAt = null;
+    
+    if (isOnSale && pkg.sale_duration_months) {
+      const expirationDate = new Date();
+      expirationDate.setMonth(expirationDate.getMonth() + pkg.sale_duration_months);
+      salePriceExpiresAt = expirationDate.toISOString().split('T')[0];
+    }
+
     // Update business with subscription info
     const subscriptionId = session.subscription;
     if (subscriptionId) {
@@ -295,9 +305,23 @@ export class StripeService {
       if (pkg) {
         updateData.plan_tier = pkg.name.toLowerCase();
         updateData.usage_limit_minutes = pkg.minutes_included;
+        
+        // Track sale purchase details if on sale
+        if (isOnSale) {
+          const priceToCharge = pkg.sale_price || pkg.monthly_price;
+          updateData.purchased_at_sale_price = priceToCharge;
+          updateData.sale_price_expires_at = salePriceExpiresAt;
+          updateData.sale_name = pkg.sale_name;
+        }
       }
 
       await Business.update(businessId, updateData);
+      
+      // Increment sale count if package is on sale
+      if (isOnSale && pkg) {
+        await PricingPackage.incrementSaleCount(packageId);
+      }
+      
       console.log(`[StripeService] Business ${businessId} updated with subscription ${subscriptionId}`);
     }
   }

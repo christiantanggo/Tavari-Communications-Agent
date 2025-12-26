@@ -431,6 +431,58 @@ router.get("/stats", authenticateAdmin, async (req, res) => {
     
     if (bizError) throw bizError;
     
+    // Get demo usage stats
+    let demoStats = {
+      total_demos: 0,
+      total_minutes: 0,
+      total_demos_today: 0,
+      total_minutes_today: 0,
+      total_demos_this_month: 0,
+      total_minutes_this_month: 0,
+    };
+    
+    try {
+      // Total demo usage (all time)
+      const { data: allDemos, error: allDemosError } = await supabaseClient
+        .from("demo_usage")
+        .select("minutes_used");
+      
+      if (!allDemosError && allDemos) {
+        demoStats.total_demos = allDemos.length;
+        demoStats.total_minutes = allDemos.reduce((sum, demo) => sum + (parseFloat(demo.minutes_used) || 0), 0);
+      }
+      
+      // Demo usage today
+      const today = new Date().toISOString().split('T')[0];
+      const { data: todayDemos, error: todayError } = await supabaseClient
+        .from("demo_usage")
+        .select("minutes_used")
+        .eq("date", today);
+      
+      if (!todayError && todayDemos) {
+        demoStats.total_demos_today = todayDemos.length;
+        demoStats.total_minutes_today = todayDemos.reduce((sum, demo) => sum + (parseFloat(demo.minutes_used) || 0), 0);
+      }
+      
+      // Demo usage this month
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+      const { data: monthDemos, error: monthError } = await supabaseClient
+        .from("demo_usage")
+        .select("minutes_used")
+        .eq("month", currentMonth)
+        .eq("year", currentYear);
+      
+      if (!monthError && monthDemos) {
+        demoStats.total_demos_this_month = monthDemos.length;
+        demoStats.total_minutes_this_month = monthDemos.reduce((sum, demo) => sum + (parseFloat(demo.minutes_used) || 0), 0);
+      }
+    } catch (demoError) {
+      // If demo_usage table doesn't exist yet, just log warning and continue
+      console.warn("[Admin Stats] Could not fetch demo stats (table may not exist yet):", demoError.message);
+    }
+    
     const stats = {
       total_accounts: businesses.length,
       active_accounts: businesses.filter(b => b.ai_enabled).length,
@@ -440,6 +492,7 @@ router.get("/stats", authenticateAdmin, async (req, res) => {
         core: businesses.filter(b => b.plan_tier === "core").length,
         pro: businesses.filter(b => b.plan_tier === "pro").length,
       },
+      demo_usage: demoStats,
     };
     
     res.json({ stats });

@@ -18,17 +18,16 @@ router.get('/test-mode', async (req, res) => {
   }
 });
 
-// Get available packages (public packages for customers)
-router.get('/packages', authenticate, async (req, res) => {
+// Get available packages (public endpoint - no auth required for pricing modal)
+router.get('/packages', async (req, res) => {
   try {
-    console.log('[Billing] Fetching packages for business:', req.businessId);
     const packages = await PricingPackage.findAll({
       includeInactive: false,
       includePrivate: false, // Only public packages
     });
     
     console.log('[Billing] Found packages:', packages.length);
-    console.log('[Billing] Packages:', packages.map(p => ({ id: p.id, name: p.name, price: p.monthly_price })));
+    console.log('[Billing] Packages:', packages.map(p => ({ id: p.id, name: p.name, price: p.monthly_price, isOnSale: p.isOnSale })));
     
     res.json({ packages });
   } catch (error) {
@@ -63,19 +62,57 @@ router.post('/checkout', authenticate, async (req, res) => {
       });
     }
     
+    // Get package details first (needed for both Stripe and non-Stripe flows)
+    const pkg = await PricingPackage.findById(packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: 'Package not found' });
+    }
+    
+    // Check if sale is available (active and not sold out)
+    const isOnSale = PricingPackage.isSaleActive(pkg);
+    const saleAvailable = PricingPackage.isSaleAvailable(pkg);
+    
+    if (isOnSale && !saleAvailable) {
+      return res.status(400).json({ 
+        error: 'This sale has ended - all available plans have been sold out',
+        saleName: pkg.sale_name,
+      });
+    }
+    
+    // Determine the price to charge (sale_price if on sale, otherwise monthly_price)
+    const priceToCharge = (isOnSale && pkg.sale_price) ? pkg.sale_price : pkg.monthly_price;
+    
+    // Calculate sale price expiration date if applicable
+    let salePriceExpiresAt = null;
+    if (isOnSale && pkg.sale_duration_months) {
+      const expirationDate = new Date();
+      expirationDate.setMonth(expirationDate.getMonth() + pkg.sale_duration_months);
+      salePriceExpiresAt = expirationDate.toISOString().split('T')[0];
+    }
+    
     // Check if Stripe is configured
     if (!process.env.STRIPE_SECRET_KEY) {
       console.log('[Billing] ⚠️ STRIPE_SECRET_KEY not configured, updating package locally');
-      const pkg = await PricingPackage.findById(packageId);
-      if (!pkg) {
-        return res.status(404).json({ error: 'Package not found' });
-      }
       
-      await Business.update(req.businessId, {
+      const updateData = {
         package_id: packageId,
         plan_tier: pkg.name.toLowerCase(),
         usage_limit_minutes: pkg.minutes_included,
-      });
+      };
+      
+      // Track sale purchase details if on sale
+      if (isOnSale) {
+        updateData.purchased_at_sale_price = priceToCharge;
+        updateData.sale_price_expires_at = salePriceExpiresAt;
+        updateData.sale_name = pkg.sale_name;
+      }
+      
+      await Business.update(req.businessId, updateData);
+      
+      // Increment sale count if package is on sale
+      if (isOnSale) {
+        await PricingPackage.incrementSaleCount(packageId);
+      }
       
       return res.json({ 
         success: true,
@@ -86,12 +123,6 @@ router.post('/checkout', authenticate, async (req, res) => {
       });
     }
     
-    // Get package details
-    const pkg = await PricingPackage.findById(packageId);
-    if (!pkg) {
-      return res.status(404).json({ error: 'Package not found' });
-    }
-    
     const business = await Business.findById(req.businessId);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
@@ -100,12 +131,13 @@ router.post('/checkout', authenticate, async (req, res) => {
     const successUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing/success?package_id=${packageId}&from_setup=true&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/setup`;
     
-    // Create Stripe checkout session
+    // Create Stripe checkout session with the correct price (sale or regular)
     console.log('[Billing] Creating Stripe checkout session for package:', packageId);
+    console.log('[Billing] Package regular price:', pkg.monthly_price, 'Sale price:', pkg.sale_price, 'Charging:', priceToCharge);
     const checkoutSession = await StripeService.createCheckoutSession(
       req.businessId,
       packageId,
-      pkg.monthly_price,
+      priceToCharge,
       pkg.name,
       successUrl,
       cancelUrl
@@ -114,11 +146,20 @@ router.post('/checkout', authenticate, async (req, res) => {
     console.log('[Billing] ✅ Stripe checkout session created:', checkoutSession.sessionId);
     
     // Update package locally (will be confirmed via webhook)
-    await Business.update(req.businessId, {
+    // Track sale purchase details if on sale (webhook will confirm)
+    const updateData = {
       package_id: packageId,
       plan_tier: pkg.name.toLowerCase(),
       usage_limit_minutes: pkg.minutes_included,
-    });
+    };
+    
+    if (isOnSale) {
+      updateData.purchased_at_sale_price = priceToCharge;
+      updateData.sale_price_expires_at = salePriceExpiresAt;
+      updateData.sale_name = pkg.sale_name;
+    }
+    
+    await Business.update(req.businessId, updateData);
     
     return res.json({
       url: checkoutSession.url,

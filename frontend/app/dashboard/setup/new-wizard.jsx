@@ -1040,35 +1040,80 @@ function SetupWizardContent({ testMode = false }) {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {packages.map((pkg) => (
-                        <div
-                          key={pkg.id}
-                          onClick={() => {
-                            setSelectedPackage(pkg);
-                            updateFormData('step5', 'packageId', pkg.id);
-                          }}
-                          className={`cursor-pointer p-6 border-2 rounded-lg transition-all ${
-                            formData.step5.packageId === pkg.id
-                              ? 'border-blue-500 bg-blue-50'
-                              : 'border-gray-200 hover:border-blue-300'
-                          }`}
-                        >
-                          <h3 className="text-xl font-bold text-gray-900 mb-2">{pkg.name}</h3>
-                          <p className="text-2xl font-bold text-blue-600 mb-2">
-                            ${(parseFloat(pkg.monthly_price) || 0).toFixed(2)}/month
-                          </p>
-                          <p className="text-sm text-gray-600 mb-4">{pkg.description}</p>
-                          <div className="text-xs text-gray-500">
-                            {pkg.minutes_included ? `${pkg.minutes_included} minutes included` : 'Unlimited minutes'}
+                      {packages.map((pkg) => {
+                        const isOnSale = pkg.isOnSale && pkg.saleAvailable;
+                        const saleBorderColor = isOnSale ? 'border-orange-500' : '';
+                        const normalBorderColor = formData.step5.packageId === pkg.id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-blue-300';
+                        
+                        return (
+                          <div
+                            key={pkg.id}
+                            onClick={() => {
+                              setSelectedPackage(pkg);
+                              updateFormData('step5', 'packageId', pkg.id);
+                            }}
+                            className={`cursor-pointer p-6 border-2 rounded-lg transition-all relative ${
+                              isOnSale ? saleBorderColor : normalBorderColor
+                            } ${formData.step5.packageId === pkg.id && !isOnSale ? 'bg-blue-50' : ''}`}
+                          >
+                            {isOnSale && pkg.sale_name && (
+                              <div className="absolute -top-3 left-4 bg-orange-500 text-white px-3 py-1 rounded-full text-xs font-bold">
+                                {pkg.sale_name}
+                              </div>
+                            )}
+                            <h3 className="text-xl font-bold text-gray-900 mb-2">{pkg.name}</h3>
+                            <div className="mb-2">
+                              {isOnSale && pkg.sale_price ? (
+                                <>
+                                  <p className="text-2xl font-bold text-blue-600">
+                                    ${(parseFloat(pkg.sale_price) || 0).toFixed(2)}/month
+                                  </p>
+                                  <p className="text-sm text-gray-400 line-through">
+                                    ${(parseFloat(pkg.monthly_price) || 0).toFixed(2)}/month
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-2xl font-bold text-blue-600">
+                                  ${(parseFloat(pkg.monthly_price) || 0).toFixed(2)}/month
+                                </p>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-600 mb-4">{pkg.description}</p>
+                            <div className="text-xs text-gray-500 space-y-1">
+                              <div>
+                                {pkg.minutes_included ? `${pkg.minutes_included} minutes included` : 'Unlimited minutes'}
+                              </div>
+                              {pkg.sms_included !== undefined && pkg.sms_included !== null && (
+                                <div>
+                                  {pkg.sms_included > 0 ? `${pkg.sms_included} SMS included` : 'No SMS included'}
+                                </div>
+                              )}
+                            </div>
+                            {isOnSale && pkg.sale_max_quantity && (
+                              <div className="text-xs text-orange-600 font-semibold mt-2">
+                                Limited Number
+                              </div>
+                            )}
+                            {isOnSale && pkg.sale_duration_months && pkg.sale_name && (
+                              <div className="text-xs text-orange-600 font-semibold mt-1">
+                                "{pkg.sale_name}" special valid for {pkg.sale_duration_months} {pkg.sale_duration_months === 1 ? 'month' : 'months'}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {selectedPackage && (
                     <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                       <p className="text-sm text-blue-800">
-                        <strong>Selected:</strong> {selectedPackage.name} - ${(parseFloat(selectedPackage.monthly_price) || 0).toFixed(2)}/month
+                        <strong>Selected:</strong> {selectedPackage.name} - {
+                          (selectedPackage.isOnSale && selectedPackage.saleAvailable && selectedPackage.sale_price) 
+                            ? `$${(parseFloat(selectedPackage.sale_price) || 0).toFixed(2)}/month`
+                            : `$${(parseFloat(selectedPackage.monthly_price) || 0).toFixed(2)}/month`
+                        }
                         <br />
                         You'll complete payment in the next step.
                       </p>
