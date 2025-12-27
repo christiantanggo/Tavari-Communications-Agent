@@ -293,25 +293,47 @@ export class StripeService {
     console.log('[StripeService] Payment status:', session.payment_status);
     console.log('[StripeService] Amount total:', session.amount_total);
     
-    const businessId = session.metadata?.business_id;
+    let businessId = session.metadata?.business_id;
     const packageId = session.metadata?.package_id;
     const saleName = session.metadata?.sale_name;
     const salePriceExpiresAt = session.metadata?.sale_price_expires_at;
 
-    if (!businessId || !packageId) {
-      console.error('[StripeService] ❌ Missing metadata in checkout session');
-      console.error('[StripeService] businessId:', businessId);
-      console.error('[StripeService] packageId:', packageId);
+    if (!packageId) {
+      console.error('[StripeService] ❌ Missing package ID in checkout session metadata');
       return;
     }
 
-    console.log('[StripeService] Business ID:', businessId);
+    if (!businessId && !session.customer) {
+      console.error('[StripeService] ❌ Missing both business_id in metadata and customer ID in session');
+      return;
+    }
+
+    console.log('[StripeService] Business ID from metadata:', businessId);
+    console.log('[StripeService] Customer ID from session:', session.customer);
     console.log('[StripeService] Package ID:', packageId);
 
-    // Verify business exists before trying to update it
-    const business = await Business.findById(businessId);
+    // Try to find business by metadata business_id first (if provided)
+    let business = null;
+    if (businessId) {
+      business = await Business.findById(businessId);
+    }
+    
+    // If not found by ID, try to find by Stripe customer ID as fallback
+    if (!business && session.customer) {
+      console.warn('[StripeService] ⚠️  Business not found by ID, trying to find by Stripe customer ID:', session.customer);
+      business = await Business.findByStripeCustomerId(session.customer);
+      if (business) {
+        console.log('[StripeService] ✅ Found business by Stripe customer ID:', business.id);
+        // Update businessId to the correct one from the database
+        businessId = business.id;
+      }
+    }
+    
     if (!business) {
-      console.error('[StripeService] ❌ Business not found:', businessId);
+      console.error('[StripeService] ❌ Business not found by ID:', businessId);
+      if (session.customer) {
+        console.error('[StripeService] ❌ Business also not found by Stripe customer ID:', session.customer);
+      }
       console.error('[StripeService] Cannot update business - business does not exist in database');
       return;
     }
