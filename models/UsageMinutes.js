@@ -84,6 +84,24 @@ export class UsageMinutes {
     return this.getMonthlyUsage(business_id, now.getFullYear(), now.getMonth() + 1);
   }
 
+  static async findByCallSessionId(call_session_id) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('usage_minutes')
+        .select('*')
+        .eq('call_session_id', call_session_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (error && error.code !== 'PGRST116') throw error;
+      return data || null;
+    } catch (error) {
+      console.error('[UsageMinutes] Error finding usage by call_session_id:', error);
+      return null;
+    }
+  }
+
   static async getCurrentCycleUsage(business_id, cycleStart, cycleEnd) {
     console.log(`[UsageMinutes] ========== GET CURRENT CYCLE USAGE START ==========`);
     console.log(`[UsageMinutes] business_id: ${business_id}`);

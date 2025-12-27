@@ -209,6 +209,19 @@ export async function recordCallUsage(businessId, callSessionId, minutesUsed) {
 
   console.log(`[Usage] Current usage: ${usage.totalMinutes} / ${totalAvailable}, isOverage: ${isOverage}`);
 
+  // Check if usage record already exists for this call session (prevent duplicates)
+  const existingUsage = await UsageMinutes.findByCallSessionId(callSessionId);
+  if (existingUsage) {
+    console.log(`[Usage] ⚠️ Usage record already exists for call_session_id: ${callSessionId}`);
+    console.log(`[Usage] Existing record:`, {
+      id: existingUsage.id,
+      minutes_used: existingUsage.minutes_used,
+      created_at: existingUsage.created_at,
+    });
+    console.log(`[Usage] Skipping duplicate usage record creation`);
+    return existingUsage;
+  }
+
   // Record usage
   try {
     const usageData = {
