@@ -308,6 +308,14 @@ export class StripeService {
     console.log('[StripeService] Business ID:', businessId);
     console.log('[StripeService] Package ID:', packageId);
 
+    // Verify business exists before trying to update it
+    const business = await Business.findById(businessId);
+    if (!business) {
+      console.error('[StripeService] ❌ Business not found:', businessId);
+      console.error('[StripeService] Cannot update business - business does not exist in database');
+      return;
+    }
+
     // Get package details to update plan_tier and usage_limit_minutes
     const { PricingPackage } = await import('../models/PricingPackage.js');
     const pkg = await PricingPackage.findById(packageId);
