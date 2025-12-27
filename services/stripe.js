@@ -124,37 +124,8 @@ export class StripeService {
         });
       }
 
-      // Always use dynamic price_data to ensure the price matches what's in the database
-      // This handles sale prices and price changes correctly
-      // We'll check if we can reuse the stored price ID, but only if the price matches
-      let priceId = null;
-      let usePriceData = true; // Default to using price_data for dynamic pricing
-      
-      // Check if we have a stored price ID that matches the current price
-      if (pkg.stripe_price_id) {
-        try {
-          const stripe = getStripe();
-          const existingPrice = await stripe.prices.retrieve(pkg.stripe_price_id);
-          const existingPriceAmount = existingPrice.unit_amount / 100; // Convert cents to dollars
-          
-          // Only reuse the price ID if the amount matches exactly
-          if (Math.abs(existingPriceAmount - packagePrice) < 0.01) {
-            console.log('[StripeService] Reusing existing Stripe price that matches current price:', pkg.stripe_price_id);
-            priceId = pkg.stripe_price_id;
-            usePriceData = false; // Use existing price ID
-          } else {
-            console.log('[StripeService] Stored price ID amount does not match current price. Stored:', existingPriceAmount, 'Current:', packagePrice);
-            console.log('[StripeService] Creating new price with current amount...');
-            // Will create new price below
-          }
-        } catch (error) {
-          // Price doesn't exist (might be from test mode or deleted)
-          console.warn('[StripeService] Stored price ID does not exist in Stripe:', pkg.stripe_price_id);
-          console.warn('[StripeService] Error:', error.message);
-          console.log('[StripeService] Creating new price...');
-          // Will create new price below
-        }
-      }
+      // ALWAYS use price_data for subscriptions to ensure correct price
+      // This avoids issues with stale price IDs and ensures database price matches Stripe
       
       // Get or create product ID (needed for price_data)
       let productId = pkg.stripe_product_id;
@@ -188,32 +159,57 @@ export class StripeService {
         console.log('[StripeService] Created new Stripe product:', productId);
       }
 
-      // Create checkout session - use price_data to ensure correct price is always used
+      // Create checkout session - ALWAYS use price_data to ensure correct price
       const stripe = getStripe();
-      const lineItems = [];
       
-      if (priceId && !usePriceData) {
-        // Use existing price ID if it matches the current price
-        lineItems.push({
-          price: priceId,
-          quantity: 1,
-        });
-        console.log('[StripeService] Using existing Stripe price ID:', priceId);
-      } else {
-        // Use price_data to ensure the price matches what's in the database (handles sales and price changes)
-        lineItems.push({
-          price_data: {
-            currency: 'cad',
-            product: productId,
-            unit_amount: Math.round(packagePrice * 100), // Convert to cents - ensures correct price
-            recurring: {
-              interval: 'month',
-            },
-          },
-          quantity: 1,
-        });
-        console.log('[StripeService] Using price_data with dynamic price:', packagePrice, '(ensures UI price matches Stripe)');
+      // Validate price is valid
+      if (!packagePrice || packagePrice <= 0) {
+        throw new Error(`Invalid package price: ${packagePrice}. Price must be greater than 0.`);
       }
+      
+      // Stripe minimum charge amounts by currency
+      // For CAD, minimum is $0.50 for one-time payments and subscriptions
+      const MINIMUM_AMOUNTS = {
+        cad: 0.50,
+        usd: 0.50,
+        eur: 0.50,
+        gbp: 0.30,
+      };
+      
+      const currency = 'cad'; // Currently only supporting CAD
+      const minimumAmount = MINIMUM_AMOUNTS[currency.toLowerCase()] || 0.50;
+      
+      if (packagePrice < minimumAmount) {
+        throw new Error(
+          `Package price ($${packagePrice.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum charge amount of $${minimumAmount.toFixed(2)} ${currency.toUpperCase()}. ` +
+          `Stripe will reject payments below this amount. Please set a valid package price.`
+        );
+      }
+      
+      const lineItems = [{
+        price_data: {
+          currency: 'cad',
+          product: productId,
+          unit_amount: Math.round(packagePrice * 100), // Convert to cents
+          recurring: {
+            interval: 'month',
+          },
+        },
+        quantity: 1,
+      }];
+      
+      console.log('[StripeService] Using price_data - Price:', packagePrice, 'CAD (', Math.round(packagePrice * 100), 'cents)');
+      
+      console.log('[StripeService] Creating checkout session with:');
+      console.log('[StripeService] - customer:', customerId);
+      console.log('[StripeService] - line_items:', JSON.stringify(lineItems, null, 2));
+      console.log('[StripeService] - mode: subscription');
+      console.log('[StripeService] - metadata:', {
+        business_id: businessId,
+        package_id: packageId,
+        sale_name: saleName || '',
+        sale_price_expires_at: salePriceExpiresAt || '',
+      });
       
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
@@ -235,6 +231,10 @@ export class StripeService {
           },
         },
       });
+      
+      console.log('[StripeService] ✅ Checkout session created:', session.id);
+      console.log('[StripeService] Checkout URL:', session.url);
+      console.log('[StripeService] Payment status:', session.payment_status);
 
       return {
         sessionId: session.id,
@@ -286,58 +286,127 @@ export class StripeService {
 
   // Handle checkout completed
   static async handleCheckoutCompleted(session) {
+    console.log('[StripeService] ========== HANDLING CHECKOUT COMPLETED ==========');
+    console.log('[StripeService] Session ID:', session.id);
+    console.log('[StripeService] Session metadata:', JSON.stringify(session.metadata, null, 2));
+    console.log('[StripeService] Subscription ID:', session.subscription);
+    console.log('[StripeService] Payment status:', session.payment_status);
+    console.log('[StripeService] Amount total:', session.amount_total);
+    
     const businessId = session.metadata?.business_id;
     const packageId = session.metadata?.package_id;
     const saleName = session.metadata?.sale_name;
     const salePriceExpiresAt = session.metadata?.sale_price_expires_at;
 
     if (!businessId || !packageId) {
-      console.warn('[StripeService] Missing metadata in checkout session');
+      console.error('[StripeService] ❌ Missing metadata in checkout session');
+      console.error('[StripeService] businessId:', businessId);
+      console.error('[StripeService] packageId:', packageId);
       return;
     }
+
+    console.log('[StripeService] Business ID:', businessId);
+    console.log('[StripeService] Package ID:', packageId);
 
     // Get package details to update plan_tier and usage_limit_minutes
     const { PricingPackage } = await import('../models/PricingPackage.js');
     const pkg = await PricingPackage.findById(packageId);
+    
+    if (!pkg) {
+      console.error('[StripeService] ❌ Package not found:', packageId);
+      return;
+    }
+    
+    console.log('[StripeService] Package found:', pkg.name);
+    console.log('[StripeService] Package minutes included:', pkg.minutes_included);
 
     // Use sale info from metadata (more reliable than recalculating)
     const isOnSale = !!(saleName && saleName.trim() !== '');
 
     // Update business with subscription info
-    const subscriptionId = session.subscription;
-    if (subscriptionId) {
-      const updateData = {
-        stripe_subscription_id: subscriptionId,
-        stripe_subscription_status: 'active',
-        package_id: packageId,
-      };
-
-      // If package found, update plan tier and usage limit
-      if (pkg) {
-        updateData.plan_tier = pkg.name.toLowerCase();
-        updateData.usage_limit_minutes = pkg.minutes_included;
-        
-        // Track sale purchase details if on sale (use metadata values)
-        if (isOnSale) {
-          // Get the actual amount charged from the session (most accurate)
-          const amountCharged = session.amount_total ? session.amount_total / 100 : null;
-          if (amountCharged) {
-            updateData.purchased_at_sale_price = amountCharged;
-          }
-          updateData.sale_price_expires_at = salePriceExpiresAt && salePriceExpiresAt.trim() !== '' ? salePriceExpiresAt : null;
-          updateData.sale_name = saleName;
-        }
-      }
-
-      await Business.update(businessId, updateData);
-      
-      // Increment sale count if package is on sale
-      if (isOnSale && pkg) {
-        await PricingPackage.incrementSaleCount(packageId);
-      }
-      
-      console.log(`[StripeService] Business ${businessId} updated with subscription ${subscriptionId}`);
+    let subscriptionId = session.subscription;
+    
+    // If subscription ID is a string, use it directly; if it's an object, extract the ID
+    if (typeof subscriptionId === 'object' && subscriptionId !== null) {
+      subscriptionId = subscriptionId.id;
     }
+    
+    // If still no subscription ID, try to retrieve the session again to get the latest data
+    if (!subscriptionId) {
+      console.warn('[StripeService] ⚠️  No subscription ID in checkout session, retrieving session from Stripe...');
+      try {
+        const stripe = getStripe();
+        const retrievedSession = await stripe.checkout.sessions.retrieve(session.id, {
+          expand: ['subscription'],
+        });
+        subscriptionId = retrievedSession.subscription;
+        
+        if (typeof subscriptionId === 'object' && subscriptionId !== null) {
+          subscriptionId = subscriptionId.id;
+        }
+        
+        if (subscriptionId) {
+          console.log('[StripeService] ✅ Found subscription ID after retrieval:', subscriptionId);
+        } else {
+          console.error('[StripeService] ❌ No subscription ID found even after retrieving session');
+          console.error('[StripeService] Retrieved session:', JSON.stringify(retrievedSession, null, 2));
+          return;
+        }
+      } catch (retrieveError) {
+        console.error('[StripeService] ❌ Error retrieving session from Stripe:', retrieveError);
+        return;
+      }
+    }
+    
+    console.log('[StripeService] ✅ Subscription ID found:', subscriptionId);
+    
+    const updateData = {
+      stripe_subscription_id: subscriptionId,
+      stripe_subscription_status: 'active',
+      package_id: packageId,
+    };
+
+    // If package found, update plan tier and usage limit
+    if (pkg) {
+      updateData.plan_tier = pkg.name.toLowerCase();
+      updateData.usage_limit_minutes = pkg.minutes_included;
+      
+      console.log('[StripeService] Updating business with:');
+      console.log('[StripeService] - plan_tier:', updateData.plan_tier);
+      console.log('[StripeService] - usage_limit_minutes:', updateData.usage_limit_minutes);
+      
+      // Track sale purchase details if on sale (use metadata values)
+      if (isOnSale) {
+        // Get the actual amount charged from the session (most accurate)
+        const amountCharged = session.amount_total ? session.amount_total / 100 : null;
+        if (amountCharged) {
+          updateData.purchased_at_sale_price = amountCharged;
+          console.log('[StripeService] Sale price charged:', amountCharged);
+        }
+        updateData.sale_price_expires_at = salePriceExpiresAt && salePriceExpiresAt.trim() !== '' ? salePriceExpiresAt : null;
+        updateData.sale_name = saleName;
+        console.log('[StripeService] Sale name:', saleName);
+        console.log('[StripeService] Sale price expires at:', updateData.sale_price_expires_at);
+      }
+    }
+
+    console.log('[StripeService] Final update data:', JSON.stringify(updateData, null, 2));
+    
+    const updatedBusiness = await Business.update(businessId, updateData);
+    
+    console.log('[StripeService] ✅ Business updated successfully');
+    console.log('[StripeService] Updated business plan_tier:', updatedBusiness.plan_tier);
+    console.log('[StripeService] Updated business usage_limit_minutes:', updatedBusiness.usage_limit_minutes);
+    console.log('[StripeService] Updated business package_id:', updatedBusiness.package_id);
+    
+    // Increment sale count if package is on sale
+    if (isOnSale && pkg) {
+      await PricingPackage.incrementSaleCount(packageId);
+      console.log('[StripeService] ✅ Incremented sale count for package:', packageId);
+    }
+    
+    console.log(`[StripeService] ✅ Business ${businessId} updated with subscription ${subscriptionId}`);
+    console.log('[StripeService] ================================================');
   }
 
   // Handle subscription update

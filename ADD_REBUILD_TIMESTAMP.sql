@@ -7,3 +7,4 @@ ADD COLUMN IF NOT EXISTS vapi_assistant_rebuilt_at TIMESTAMP;
 -- Add comment
 COMMENT ON COLUMN businesses.vapi_assistant_rebuilt_at IS 'Timestamp of when the VAPI assistant was last rebuilt';
 
+

@@ -73,8 +73,17 @@ app.use(cors({
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
 }));
 
-// Body parsing
-app.use(express.json({ limit: "10mb" }));
+// Body parsing - EXCLUDE webhook endpoints that need raw body
+// Stripe webhooks need raw body for signature verification
+const jsonParser = express.json({ limit: "10mb" });
+app.use((req, res, next) => {
+  // Skip JSON parsing for Stripe webhooks (they need raw body for signature verification)
+  if (req.path.includes('/api/billing/webhook')) {
+    return next();
+  }
+  // Apply JSON parsing for all other routes
+  jsonParser(req, res, next);
+});
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging
@@ -372,7 +381,7 @@ try {
 }
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('\n' + '='.repeat(60));
   console.log('🚀 TAVARI SERVER - VAPI VERSION');
   console.log('='.repeat(60));

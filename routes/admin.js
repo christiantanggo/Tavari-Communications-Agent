@@ -6,6 +6,7 @@ import { authenticateAdmin } from "../middleware/adminAuth.js";
 import { AdminUser } from "../models/AdminUser.js";
 import { AdminActivityLog } from "../models/AdminActivityLog.js";
 import { Business } from "../models/Business.js";
+import { PricingPackage } from "../models/PricingPackage.js";
 import { generateToken } from "../utils/auth.js";
 import { hashPassword } from "../utils/auth.js";
 import { sendSupportTicketUpdateNotification } from "../services/notifications.js";
@@ -623,7 +624,6 @@ router.get("/test-vapi", authenticateAdmin, async (req, res) => {
 });
 
 import { AIAgent } from "../models/AIAgent.js";
-import { PricingPackage } from "../models/PricingPackage.js";
 
 // ============================================
 // PACKAGE MANAGEMENT ROUTES
@@ -724,6 +724,29 @@ router.put("/packages/:id", authenticateAdmin, async (req, res) => {
     const existingPackage = await PricingPackage.findById(packageId);
     if (!existingPackage) {
       return res.status(404).json({ error: "Package not found" });
+    }
+
+    // Validate minimum price amounts for Stripe
+    // Stripe minimum charge amounts by currency (CAD minimum is $0.50)
+    const MINIMUM_AMOUNTS = {
+      cad: 0.50,
+      usd: 0.50,
+      eur: 0.50,
+      gbp: 0.30,
+    };
+    const currency = 'cad'; // Currently only supporting CAD
+    const minimumAmount = MINIMUM_AMOUNTS[currency.toLowerCase()] || 0.50;
+
+    if (packageData.monthly_price !== undefined && packageData.monthly_price < minimumAmount) {
+      return res.status(400).json({
+        error: `Monthly price ($${packageData.monthly_price.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum charge amount of $${minimumAmount.toFixed(2)} ${currency.toUpperCase()}. Stripe will reject payments below this amount.`,
+      });
+    }
+
+    if (packageData.sale_price !== undefined && packageData.sale_price !== null && packageData.sale_price < minimumAmount) {
+      return res.status(400).json({
+        error: `Sale price ($${packageData.sale_price.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum charge amount of $${minimumAmount.toFixed(2)} ${currency.toUpperCase()}. Stripe will reject payments below this amount.`,
+      });
     }
 
     const pkg = await PricingPackage.update(packageId, packageData);

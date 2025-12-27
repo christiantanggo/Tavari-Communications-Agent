@@ -385,11 +385,20 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 
   try {
-    console.log('[Billing Webhook] Received event:', event.type);
+    console.log('[Billing Webhook] ========== WEBHOOK EVENT RECEIVED ==========');
+    console.log('[Billing Webhook] Event type:', event.type);
+    console.log('[Billing Webhook] Event ID:', event.id);
+    console.log('[Billing Webhook] Event data:', JSON.stringify(event.data, null, 2));
+    
     await StripeService.handleWebhook(event);
+    
+    console.log('[Billing Webhook] ✅ Webhook processed successfully');
+    console.log('[Billing Webhook] ============================================');
+    
     res.json({ received: true });
   } catch (error) {
-    console.error('[Billing Webhook] Error processing webhook:', error);
+    console.error('[Billing Webhook] ❌ Error processing webhook:', error);
+    console.error('[Billing Webhook] Error stack:', error.stack);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });

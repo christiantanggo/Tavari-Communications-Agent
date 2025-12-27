@@ -3,11 +3,14 @@ import Cookies from 'js-cookie';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/$/, ''); // Remove trailing slash
 
+console.log('[API] Initializing API client with URL:', API_URL);
+
 const api = axios.create({
   baseURL: `${API_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // 30 second timeout
 });
 
 // Add auth token to requests
@@ -40,6 +43,15 @@ const retryRequest = async (config, retries = 2) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    // Log network errors for debugging
+    if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || !error.response) {
+      console.error('[API] Network error:', error.message);
+      console.error('[API] API URL:', API_URL);
+      console.error('[API] Full error:', error);
+      // Don't redirect on network errors - let the component handle it
+      return Promise.reject(new Error(`Unable to connect to server. Please check that the backend is running at ${API_URL}`));
+    }
+    
     if (error.response?.status === 401) {
       Cookies.remove('token');
       if (typeof window !== 'undefined') {

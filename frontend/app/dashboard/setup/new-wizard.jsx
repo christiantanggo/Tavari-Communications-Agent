@@ -17,7 +17,7 @@
  * Each step has a skip button with warning
  */
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
@@ -43,13 +43,26 @@ function Step6PhoneNumber({
   const [autoAssigning, setAutoAssigning] = useState(true);
   const [autoAssigned, setAutoAssigned] = useState(false);
   const [showSelector, setShowSelector] = useState(false);
+  const lastBusinessId = useRef(null);
 
   useEffect(() => {
+    // Wait for business data to load
+    if (business === null) {
+      return; // Still loading
+    }
+
+    // Reset if business ID changed
+    if (lastBusinessId.current !== business?.id) {
+      lastBusinessId.current = business?.id;
+      setAutoAssigning(true);
+      setAutoAssigned(false);
+      setShowSelector(false);
+    } else {
+      // Already processed this business
+      return;
+    }
+
     const tryAutoAssign = async () => {
-      // Wait for business data to load
-      if (business === null) {
-        return; // Still loading
-      }
 
       // Check if business already has a phone number
       if (business?.vapi_phone_number || business?.telnyx_number) {
@@ -99,7 +112,7 @@ function Step6PhoneNumber({
     };
 
     tryAutoAssign();
-  }, [business, setSelectedPhoneNumber, updateFormData, success, setBusiness]);
+  }, [business?.id]); // Only depend on business.id to avoid infinite loops
 
   if (autoAssigning) {
     return (

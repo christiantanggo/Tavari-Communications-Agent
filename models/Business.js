@@ -18,6 +18,8 @@ export class Business {
         phone,
         address,
         timezone,
+        // DO NOT set usage_limit_minutes - it must remain NULL until package is purchased
+        // This ensures no free minutes are given if payment fails
       })
       .select()
       .single();

@@ -444,40 +444,60 @@ router.post('/signup', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
+    console.log('[Auth Login] ========== LOGIN ATTEMPT START ==========');
+    console.log('[Auth Login] Email:', req.body.email);
+    
     const { email, password } = req.body;
     
     if (!email || !password) {
+      console.log('[Auth Login] ❌ Missing email or password');
       return res.status(400).json({ error: 'Email and password are required' });
     }
     
+    console.log('[Auth Login] Looking up user...');
     const user = await User.findByEmail(email);
     
     if (!user) {
+      console.log('[Auth Login] ❌ User not found for email:', email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
+    console.log('[Auth Login] ✅ User found, verifying password...');
     const isValid = await comparePassword(password, user.password_hash);
     
     if (!isValid) {
+      console.log('[Auth Login] ❌ Invalid password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
     if (!user.is_active) {
+      console.log('[Auth Login] ❌ Account is inactive');
       return res.status(401).json({ error: 'Account is inactive' });
     }
     
+    console.log('[Auth Login] ✅ Password valid, updating last login...');
     // Update last login
     await User.updateLastLogin(user.id);
     
+    console.log('[Auth Login] Fetching business...');
     // Get business
     const business = await Business.findById(user.business_id);
     
+    if (!business) {
+      console.log('[Auth Login] ❌ Business not found for user');
+      return res.status(500).json({ error: 'Business not found' });
+    }
+    
+    console.log('[Auth Login] Generating token...');
     // Generate token
     const token = generateToken({
       userId: user.id,
       businessId: user.business_id,
       email: user.email,
     });
+    
+    console.log('[Auth Login] ✅ Login successful, token generated');
+    console.log('[Auth Login] ========== LOGIN ATTEMPT COMPLETE ==========');
     
     res.json({
       token,
@@ -496,8 +516,9 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+    console.error('[Auth Login] ❌ Error:', error);
+    console.error('[Auth Login] Error stack:', error.stack);
+    res.status(500).json({ error: 'Login failed', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
   }
 });
 
