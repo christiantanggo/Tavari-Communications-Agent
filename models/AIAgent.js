@@ -50,6 +50,13 @@ export class AIAgent {
       updated_at: new Date().toISOString(),
     };
     
+    console.log('[AIAgent Model] ========== UPDATING AI AGENT ==========');
+    console.log('[AIAgent Model] Business ID:', business_id);
+    console.log('[AIAgent Model] Update data (keys):', Object.keys(updateData));
+    if (updateData.business_hours) {
+      console.log('[AIAgent Model] business_hours being saved:', JSON.stringify(updateData.business_hours, null, 2));
+    }
+    
     const { data: agent, error } = await supabaseClient
       .from('ai_agents')
       .update(updateData)
@@ -57,7 +64,23 @@ export class AIAgent {
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      console.error('[AIAgent Model] ❌ Error updating agent:', error);
+      console.error('[AIAgent Model] Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
+    
+    console.log('[AIAgent Model] ✅ Agent updated successfully');
+    if (agent.business_hours) {
+      console.log('[AIAgent Model] Saved business_hours:', JSON.stringify(agent.business_hours, null, 2));
+    }
+    console.log('[AIAgent Model] ===============================================');
+    
     return agent;
   }
 }

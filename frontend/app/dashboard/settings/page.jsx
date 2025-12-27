@@ -187,20 +187,24 @@ function SettingsPage() {
       if (agentRes.data?.agent) {
         const agentData = agentRes.data.agent;
         
-        // Always set business hours - use defaults if missing
-        const loadedBusinessHours = (agentData.business_hours && typeof agentData.business_hours === 'object' && Object.keys(agentData.business_hours).length > 0)
-          ? JSON.parse(JSON.stringify(agentData.business_hours))
-          : {
-              monday: { open: '09:00', close: '17:00', closed: false },
-              tuesday: { open: '09:00', close: '17:00', closed: false },
-              wednesday: { open: '09:00', close: '17:00', closed: false },
-              thursday: { open: '09:00', close: '17:00', closed: false },
-              friday: { open: '09:00', close: '17:00', closed: false },
-              saturday: { closed: true },
-              sunday: { closed: true },
-            };
-        console.log('[Settings Load] Setting businessHours:', loadedBusinessHours);
-        setBusinessHours(loadedBusinessHours);
+        // CRITICAL: Only use defaults if business_hours is truly missing
+        // If it's null, undefined, or empty object, preserve current state (don't overwrite with defaults)
+        // This prevents losing hours when they're temporarily null during rebuild
+        if (agentData.business_hours && typeof agentData.business_hours === 'object' && Object.keys(agentData.business_hours).length > 0) {
+          // Valid business hours exist - use them
+          const loadedBusinessHours = JSON.parse(JSON.stringify(agentData.business_hours));
+          console.log('[Settings Load] ✅ Using business_hours from database:', loadedBusinessHours);
+          setBusinessHours(loadedBusinessHours);
+        } else if (agentData.business_hours === null || agentData.business_hours === undefined) {
+          // business_hours is null/undefined - preserve current state (don't reset to defaults)
+          // This prevents overwriting hours that might be temporarily null during rebuild
+          console.warn('[Settings Load] ⚠️ business_hours is null/undefined - preserving current state to prevent data loss');
+          // Don't call setBusinessHours - keep whatever is currently in the state
+        } else {
+          // Empty object {} - also preserve current state
+          console.warn('[Settings Load] ⚠️ business_hours is empty object - preserving current state to prevent data loss');
+          // Don't call setBusinessHours - keep whatever is currently in the state
+        }
         
         // Always set FAQs
         const loadedFaqs = (agentData.faqs && Array.isArray(agentData.faqs)) 

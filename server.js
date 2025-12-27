@@ -320,6 +320,57 @@ try {
   console.warn('⚠️  Could not start queued SMS processor:', error.message);
 }
 
+// Start scheduled job to update expired sale prices (daily at 2 AM)
+let expiredSalePricesInterval = null;
+try {
+  const { StripeService } = await import('./services/stripe.js');
+  
+  // Calculate milliseconds until next 2 AM
+  const getMsUntil2AM = () => {
+    const now = new Date();
+    const next2AM = new Date();
+    next2AM.setHours(2, 0, 0, 0); // 2 AM today
+    
+    // If it's already past 2 AM today, set for tomorrow
+    if (now >= next2AM) {
+      next2AM.setDate(next2AM.getDate() + 1);
+    }
+    
+    return next2AM.getTime() - now.getTime();
+  };
+  
+  // Update expired sale prices job
+  const updateExpiredSalePricesJob = async () => {
+    try {
+      console.log('[Server] Running daily expired sale prices check...');
+      await StripeService.updateExpiredSalePrices();
+    } catch (error) {
+      console.error('[Server] Error in expired sale prices job:', error.message);
+    }
+  };
+  
+  // Run immediately on startup (in case there are expired sales)
+  updateExpiredSalePricesJob();
+  
+  // Schedule to run daily at 2 AM
+  const scheduleNextRun = () => {
+    const msUntilNext = getMsUntil2AM();
+    console.log(`[Server] Next expired sale prices check scheduled in ${Math.round(msUntilNext / 1000 / 60)} minutes (at 2 AM)`);
+    
+    setTimeout(() => {
+      updateExpiredSalePricesJob();
+      // After first run, schedule to run every 24 hours
+      expiredSalePricesInterval = setInterval(updateExpiredSalePricesJob, 24 * 60 * 60 * 1000); // 24 hours
+    }, msUntilNext);
+  };
+  
+  scheduleNextRun();
+  
+  console.log('✅ Expired sale prices checker started (runs daily at 2 AM)');
+} catch (error) {
+  console.warn('⚠️  Could not start expired sale prices checker:', error.message);
+}
+
 // Start server
 const server = app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));

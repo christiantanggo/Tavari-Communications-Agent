@@ -79,6 +79,8 @@ export const authAPI = {
   getMe: () => api.get('/auth/me'),
   updateEmail: (email) => api.put('/auth/me/email', { email }),
   updatePassword: (currentPassword, newPassword) => api.put('/auth/me/password', { currentPassword, newPassword }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: ({ code, email, password }) => api.post('/auth/reset-password', { code, email, password }),
   getUsers: () => api.get('/auth/users'),
   createUser: (data) => api.post('/auth/users', data),
   updateUser: (userId, data) => api.put(`/auth/users/${userId}`, data),
@@ -130,8 +132,6 @@ export const billingAPI = {
   getPackages: () => api.get('/billing/packages'),
   createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
   verifyStripeSession: (sessionId) => api.get('/billing/verify-session', { params: { session_id: sessionId } }),
-  getHostedPayment: () => api.get('/billing/hosted-payment'),
-  getHostedPaymentCheckout: (packageId) => api.get(`/billing/hosted-payment/checkout?packageId=${packageId}`),
   getTestMode: () => api.get('/billing/test-mode'),
 };
 

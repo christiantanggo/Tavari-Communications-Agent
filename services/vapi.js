@@ -1119,17 +1119,36 @@ export async function rebuildAssistant(businessId) {
     const allowTransfer = businessRecord.allow_call_transfer ?? true;
     const afterHoursBehavior = businessRecord.after_hours_behavior || "take_message";
     
-    const businessHours = agentRecord?.business_hours || {};
+    // CRITICAL: Check if business_hours exists and has actual data
+    // If it's null, undefined, or an empty object, we should NOT use defaults
+    // Instead, we should preserve whatever is in the database (even if empty)
+    let businessHours = agentRecord?.business_hours;
     
     // Log business hours for debugging
     console.log(`[VAPI Rebuild] ========== BUSINESS HOURS FROM DATABASE ==========`);
-    console.log(`[VAPI Rebuild] Raw business_hours:`, JSON.stringify(businessHours, null, 2));
+    console.log(`[VAPI Rebuild] Raw business_hours from DB:`, JSON.stringify(businessHours, null, 2));
+    console.log(`[VAPI Rebuild] business_hours type:`, typeof businessHours);
+    console.log(`[VAPI Rebuild] business_hours is null:`, businessHours === null);
+    console.log(`[VAPI Rebuild] business_hours is undefined:`, businessHours === undefined);
+    console.log(`[VAPI Rebuild] business_hours is empty object:`, businessHours && typeof businessHours === 'object' && Object.keys(businessHours).length === 0);
+    
+    // Only use empty object as fallback if business_hours is truly missing
+    // DO NOT overwrite existing hours (even if they seem "empty")
+    if (businessHours === null || businessHours === undefined) {
+      console.warn(`[VAPI Rebuild] ⚠️ business_hours is null/undefined, using empty object for rebuild (but NOT updating database)`);
+      businessHours = {};
+    } else if (typeof businessHours !== 'object') {
+      console.warn(`[VAPI Rebuild] ⚠️ business_hours is not an object (type: ${typeof businessHours}), using empty object for rebuild`);
+      businessHours = {};
+    }
+    
     if (businessHours && typeof businessHours === 'object') {
       Object.keys(businessHours).forEach(day => {
         const hours = businessHours[day];
         console.log(`[VAPI Rebuild] ${day}:`, hours);
       });
     }
+    console.log(`[VAPI Rebuild] Final business_hours being used for rebuild:`, JSON.stringify(businessHours, null, 2));
     console.log(`[VAPI Rebuild] ================================================`);
     
     // CRITICAL: Normalize holiday hours dates to ensure they're in YYYY-MM-DD format

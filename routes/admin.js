@@ -420,16 +420,31 @@ router.post("/accounts/:id/sync-vapi", authenticateAdmin, async (req, res) => {
   }
 });
 
-// Get dashboard stats
-router.get("/stats", authenticateAdmin, async (req, res) => {
-  try {
-    const { supabaseClient } = await import("../config/database.js");
-    const { data: businesses, error: bizError } = await supabaseClient
-      .from("businesses")
-      .select("id, ai_enabled, plan_tier")
-      .is("deleted_at", null);
-    
-    if (bizError) throw bizError;
+    // Get dashboard stats
+    router.get("/stats", authenticateAdmin, async (req, res) => {
+      try {
+        const { supabaseClient } = await import("../config/database.js");
+        const { PricingPackage } = await import("../models/PricingPackage.js");
+        
+        // Get businesses with their package relationships
+        const { data: businesses, error: bizError } = await supabaseClient
+          .from("businesses")
+          .select("id, ai_enabled, plan_tier, package_id")
+          .is("deleted_at", null);
+        
+        if (bizError) throw bizError;
+        
+        // Get all packages to map package_id to package name
+        let packagesMap = new Map();
+        try {
+          const allPackages = await PricingPackage.findAll({ includeInactive: true, includePrivate: true });
+          allPackages.forEach(pkg => {
+            packagesMap.set(pkg.id, pkg.name);
+          });
+          console.log("[Admin Stats] Loaded packages:", Array.from(packagesMap.entries()).map(([id, name]) => ({ id, name })));
+        } catch (pkgError) {
+          console.warn("[Admin Stats] Could not fetch packages for plan distribution:", pkgError.message);
+        }
     
     // Get demo usage stats
     let demoStats = {
@@ -483,15 +498,58 @@ router.get("/stats", authenticateAdmin, async (req, res) => {
       console.warn("[Admin Stats] Could not fetch demo stats (table may not exist yet):", demoError.message);
     }
     
+    // Helper function to determine plan tier from business (checks package name first, then plan_tier field)
+    const getPlanTier = (business) => {
+      // First, try to get tier from package name if package_id exists
+      if (business.package_id && packagesMap.has(business.package_id)) {
+        const packageName = packagesMap.get(business.package_id).toLowerCase();
+        if (packageName.includes('starter')) return 'starter';
+        if (packageName.includes('core')) return 'core';
+        if (packageName.includes('pro')) return 'pro';
+      }
+      
+      // Fall back to plan_tier field
+      if (business.plan_tier) {
+        const normalized = business.plan_tier.toLowerCase().trim();
+        if (normalized.includes('starter')) return 'starter';
+        if (normalized.includes('core')) return 'core';
+        if (normalized.includes('pro')) return 'pro';
+      }
+      
+      return null; // Unknown tier
+    };
+    
+    // Calculate tier counts
+    const tierCounts = {
+      starter: 0,
+      core: 0,
+      pro: 0,
+    };
+    
+    // Debug: Log sample businesses to understand data structure
+    if (businesses.length > 0) {
+      console.log("[Admin Stats] Sample business data:", JSON.stringify(businesses.slice(0, 3).map(b => ({
+        id: b.id,
+        plan_tier: b.plan_tier,
+        package_id: b.package_id
+      })), null, 2));
+    }
+    
+    businesses.forEach(business => {
+      const tier = getPlanTier(business);
+      console.log(`[Admin Stats] Business ${business.id.substring(0, 8)}... plan_tier="${business.plan_tier}", package_id="${business.package_id}", detected_tier="${tier}"`);
+      if (tier === 'starter') tierCounts.starter++;
+      else if (tier === 'core') tierCounts.core++;
+      else if (tier === 'pro') tierCounts.pro++;
+    });
+    
+    console.log("[Admin Stats] Plan distribution calculated:", tierCounts);
+    
     const stats = {
       total_accounts: businesses.length,
       active_accounts: businesses.filter(b => b.ai_enabled).length,
       inactive_accounts: businesses.filter(b => !b.ai_enabled).length,
-      by_tier: {
-        starter: businesses.filter(b => b.plan_tier === "starter").length,
-        core: businesses.filter(b => b.plan_tier === "core").length,
-        pro: businesses.filter(b => b.plan_tier === "pro").length,
-      },
+      by_tier: tierCounts,
       demo_usage: demoStats,
     };
     
@@ -1630,6 +1688,27 @@ router.post("/accounts/:id/rebuild-assistant", authenticateAdmin, async (req, re
     if (!business.vapi_assistant_id) {
       return res.status(400).json({ error: "No VAPI assistant found for this business" });
     }
+    
+    // CRITICAL: Verify business hours exist before rebuild
+    const { AIAgent } = await import("../models/AIAgent.js");
+    const agent = await AIAgent.findByBusinessId(req.params.id);
+    
+    console.log(`[Admin Rebuild] ========== PRE-REBUILD CHECK ==========`);
+    console.log(`[Admin Rebuild] Business: ${business.name} (${business.id})`);
+    console.log(`[Admin Rebuild] Agent exists:`, !!agent);
+    if (agent) {
+      console.log(`[Admin Rebuild] business_hours exists:`, !!agent.business_hours);
+      console.log(`[Admin Rebuild] business_hours type:`, typeof agent.business_hours);
+      console.log(`[Admin Rebuild] business_hours keys:`, agent.business_hours ? Object.keys(agent.business_hours) : 'N/A');
+      console.log(`[Admin Rebuild] holiday_hours exists:`, !!agent.holiday_hours);
+      console.log(`[Admin Rebuild] holiday_hours count:`, agent.holiday_hours ? agent.holiday_hours.length : 0);
+      if (agent.business_hours) {
+        console.log(`[Admin Rebuild] business_hours data:`, JSON.stringify(agent.business_hours, null, 2));
+      }
+    } else {
+      console.warn(`[Admin Rebuild] ⚠️ No agent found for business ${business.id}`);
+    }
+    console.log(`[Admin Rebuild] =======================================`);
     
     const { rebuildAssistant } = await import("../services/vapi.js");
     

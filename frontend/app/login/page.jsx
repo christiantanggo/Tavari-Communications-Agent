@@ -21,7 +21,12 @@ export default function LoginPage() {
       await login(email, password);
       router.push('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      console.error('Login error:', err);
+      console.error('Login error response:', err.response);
+      console.error('Login error message:', err.message);
+      const errorMessage = err.response?.data?.error || err.message || 'Login failed';
+      console.error('Setting error message:', errorMessage);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -33,7 +38,7 @@ export default function LoginPage() {
         <h1 className="text-3xl font-bold text-center mb-6 text-gray-900">Login</h1>
         
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="bg-red-50 border-2 border-red-300 text-red-700 px-4 py-3 rounded mb-4 font-medium">
             {error}
           </div>
         )}
@@ -80,6 +85,12 @@ export default function LoginPage() {
           Don't have an account?{' '}
           <Link href="/signup" className="text-blue-600 hover:underline">
             Sign up
+          </Link>
+        </p>
+        
+        <p className="mt-2 text-center text-sm">
+          <Link href="/reset-password" className="text-blue-600 hover:underline">
+            Forgot password?
           </Link>
         </p>
       </div>

@@ -808,5 +808,167 @@ router.delete('/users/:userId', authenticate, async (req, res) => {
   }
 });
 
+// Forgot password
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    console.log('[Forgot Password] Request for email:', email);
+
+    // Find user by email (first try users table)
+    let user = await User.findByEmail(email);
+    
+    // If user not found, try finding by business email
+    if (!user) {
+      console.log('[Forgot Password] User not found in users table, checking businesses table...');
+      const business = await Business.findByEmail(email);
+      if (business) {
+        console.log('[Forgot Password] Business found, looking for associated users...');
+        // Find users associated with this business
+        const users = await User.findByBusinessId(business.id);
+        if (users && users.length > 0) {
+          // Use the first active user (preferably owner)
+          user = users.find(u => u.role === 'owner') || users[0];
+          console.log('[Forgot Password] Found user via business email:', user.id);
+        }
+      }
+    }
+    
+    // Always return success to prevent email enumeration
+    // But only send email if user exists
+    if (user) {
+      // Generate 6-digit random code
+      const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Set expiration to 15 minutes from now
+      const resetExpires = new Date();
+      resetExpires.setMinutes(resetExpires.getMinutes() + 15);
+      
+      // Save code and expiration to user
+      await User.update(user.id, {
+        password_reset_token: resetCode,
+        password_reset_expires: resetExpires.toISOString(),
+      });
+      
+      // Get business to include name in email
+      const business = await Business.findById(user.business_id);
+      
+      // Send reset code email
+      const { sendEmail } = await import('../services/notifications.js');
+      const subject = 'Your Password Reset Code - Tavari';
+      const bodyText = `Hello,
+
+You requested to reset your password for your Tavari account${business ? ` (${business.name})` : ''}.
+
+Your password reset code is: ${resetCode}
+
+Enter this code on the password reset page to continue.
+
+This code will expire in 15 minutes.
+
+If you didn't request this, please ignore this email and your password will remain unchanged.
+
+Best regards,
+The Tavari Team`;
+      
+      const bodyHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">Password Reset Code</h2>
+          <p>Hello,</p>
+          <p>You requested to reset your password for your Tavari account${business ? ` (<strong>${business.name}</strong>)` : ''}.</p>
+          <div style="background-color: #f3f4f6; border: 2px solid #2563eb; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0;">
+            <p style="margin: 0; font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px;">Your Reset Code</p>
+            <p style="margin: 10px 0 0 0; font-size: 36px; font-weight: bold; color: #2563eb; letter-spacing: 8px;">${resetCode}</p>
+          </div>
+          <p>Enter this code on the password reset page to continue.</p>
+          <p style="color: #666; font-size: 14px;">This code will expire in 15 minutes.</p>
+          <p style="color: #666; font-size: 14px;">If you didn't request this, please ignore this email and your password will remain unchanged.</p>
+          <p>Best regards,<br>The Tavari Team</p>
+        </div>
+      `;
+      
+      try {
+        await sendEmail(email, subject, bodyText, bodyHtml, 'Tavari');
+        console.log('[Forgot Password] ✅ Reset code sent to:', email, 'Code:', resetCode);
+      } catch (emailError) {
+        console.error('[Forgot Password] ❌ Error sending reset code email:', emailError);
+        console.error('[Forgot Password] Error details:', {
+          message: emailError.message,
+          stack: emailError.stack,
+        });
+        // Still return success to prevent email enumeration
+        // But log the error so we can debug
+      }
+    } else {
+      console.log('[Forgot Password] User not found for email:', email);
+    }
+
+    // Always return success (security best practice - don't reveal if email exists)
+    res.json({ 
+      message: 'If an account with that email exists, a password reset code has been sent.' 
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to process password reset request' });
+  }
+});
+
+// Reset password with code
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { code, email, password } = req.body;
+
+    if (!code || !email || !password) {
+      return res.status(400).json({ error: 'Reset code, email, and new password are required' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
+    console.log('[Reset Password] Request for email:', email, 'Code:', code);
+
+    // Find user by email
+    const user = await User.findByEmail(email);
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    // Verify code
+    const storedCode = user.password_reset_token;
+    
+    if (!storedCode || storedCode !== code) {
+      return res.status(400).json({ error: 'Invalid reset code' });
+    }
+
+    // Check if code has expired
+    if (!user.password_reset_expires || new Date(user.password_reset_expires) < new Date()) {
+      return res.status(400).json({ error: 'Reset code has expired. Please request a new one.' });
+    }
+
+    // Hash new password
+    const { hashPassword } = await import('../utils/auth.js');
+    const passwordHash = await hashPassword(password);
+
+    // Update password and clear reset code
+    await User.update(user.id, {
+      password_hash: passwordHash,
+      password_reset_token: null,
+      password_reset_expires: null,
+    });
+
+    console.log('[Reset Password] Password reset successful for user:', user.id);
+
+    res.json({ message: 'Password has been reset successfully. You can now login with your new password.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
 export default router;
 

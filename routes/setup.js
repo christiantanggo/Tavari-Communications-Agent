@@ -98,9 +98,17 @@ router.post('/step3', authenticate, async (req, res) => {
   try {
     const { business_hours, holiday_hours } = req.body;
     
+    console.log('[Setup Step 3] ========== SAVING BUSINESS HOURS ==========');
+    console.log('[Setup Step 3] Business ID:', req.businessId);
+    console.log('[Setup Step 3] Received business_hours:', JSON.stringify(business_hours, null, 2));
+    console.log('[Setup Step 3] Received holiday_hours:', JSON.stringify(holiday_hours, null, 2));
+    
     const updateData = {};
     if (business_hours !== undefined) {
       updateData.business_hours = business_hours;
+      console.log('[Setup Step 3] ✅ Adding business_hours to updateData');
+    } else {
+      console.warn('[Setup Step 3] ⚠️ business_hours is undefined in request body');
     }
     if (holiday_hours !== undefined) {
       // Normalize holiday hours dates to YYYY-MM-DD format
@@ -121,13 +129,24 @@ router.post('/step3', authenticate, async (req, res) => {
         });
       }
       updateData.holiday_hours = normalizedHolidayHours;
+      console.log('[Setup Step 3] ✅ Adding holiday_hours to updateData');
     }
     
-    await AIAgent.update(req.businessId, updateData);
+    console.log('[Setup Step 3] Update data to be saved:', JSON.stringify(updateData, null, 2));
+    
+    const updatedAgent = await AIAgent.update(req.businessId, updateData);
+    
+    console.log('[Setup Step 3] ✅ Business hours saved successfully');
+    console.log('[Setup Step 3] Updated agent business_hours:', JSON.stringify(updatedAgent.business_hours, null, 2));
+    console.log('[Setup Step 3] ===============================================');
     
     res.json({ success: true });
   } catch (error) {
-    console.error('Step 3 error:', error);
+    console.error('[Setup Step 3] ❌ Error updating business hours:', error);
+    console.error('[Setup Step 3] Error details:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to update business hours' });
   }
 });

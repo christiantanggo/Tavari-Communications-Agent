@@ -122,7 +122,13 @@ router.put('/', authenticate, async (req, res) => {
     if (greeting_text !== undefined) updateData.greeting_text = greeting_text;
     if (opening_greeting !== undefined) updateData.opening_greeting = opening_greeting;
     if (ending_greeting !== undefined) updateData.ending_greeting = ending_greeting;
-    if (business_hours !== undefined) updateData.business_hours = business_hours;
+    if (business_hours !== undefined) {
+      updateData.business_hours = business_hours;
+      console.log('[Agent Settings] ✅ Adding business_hours to updateData');
+      console.log('[Agent Settings] business_hours data:', JSON.stringify(business_hours, null, 2));
+    } else {
+      console.warn('[Agent Settings] ⚠️ business_hours is undefined in request body');
+    }
     if (faqs !== undefined) updateData.faqs = faqs;
     // Use normalized holiday hours to ensure dates are in YYYY-MM-DD format
     if (holiday_hours !== undefined) updateData.holiday_hours = normalizedHolidayHours;
@@ -130,8 +136,18 @@ router.put('/', authenticate, async (req, res) => {
     if (voice_settings !== undefined) updateData.voice_settings = voice_settings;
     if (system_instructions !== undefined) updateData.system_instructions = system_instructions;
     
-    console.log('[Agent Settings] Updating with data:', updateData);
+    console.log('[Agent Settings] ========== UPDATING AGENT ==========');
+    console.log('[Agent Settings] Business ID:', req.businessId);
+    console.log('[Agent Settings] Update data keys:', Object.keys(updateData));
+    console.log('[Agent Settings] Updating with data:', JSON.stringify(updateData, null, 2));
+    
     const agent = await AIAgent.update(req.businessId, updateData);
+    
+    console.log('[Agent Settings] ✅ Agent updated successfully');
+    if (agent.business_hours) {
+      console.log('[Agent Settings] Saved business_hours:', JSON.stringify(agent.business_hours, null, 2));
+    }
+    console.log('[Agent Settings] ===============================================');
     console.log('[Agent Settings] Updated agent:', {
       id: agent.id,
       opening_greeting: agent.opening_greeting,

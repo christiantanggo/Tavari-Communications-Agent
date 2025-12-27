@@ -120,28 +120,28 @@ function BillingPage() {
   const handleManageBilling = async () => {
     setLoadingPortal(true);
     try {
-      console.log('[Billing] Getting hosted payment page URL...');
-      const res = await billingAPI.getHostedPayment();
-      console.log('[Billing] Hosted payment response:', res.data);
+      console.log('[Billing] Getting Stripe Customer Portal URL...');
+      const res = await billingAPI.getPortal();
+      console.log('[Billing] Portal response:', res.data);
       
       if (res.data.url) {
-        // Open Helcim's hosted payment page in a new tab
-        // This allows users to stay in the app and come back easily
-        window.open(res.data.url, '_blank', 'noopener,noreferrer');
-        success('Payment page opened in a new tab. Complete the form there, then refresh this page.');
+        // Redirect to Stripe Customer Portal
+        // This allows users to manage payment methods, update billing info, and view invoices
+        window.location.href = res.data.url;
       } else {
-        showError(res.data.message || 'Payment page not configured. Please contact support.');
+        showError('Payment portal not available. Please contact support.');
       }
     } catch (error) {
-      console.error('[Billing] Failed to get hosted payment page:', error);
+      console.error('[Billing] Failed to get portal URL:', error);
       const errorData = error.response?.data || {};
       
-      if (error.response?.status === 503 && errorData.instructions) {
-        // Show instructions for setting up payment page
-        showError('Payment page needs to be configured. Please contact support at support@tavarios.com');
-        console.info('Setup instructions:', errorData.instructions);
+      if (error.response?.status === 400) {
+        // No Stripe customer - need to complete checkout first
+        showError(errorData.message || 'Please complete checkout first before managing payment methods.');
+      } else if (error.response?.status === 503) {
+        showError(errorData.message || 'Payment portal is not configured. Please contact support.');
       } else {
-        showError(errorData.message || 'Failed to load payment page. Please try again or contact support.');
+        showError(errorData.message || 'Failed to load payment portal. Please try again or contact support.');
       }
     } finally {
       setLoadingPortal(false);

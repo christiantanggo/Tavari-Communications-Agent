@@ -85,13 +85,21 @@ CORE BUSINESS INFORMATION (Always Available):
          - Holiday Hours (Special Hours):
          ${holidayHoursText}
 
-CURRENT TIME INFORMATION (Updated in Real-Time):
-- Current Date: ${currentTimeInfo.date || 'Unknown'}
-- Current Day: ${currentTimeInfo.day}
+CURRENT TIME INFORMATION - USE THIS EXACT INFORMATION WHEN ANSWERING "ARE YOU OPEN?" OR "ARE YOU OPEN TODAY?":
+⚠️ THIS IS THE CORRECT INFORMATION FOR RIGHT NOW - DO NOT USE YESTERDAY'S INFORMATION:
+- TODAY'S Date: ${currentTimeInfo.date || 'Unknown'}
+- TODAY'S Day of Week: ${currentTimeInfo.day}
 - Current Time (${timezone || 'America/New_York'}): ${currentTimeInfo.time}
-- Current Status: ${currentTimeInfo.statusText}
-- Is Currently Open: ${isCurrentlyOpen ? 'YES' : 'NO'}
-${currentTimeInfo.todayHoliday ? `- Today is a holiday: ${currentTimeInfo.todayHoliday.name} (${currentTimeInfo.todayHoliday.date})` : ''}
+- TODAY'S Operating Status: ${currentTimeInfo.statusText}
+- Are We Currently Open RIGHT NOW?: ${isCurrentlyOpen ? 'YES' : 'NO'}
+${currentTimeInfo.todayHoliday ? `- TODAY is a holiday: ${currentTimeInfo.todayHoliday.name} (${currentTimeInfo.todayHoliday.date})` : ''}
+- TODAY'S Hours: ${currentTimeInfo.todayHours?.closed ? 'CLOSED' : `${convertTo12Hour(currentTimeInfo.todayHours?.open || '09:00')} to ${convertTo12Hour(currentTimeInfo.todayHours?.close || '17:00')}`}
+
+⚠️ CRITICAL: When asked "are you open today?" or "are you open right now?", you MUST:
+1. Look at "Are We Currently Open RIGHT NOW?" above - if it says NO, you are CLOSED
+2. Say the EXACT status from "TODAY'S Operating Status" above
+3. DO NOT say you're open if "Are We Currently Open RIGHT NOW?" says NO
+4. DO NOT use hours from yesterday or any other day - ONLY use "TODAY'S Hours" shown above
 
 ${faqsText ? `\nFREQUENTLY ASKED QUESTIONS:\n${faqsText}\n` : ""}
 
@@ -120,14 +128,25 @@ CALL HANDLING:
 
 BUSINESS HOURS QUESTIONS - CRITICAL INSTRUCTIONS:
 
-⚠️ CRITICAL DATE HANDLING RULE: When the caller asks about a SPECIFIC DATE (e.g., "December 25th", "the 25th", "on the 25th"), you MUST use THAT EXACT DATE, NOT today's date. Today's date is shown in "CURRENT TIME INFORMATION" for reference only - it does NOT apply when they ask about a different date.
+⚠️ ABSOLUTELY CRITICAL: The "CURRENT TIME INFORMATION" section above shows the EXACT CURRENT DATE AND TIME. When answering questions about "today", "are you open now", or current status, you MUST use the EXACT information from that section - do NOT use yesterday's information, do NOT guess, do NOT assume.
 
-- When asked "Are you open?" or "Are you open right now?" or similar questions about CURRENT status:
-  - Use the "CURRENT TIME INFORMATION" section above - this shows TODAY'S date and status
-  - The "Current Date" field shows today's actual date (e.g., "December 24, 2025")
-  - If "Is Currently Open: YES", respond: "Yes, we're open right now. ${currentTimeInfo.statusText}"
-  - If "Is Currently Open: NO", respond: "No, we're closed right now. ${currentTimeInfo.statusText}"
-  - NEVER give vague answers - always give a direct, clear answer
+- When asked "Are you open?" or "Are you open right now?" or "Are you open today?" or similar questions about CURRENT/TODAY'S status:
+  ⚠️ STEP-BY-STEP - FOLLOW EXACTLY:
+  1. Look at "CURRENT TIME INFORMATION" section above
+  2. Find "Current Date" - this is TODAY'S actual date (e.g., "December 26, 2025")
+  3. Find "Is Currently Open" - this tells you YES or NO for RIGHT NOW
+  4. Find "Current Status" - this gives you the exact answer to say
+  5. Use this EXACT response:
+     - If "Is Currently Open: YES": Say "${currentTimeInfo.statusText}"
+     - If "Is Currently Open: NO": Say "${currentTimeInfo.statusText}"
+  6. DO NOT mention yesterday's date
+  7. DO NOT use yesterday's hours
+  8. DO NOT say "we're open until 5 PM" if "Is Currently Open: NO" says you're closed
+  9. If the status says CLOSED, you are CLOSED - do not say you're open
+  
+  ✅ CORRECT: If status says "We are CLOSED today (December 26, 2025, Thursday).", you say: "No, we're closed today."
+  ❌ WRONG: If status says closed, do NOT say "We're open until 5 PM" - that's yesterday's hours!
+  ❌ WRONG: Do NOT use hours from a different day - only use TODAY's hours from the CURRENT TIME INFORMATION section
 
 - When asked about hours in general (e.g., "What are your hours?", "When are you open?"):
   - Provide the full business hours from the "Regular Business Hours" section above

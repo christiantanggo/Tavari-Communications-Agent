@@ -18,10 +18,24 @@ export const isAuthenticated = () => {
 };
 
 export const login = async (email, password) => {
-  const response = await authAPI.login({ email, password });
-  const { token } = response.data;
-  setToken(token);
-  return response.data;
+  try {
+    console.log('[Auth] Attempting login for:', email);
+    const response = await authAPI.login({ email, password });
+    console.log('[Auth] Login response:', response);
+    const { token } = response.data;
+    if (!token) {
+      console.error('[Auth] No token in response:', response.data);
+      throw new Error('No authentication token received');
+    }
+    setToken(token);
+    console.log('[Auth] Login successful, token set');
+    return response.data;
+  } catch (error) {
+    console.error('[Auth] Login error:', error);
+    console.error('[Auth] Error response:', error.response);
+    console.error('[Auth] Error message:', error.message);
+    throw error; // Re-throw to let the component handle it
+  }
 };
 
 export const signup = async (data) => {

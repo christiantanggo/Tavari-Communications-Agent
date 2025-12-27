@@ -140,26 +140,17 @@ router.post('/checkout', authenticate, async (req, res) => {
       priceToCharge,
       pkg.name,
       successUrl,
-      cancelUrl
+      cancelUrl,
+      isOnSale ? pkg.sale_name : null, // Pass sale name if on sale
+      salePriceExpiresAt // Pass sale expiration date
     );
     
     console.log('[Billing] ✅ Stripe checkout session created:', checkoutSession.sessionId);
+    console.log('[Billing] ⚠️  Business record will be updated via webhook after payment confirmation');
     
-    // Update package locally (will be confirmed via webhook)
-    // Track sale purchase details if on sale (webhook will confirm)
-    const updateData = {
-      package_id: packageId,
-      plan_tier: pkg.name.toLowerCase(),
-      usage_limit_minutes: pkg.minutes_included,
-    };
-    
-    if (isOnSale) {
-      updateData.purchased_at_sale_price = priceToCharge;
-      updateData.sale_price_expires_at = salePriceExpiresAt;
-      updateData.sale_name = pkg.sale_name;
-    }
-    
-    await Business.update(req.businessId, updateData);
+    // DO NOT update business here - wait for webhook to confirm payment
+    // The webhook (handleCheckoutCompleted) will update the business record
+    // only after Stripe confirms the payment was successful
     
     return res.json({
       url: checkoutSession.url,
@@ -198,19 +189,123 @@ router.get('/status', authenticate, async (req, res) => {
       packageDetails = await PricingPackage.findById(packageId);
     }
 
+    let subscription = null;
+    let paymentMethod = null;
+
+    // Fetch subscription and payment method details from Stripe if available
+    if (business.stripe_customer_id && process.env.STRIPE_SECRET_KEY) {
+      try {
+        const { getStripeInstance } = await import('../services/stripe.js');
+        const stripe = getStripeInstance();
+        
+        // Get subscription details if subscription ID exists
+        if (business.stripe_subscription_id) {
+          try {
+            subscription = await stripe.subscriptions.retrieve(business.stripe_subscription_id, {
+              expand: ['default_payment_method']
+            });
+          } catch (subError) {
+            console.warn('[Billing Status] Could not retrieve subscription:', subError.message);
+          }
+        }
+        
+        // Get payment method from customer if no subscription payment method
+        if (!subscription?.default_payment_method) {
+          try {
+            const customer = await stripe.customers.retrieve(business.stripe_customer_id, {
+              expand: ['invoice_settings.default_payment_method']
+            });
+            
+            if (customer.invoice_settings?.default_payment_method) {
+              const pm = typeof customer.invoice_settings.default_payment_method === 'string'
+                ? await stripe.paymentMethods.retrieve(customer.invoice_settings.default_payment_method)
+                : customer.invoice_settings.default_payment_method;
+              paymentMethod = pm;
+            }
+          } catch (pmError) {
+            console.warn('[Billing Status] Could not retrieve payment method:', pmError.message);
+          }
+        } else if (subscription.default_payment_method) {
+          // Extract payment method from subscription
+          paymentMethod = typeof subscription.default_payment_method === 'string'
+            ? await stripe.paymentMethods.retrieve(subscription.default_payment_method)
+            : subscription.default_payment_method;
+        }
+      } catch (stripeError) {
+        console.warn('[Billing Status] Error fetching Stripe data:', stripeError.message);
+        // Continue without Stripe data - return what we have
+      }
+    }
+
     res.json({
       packageId: packageId,
       package: packageDetails,
-      planTier: business.plan_tier,
-      usageLimitMinutes: business.usage_limit_minutes,
-      stripeCustomerId: business.stripe_customer_id,
-      stripeSubscriptionId: business.stripe_subscription_id,
-      stripeSubscriptionStatus: business.stripe_subscription_status,
+      plan_tier: business.plan_tier,
+      usage_limit_minutes: business.usage_limit_minutes,
+      subscription: subscription ? {
+        id: subscription.id,
+        status: subscription.status,
+        current_period_start: subscription.current_period_start,
+        current_period_end: subscription.current_period_end,
+        cancel_at_period_end: subscription.cancel_at_period_end,
+      } : null,
+      payment_method: paymentMethod ? {
+        id: paymentMethod.id,
+        type: paymentMethod.type,
+        card: paymentMethod.card ? {
+          brand: paymentMethod.card.brand,
+          last4: paymentMethod.card.last4,
+          exp_month: paymentMethod.card.exp_month,
+          exp_year: paymentMethod.card.exp_year,
+        } : null,
+      } : null,
     });
   } catch (error) {
     console.error('Get subscription status error:', error);
     res.status(500).json({ 
       error: 'Failed to get subscription status',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get Stripe Customer Portal URL for managing payment methods and subscriptions
+router.get('/portal', authenticate, async (req, res) => {
+  try {
+    const business = await Business.findById(req.businessId);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    if (!business.stripe_customer_id) {
+      return res.status(400).json({ 
+        error: 'No Stripe customer found. Please complete checkout first.',
+        message: 'You need to complete a checkout session before managing payment methods.'
+      });
+    }
+
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(503).json({ 
+        error: 'Stripe is not configured',
+        message: 'Payment portal is not available. Please contact support.'
+      });
+    }
+
+    const { getStripeInstance } = await import('../services/stripe.js');
+    const stripe = getStripeInstance();
+    
+    const returnUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing`;
+    
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: business.stripe_customer_id,
+      return_url: returnUrl,
+    });
+
+    res.json({ url: portalSession.url });
+  } catch (error) {
+    console.error('Get portal session error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create portal session',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
