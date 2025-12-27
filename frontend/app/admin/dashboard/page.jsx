@@ -116,6 +116,9 @@ function AdminDashboardPage() {
               <Link href="/admin/packages" className="text-gray-700 hover:text-blue-600">
                 Packages
               </Link>
+              <Link href="/admin/invoice-settings" className="text-gray-700 hover:text-blue-600">
+                Invoice Settings
+              </Link>
               <Link href="/admin/activity" className="text-gray-700 hover:text-blue-600">
                 Activity
               </Link>

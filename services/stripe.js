@@ -162,12 +162,22 @@ export class StripeService {
       // Create checkout session - ALWAYS use price_data to ensure correct price
       const stripe = getStripe();
       
+      // Get invoice settings for tax rate
+      const { InvoiceSettings } = await import('../models/InvoiceSettings.js');
+      const invoiceSettings = await InvoiceSettings.get();
+      const taxRate = invoiceSettings?.tax_rate || 0.13;
+      
+      // Calculate total with tax (Tavari controls taxes, not Stripe)
+      const subtotal = packagePrice;
+      const taxAmount = subtotal * taxRate;
+      const totalWithTax = subtotal + taxAmount;
+      
       // Validate price is valid
       if (!packagePrice || packagePrice <= 0) {
         throw new Error(`Invalid package price: ${packagePrice}. Price must be greater than 0.`);
       }
       
-      // Stripe minimum charge amounts by currency
+      // Stripe minimum charge amounts by currency (check against total with tax)
       // For CAD, minimum is $0.50 for one-time payments and subscriptions
       const MINIMUM_AMOUNTS = {
         cad: 0.50,
@@ -179,9 +189,9 @@ export class StripeService {
       const currency = 'cad'; // Currently only supporting CAD
       const minimumAmount = MINIMUM_AMOUNTS[currency.toLowerCase()] || 0.50;
       
-      if (packagePrice < minimumAmount) {
+      if (totalWithTax < minimumAmount) {
         throw new Error(
-          `Package price ($${packagePrice.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum charge amount of $${minimumAmount.toFixed(2)} ${currency.toUpperCase()}. ` +
+          `Total amount with tax ($${totalWithTax.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum charge amount of $${minimumAmount.toFixed(2)} ${currency.toUpperCase()}. ` +
           `Stripe will reject payments below this amount. Please set a valid package price.`
         );
       }
@@ -190,7 +200,7 @@ export class StripeService {
         price_data: {
           currency: 'cad',
           product: productId,
-          unit_amount: Math.round(packagePrice * 100), // Convert to cents
+          unit_amount: Math.round(totalWithTax * 100), // Convert to cents - charge total WITH tax
           recurring: {
             interval: 'month',
           },
@@ -198,12 +208,17 @@ export class StripeService {
         quantity: 1,
       }];
       
-      console.log('[StripeService] Using price_data - Price:', packagePrice, 'CAD (', Math.round(packagePrice * 100), 'cents)');
+      console.log('[StripeService] Using price_data with Tavari tax calculation:');
+      console.log('[StripeService] - Subtotal:', subtotal.toFixed(2), 'CAD');
+      console.log('[StripeService] - Tax Rate:', (taxRate * 100).toFixed(2), '%');
+      console.log('[StripeService] - Tax Amount:', taxAmount.toFixed(2), 'CAD');
+      console.log('[StripeService] - Total (with tax):', totalWithTax.toFixed(2), 'CAD (', Math.round(totalWithTax * 100), 'cents)');
       
       console.log('[StripeService] Creating checkout session with:');
       console.log('[StripeService] - customer:', customerId);
       console.log('[StripeService] - line_items:', JSON.stringify(lineItems, null, 2));
       console.log('[StripeService] - mode: subscription');
+      console.log('[StripeService] - automatic_tax: disabled (Tavari controls taxes)');
       console.log('[StripeService] - metadata:', {
         business_id: businessId,
         package_id: packageId,
@@ -216,6 +231,7 @@ export class StripeService {
         payment_method_types: ['card'],
         line_items: lineItems,
         mode: 'subscription', // This creates a recurring subscription automatically
+        automatic_tax: { enabled: false }, // Disable Stripe automatic tax - Tavari controls taxes
         success_url: successUrl,
         cancel_url: cancelUrl,
         metadata: {
@@ -435,6 +451,63 @@ export class StripeService {
       console.log('[StripeService] ✅ Incremented sale count for package:', packageId);
     }
     
+    // Create invoice for the initial payment
+    try {
+      const amountCharged = session.amount_total ? session.amount_total / 100 : pkg.monthly_price;
+      
+      // Try to get the Stripe invoice ID from the session
+      let stripeInvoiceId = null;
+      if (session.invoice) {
+        stripeInvoiceId = typeof session.invoice === 'string' ? session.invoice : session.invoice.id;
+      }
+      
+      const { generateInvoiceNumber } = await import('../services/invoices.js');
+      const { InvoiceSettings } = await import('../models/InvoiceSettings.js');
+      
+      // Get invoice settings for tax rate
+      const invoiceSettings = await InvoiceSettings.get();
+      const taxRate = invoiceSettings?.tax_rate || 0.13;
+      
+      // Calculate subtotal and tax (assume amountCharged includes tax)
+      // If Stripe already calculated tax, we might need to extract it
+      // For now, calculate backwards from total
+      const subtotal = amountCharged / (1 + taxRate);
+      const taxAmount = amountCharged - subtotal;
+      
+      // Generate invoice number
+      const invoiceNumber = await generateInvoiceNumber(businessId);
+      
+      // Create invoice record directly (simpler than using generateInvoice which requires PDF)
+      const { supabaseClient } = await import('../config/database.js');
+      const { data: createdInvoice, error: invoiceError } = await supabaseClient
+        .from('invoices')
+        .insert({
+          business_id: businessId,
+          invoice_number: invoiceNumber,
+          stripe_invoice_id: stripeInvoiceId,
+          subtotal: subtotal,
+          tax_rate: taxRate,
+          tax_amount: taxAmount,
+          amount: amountCharged, // Total including tax
+          currency: 'cad',
+          invoice_type: 'subscription_setup',
+          status: 'paid',
+          paid_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      
+      if (invoiceError) {
+        throw invoiceError;
+      }
+      
+      console.log('[StripeService] ✅ Invoice created for initial payment:', createdInvoice.invoice_number);
+    } catch (invoiceError) {
+      // Don't fail the whole process if invoice creation fails
+      console.error('[StripeService] ⚠️ Failed to create invoice:', invoiceError.message);
+      console.error('[StripeService] Invoice error details:', invoiceError);
+    }
+    
     console.log(`[StripeService] ✅ Business ${businessId} updated with subscription ${subscriptionId}`);
     console.log('[StripeService] ================================================');
   }
@@ -497,7 +570,6 @@ export class StripeService {
     console.log('[StripeService] Payment succeeded for invoice:', invoice.id);
     
     try {
-      // Check if sale price has expired and update subscription if needed
       const subscriptionId = invoice.subscription;
       if (!subscriptionId) {
         // One-time payment, not a subscription
@@ -516,7 +588,69 @@ export class StripeService {
         return;
       }
 
-      // Check if sale price has expired
+      const businessId = business.id;
+
+      // Create invoice record for this payment (recurring payment)
+      try {
+        const amountCharged = invoice.amount_paid ? invoice.amount_paid / 100 : (invoice.amount_due / 100);
+        const { supabaseClient } = await import('../config/database.js');
+        
+        // Check if invoice already exists to avoid duplicates
+        const { data: existingInvoice } = await supabaseClient
+          .from('invoices')
+          .select('id')
+          .eq('stripe_invoice_id', invoice.id)
+          .single();
+        
+        if (!existingInvoice) {
+          const { generateInvoiceNumber } = await import('../services/invoices.js');
+          const { InvoiceSettings } = await import('../models/InvoiceSettings.js');
+          
+          // Get invoice settings for tax rate
+          const invoiceSettings = await InvoiceSettings.get();
+          const taxRate = invoiceSettings?.tax_rate || 0.13;
+          
+          // Calculate subtotal and tax
+          // Since we charge totalWithTax in Stripe, amountCharged includes tax
+          const subtotal = amountCharged / (1 + taxRate);
+          const taxAmount = amountCharged - subtotal;
+          
+          // Generate invoice number
+          const invoiceNumber = await generateInvoiceNumber(businessId);
+          
+          const { data: createdInvoice, error: invoiceError } = await supabaseClient
+            .from('invoices')
+            .insert({
+              business_id: businessId,
+              invoice_number: invoiceNumber,
+              stripe_invoice_id: invoice.id,
+              subtotal: subtotal,
+              tax_rate: taxRate,
+              tax_amount: taxAmount,
+              amount: amountCharged, // Total including tax
+              currency: invoice.currency || 'cad',
+              invoice_type: 'subscription_recurring',
+              period_start: invoice.period_start ? new Date(invoice.period_start * 1000).toISOString().split('T')[0] : null,
+              period_end: invoice.period_end ? new Date(invoice.period_end * 1000).toISOString().split('T')[0] : null,
+              status: 'paid',
+              paid_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+          
+          if (invoiceError) {
+            throw invoiceError;
+          }
+          
+          console.log('[StripeService] ✅ Invoice created for recurring payment:', createdInvoice.invoice_number);
+        } else {
+          console.log('[StripeService] Invoice already exists for Stripe invoice:', invoice.id);
+        }
+      } catch (invoiceError) {
+        console.error('[StripeService] ⚠️ Failed to create invoice for recurring payment:', invoiceError.message);
+      }
+
+      // Check if sale price has expired and update subscription if needed
       if (business.sale_price_expires_at && business.package_id) {
         const expirationDate = new Date(business.sale_price_expires_at);
         const now = new Date();
@@ -553,7 +687,7 @@ export class StripeService {
         }
       }
     } catch (error) {
-      console.error('[StripeService] Error checking/updating expired sale price:', error);
+      console.error('[StripeService] Error in handlePaymentSucceeded:', error);
       // Don't throw - payment succeeded, this is just a cleanup task
     }
   }

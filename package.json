@@ -48,6 +48,7 @@
     "diagnose:flow": "node scripts/diagnose-payment-flow.js",
     "check:webhook": "node scripts/check-stripe-webhook-config.js",
     "fix:minutes": "node scripts/fix-business-minutes.js",
+    "backfill:invoices": "node scripts/backfill-invoices.js",
     "auto-commit": "node -e \"require('child_process').execSync('git add -A && git commit -m \\\"Auto-commit: Update files\\\" && git push origin main', {stdio: 'inherit'})\"",
     "deploy": "npm run auto-commit"
   },

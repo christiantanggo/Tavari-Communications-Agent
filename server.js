@@ -76,15 +76,25 @@ app.use(cors({
 // Body parsing - EXCLUDE webhook endpoints that need raw body
 // Stripe webhooks need raw body for signature verification
 const jsonParser = express.json({ limit: "10mb" });
+const urlencodedParser = express.urlencoded({ extended: true });
+
 app.use((req, res, next) => {
-  // Skip JSON parsing for Stripe webhooks (they need raw body for signature verification)
+  // Skip body parsing for Stripe webhooks (they need raw body for signature verification)
   if (req.path.includes('/api/billing/webhook')) {
     return next();
   }
   // Apply JSON parsing for all other routes
   jsonParser(req, res, next);
 });
-app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+  // Skip URL-encoded parsing for Stripe webhooks
+  if (req.path.includes('/api/billing/webhook')) {
+    return next();
+  }
+  // Apply URL-encoded parsing for all other routes
+  urlencodedParser(req, res, next);
+});
 
 // Request logging
 app.use((req, _res, next) => {

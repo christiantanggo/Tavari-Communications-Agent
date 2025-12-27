@@ -21,13 +21,22 @@ router.get('/test-mode', async (req, res) => {
 // Get available packages (public endpoint - no auth required for pricing modal)
 router.get('/packages', async (req, res) => {
   try {
+    // Show all active packages (both public and private) for billing
+    // This ensures all live/active plans are available for purchase
     const packages = await PricingPackage.findAll({
-      includeInactive: false,
-      includePrivate: false, // Only public packages
+      includeInactive: false, // Only show active packages
+      includePrivate: true, // Include all packages (public and private) - show all live plans
     });
     
     console.log('[Billing] Found packages:', packages.length);
-    console.log('[Billing] Packages:', packages.map(p => ({ id: p.id, name: p.name, price: p.monthly_price, isOnSale: p.isOnSale })));
+    console.log('[Billing] Packages:', packages.map(p => ({ 
+      id: p.id, 
+      name: p.name, 
+      price: p.monthly_price, 
+      is_active: p.is_active,
+      is_public: p.is_public,
+      isOnSale: p.isOnSale 
+    })));
     
     res.json({ packages });
   } catch (error) {
@@ -363,24 +372,58 @@ router.get('/verify-session', authenticate, async (req, res) => {
 
 // Webhook handler for Stripe events
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  console.log('[Billing Webhook] ========== WEBHOOK REQUEST RECEIVED ==========');
+  console.log('[Billing Webhook] Method:', req.method);
+  console.log('[Billing Webhook] Path:', req.path);
+  console.log('[Billing Webhook] Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('[Billing Webhook] Body type:', typeof req.body);
+  console.log('[Billing Webhook] Body is Buffer:', Buffer.isBuffer(req.body));
+  console.log('[Billing Webhook] Body length:', req.body?.length || 0);
+  
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  console.log('[Billing Webhook] Stripe signature header present:', !!sig);
+  console.log('[Billing Webhook] Webhook secret configured:', !!webhookSecret);
 
   let event;
 
   try {
     if (!webhookSecret) {
-      console.warn('[Billing Webhook] STRIPE_WEBHOOK_SECRET not configured, skipping signature verification');
-      // In development, accept events without verification
-      event = req.body;
+      console.warn('[Billing Webhook] ⚠️ STRIPE_WEBHOOK_SECRET not configured, skipping signature verification');
+      // In development, accept events without verification (but still need valid JSON)
+      if (Buffer.isBuffer(req.body)) {
+        event = JSON.parse(req.body.toString());
+      } else {
+        event = req.body;
+      }
+    } else if (!sig) {
+      console.error('[Billing Webhook] ❌ Missing stripe-signature header');
+      console.error('[Billing Webhook] Available headers:', Object.keys(req.headers));
+      return res.status(400).send('Webhook Error: Missing stripe-signature header. This request does not appear to be from Stripe.');
     } else {
+      // Ensure body is a Buffer for signature verification
+      let rawBody = req.body;
+      if (!Buffer.isBuffer(rawBody)) {
+        console.error('[Billing Webhook] ❌ Request body is not a Buffer. Cannot verify signature.');
+        console.error('[Billing Webhook] Body type:', typeof rawBody);
+        return res.status(400).send('Webhook Error: Invalid request body format. Body must be raw for signature verification.');
+      }
+      
       // Use the same Stripe instance logic as the service
       const { getStripeInstance } = await import('../services/stripe.js');
       const stripeInstance = getStripeInstance();
-      event = stripeInstance.webhooks.constructEvent(req.body, sig, webhookSecret);
+      event = stripeInstance.webhooks.constructEvent(rawBody, sig, webhookSecret);
+      console.log('[Billing Webhook] ✅ Signature verified successfully');
     }
   } catch (err) {
-    console.error('[Billing Webhook] Webhook signature verification failed:', err.message);
+    console.error('[Billing Webhook] ❌ Webhook signature verification failed:', err.message);
+    console.error('[Billing Webhook] Error details:', {
+      message: err.message,
+      type: err.type,
+      code: err.code,
+      stack: err.stack
+    });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 

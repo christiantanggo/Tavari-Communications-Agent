@@ -292,6 +292,12 @@ export const adminAssistantsAPI = {
   rebuildAll: () => adminApi.post('/rebuild-all-assistants'),
 };
 
+// Admin Invoice Settings API
+export const adminInvoiceSettingsAPI = {
+  get: () => adminApi.get('/invoice-settings'),
+  update: (settings) => adminApi.put('/invoice-settings', settings),
+};
+
 // Bulk SMS API
 export const bulkSMSAPI = {
   createCampaign: (data) => api.post('/bulk-sms/campaigns', data),

@@ -482,8 +482,12 @@ function BillingPage() {
               <div className="grid md:grid-cols-3 gap-4">
                 {packages.map((pkg) => {
                   const isCurrent = user?.business?.package_id === pkg.id;
-                  const currentPackagePrice = packages.find(p => p.id === user?.business?.package_id)?.monthly_price || 0;
-                  const isUpgrade = pkg.monthly_price > currentPackagePrice;
+                  const currentPackage = packages.find(p => p.id === user?.business?.package_id);
+                  const currentPackagePrice = currentPackage?.monthly_price || 0;
+                  const isOnSale = pkg.isOnSale && pkg.saleAvailable && pkg.sale_price;
+                  const displayPrice = isOnSale ? pkg.sale_price : pkg.monthly_price;
+                  // Compare using display price (sale price if on sale, otherwise regular price)
+                  const isUpgrade = parseFloat(displayPrice) > currentPackagePrice;
                   
                   return (
                     <div 
@@ -498,16 +502,43 @@ function BillingPage() {
                     >
                       <div className="flex justify-between items-start mb-2">
                         <h3 className="text-lg font-semibold text-gray-900">{pkg.name}</h3>
-                        {isCurrent && (
-                          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full font-medium">
-                            Current
-                          </span>
+                        <div className="flex gap-2 items-center">
+                          {isOnSale && (
+                            <span className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-full font-medium">
+                              Sale
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full font-medium">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mb-1">
+                        <p className="text-3xl font-bold text-gray-900">
+                          ${(parseFloat(displayPrice) || 0).toFixed(2)}
+                          <span className="text-sm font-normal text-gray-600">/month</span>
+                        </p>
+                        {isOnSale && pkg.monthly_price && (
+                          <p className="text-sm text-gray-500 line-through mt-1">
+                            ${(parseFloat(pkg.monthly_price) || 0).toFixed(2)}/month
+                          </p>
+                        )}
+                        {isOnSale && pkg.sale_name && (
+                          <p className="text-xs text-red-600 font-medium mt-1">{pkg.sale_name}</p>
+                        )}
+                        {isOnSale && pkg.sale_duration_months && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Valid for {pkg.sale_duration_months} {pkg.sale_duration_months === 1 ? 'month' : 'months'}
+                          </p>
+                        )}
+                        {isOnSale && pkg.sale_max_quantity && (
+                          <p className="text-xs text-orange-600 font-medium mt-1">
+                            Limited availability
+                          </p>
                         )}
                       </div>
-                      <p className="text-3xl font-bold text-gray-900 mb-1">
-                        ${pkg.monthly_price}
-                        <span className="text-sm font-normal text-gray-600">/month</span>
-                      </p>
                       {pkg.description && (
                         <p className="text-sm text-gray-600 mb-4">{pkg.description}</p>
                       )}

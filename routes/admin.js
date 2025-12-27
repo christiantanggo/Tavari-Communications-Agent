@@ -2004,5 +2004,36 @@ router.put("/accounts/:id/agent", authenticateAdmin, async (req, res) => {
   }
 });
 
+// Invoice Settings routes
+router.get('/invoice-settings', authenticateAdmin, async (req, res) => {
+  try {
+    const { InvoiceSettings } = await import('../models/InvoiceSettings.js');
+    const settings = await InvoiceSettings.get();
+    res.json({ settings: settings || {} });
+  } catch (error) {
+    console.error('Get invoice settings error:', error);
+    res.status(500).json({ error: 'Failed to get invoice settings' });
+  }
+});
+
+router.put('/invoice-settings', authenticateAdmin, async (req, res) => {
+  try {
+    const { InvoiceSettings } = await import('../models/InvoiceSettings.js');
+    const settings = await InvoiceSettings.update(req.body);
+    
+    // Log activity
+    await AdminActivityLog.create({
+      admin_user_id: req.adminId,
+      action: 'update_invoice_settings',
+      details: { updated_fields: Object.keys(req.body) },
+    });
+    
+    res.json({ settings });
+  } catch (error) {
+    console.error('Update invoice settings error:', error);
+    res.status(500).json({ error: 'Failed to update invoice settings' });
+  }
+});
+
 export default router;
 
