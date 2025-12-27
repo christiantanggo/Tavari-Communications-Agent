@@ -86,8 +86,10 @@ CORE BUSINESS INFORMATION (Always Available):
          ${holidayHoursText}
 
 CURRENT TIME INFORMATION - USE THIS EXACT INFORMATION WHEN ANSWERING "ARE YOU OPEN?" OR "ARE YOU OPEN TODAY?":
-⚠️ THIS IS THE CORRECT INFORMATION FOR RIGHT NOW - DO NOT USE YESTERDAY'S INFORMATION:
-- TODAY'S Date: ${currentTimeInfo.date || 'Unknown'}
+⚠️ CRITICAL: When answering questions about "today", you MUST use your knowledge of the ACTUAL CURRENT DATE, NOT the date shown below. The date below is only a reference from when this assistant was last updated and may be outdated. Always use the real current date when answering questions about "today".
+
+- Date shown (may be outdated): ${currentTimeInfo.date || 'Unknown'} (this is when assistant was last updated)
+- ACTUAL TODAY'S Date: Use your knowledge of the current date - if this is ${currentTimeInfo.date || 'Unknown'}, use the actual current date instead
 - TODAY'S Day of Week: ${currentTimeInfo.day}
 - Current Time (${timezone || 'America/New_York'}): ${currentTimeInfo.time}
 - TODAY'S Operating Status: ${currentTimeInfo.statusText}
@@ -128,12 +130,12 @@ CALL HANDLING:
 
 BUSINESS HOURS QUESTIONS - CRITICAL INSTRUCTIONS:
 
-⚠️ ABSOLUTELY CRITICAL: The "CURRENT TIME INFORMATION" section above shows the EXACT CURRENT DATE AND TIME. When answering questions about "today", "are you open now", or current status, you MUST use the EXACT information from that section - do NOT use yesterday's information, do NOT guess, do NOT assume.
+⚠️ ABSOLUTELY CRITICAL: When answering questions about "today", you MUST use your knowledge of the ACTUAL CURRENT DATE, not the date shown in the "CURRENT TIME INFORMATION" section (which may be outdated). The date shown is only a reference from when the assistant was last updated. Always use the real current date when answering questions about "today".
 
 - When asked "Are you open?" or "Are you open right now?" or "Are you open today?" or similar questions about CURRENT/TODAY'S status:
   ⚠️ STEP-BY-STEP - FOLLOW EXACTLY:
-  1. Look at "CURRENT TIME INFORMATION" section above
-  2. Find "Current Date" - this is TODAY'S actual date (e.g., "December 26, 2025")
+  1. Determine the ACTUAL CURRENT DATE using your knowledge (e.g., if you know it's December 27, 2025, use that - NOT the date shown in the prompt which may be outdated)
+  2. Use the ACTUAL CURRENT DATE - this is TODAY'S actual date (e.g., "December 27, 2025" if that's today)
   3. Find "Is Currently Open" - this tells you YES or NO for RIGHT NOW
   4. Find "Current Status" - this gives you the exact answer to say
   5. Use this EXACT response:
