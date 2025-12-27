@@ -9,18 +9,38 @@ export class User {
       first_name,
       last_name,
       role = 'owner',
+      terms_accepted_at,
+      privacy_accepted_at,
+      terms_version,
+      terms_accepted_ip,
     } = data;
+    
+    const insertData = {
+      business_id,
+      email,
+      password_hash,
+      first_name,
+      last_name,
+      role,
+    };
+    
+    // Add terms acceptance fields if provided (for new signups)
+    if (terms_accepted_at !== undefined) {
+      insertData.terms_accepted_at = terms_accepted_at;
+    }
+    if (privacy_accepted_at !== undefined) {
+      insertData.privacy_accepted_at = privacy_accepted_at;
+    }
+    if (terms_version !== undefined) {
+      insertData.terms_version = terms_version;
+    }
+    if (terms_accepted_ip !== undefined) {
+      insertData.terms_accepted_ip = terms_accepted_ip;
+    }
     
     const { data: user, error } = await supabaseClient
       .from('users')
-      .insert({
-        business_id,
-        email,
-        password_hash,
-        first_name,
-        last_name,
-        role,
-      })
+      .insert(insertData)
       .select()
       .single();
     

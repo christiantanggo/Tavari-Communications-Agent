@@ -11,6 +11,7 @@ export default function SignupPage() {
     email: '',
     password: '',
     name: '', // Business name
+    termsAccepted: false,
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,6 +41,13 @@ export default function SignupPage() {
       return;
     }
     
+    // Validate terms acceptance
+    if (!formData.termsAccepted) {
+      setError('You must agree to the Terms of Service and Privacy Policy to create an account');
+      setLoading(false);
+      return;
+    }
+    
     try {
       // Only send minimal required data - rest will be collected in setup wizard
       const response = await signup({
@@ -62,6 +70,7 @@ export default function SignupPage() {
           sunday: { closed: true },
         },
         contact_email: formData.email,
+        terms_accepted: true, // User has accepted terms (validated above)
       });
 
       // Check if signup succeeded (we got a token)
@@ -180,9 +189,37 @@ export default function SignupPage() {
             />
           </div>
 
+          {/* Terms Acceptance */}
+          <div className="space-y-2">
+            <label className="flex items-start">
+              <input
+                type="checkbox"
+                checked={formData.termsAccepted}
+                onChange={(e) => setFormData({ ...formData, termsAccepted: e.target.checked })}
+                required
+                className="mt-1 mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <span className="text-sm text-gray-700">
+                I agree to the{' '}
+                <Link href="/terms" target="_blank" className="text-blue-600 hover:underline font-medium">
+                  Terms of Service
+                </Link>
+                {' '}and{' '}
+                <Link href="/privacy" target="_blank" className="text-blue-600 hover:underline font-medium">
+                  Privacy Policy
+                </Link>
+                {' '}*
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 ml-6">
+              By creating an account, you acknowledge that you have read, understood, and agree to be bound by our Terms of Service 
+              and Privacy Policy, including our AI disclaimer and limitation of liability provisions.
+            </p>
+          </div>
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !formData.termsAccepted}
             className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Creating Account...' : 'Create Account'}

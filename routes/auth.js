@@ -22,11 +22,20 @@ router.post('/signup', async (req, res) => {
       last_name,
       timezone,
       business_hours,
-      contact_email
+      contact_email,
+      terms_accepted
     } = req.body;
     
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and business name are required' });
+    }
+    
+    // Require terms acceptance
+    if (!terms_accepted) {
+      return res.status(400).json({ 
+        error: 'You must agree to the Terms of Service and Privacy Policy to create an account',
+        code: 'TERMS_NOT_ACCEPTED'
+      });
     }
     
     // Validate and format phone number to E.164
@@ -108,7 +117,16 @@ router.post('/signup', async (req, res) => {
     // Hash password
     const password_hash = await hashPassword(password);
     
-    // Create user
+    // Get client IP address for terms acceptance tracking
+    const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
+    // Extract first IP if x-forwarded-for contains multiple
+    const termsAcceptedIp = typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : 'unknown';
+    
+    // Current terms version (update this when Terms are updated)
+    const termsVersion = '2025-12-27';
+    const now = new Date().toISOString();
+    
+    // Create user with terms acceptance
     const user = await User.create({
       business_id: business.id,
       email,
@@ -116,6 +134,10 @@ router.post('/signup', async (req, res) => {
       first_name,
       last_name,
       role: 'owner',
+      terms_accepted_at: now,
+      privacy_accepted_at: now, // Privacy policy accepted at same time
+      terms_version: termsVersion,
+      terms_accepted_ip: termsAcceptedIp,
     });
     
     // Create default AI agent
