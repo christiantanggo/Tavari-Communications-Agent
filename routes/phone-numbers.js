@@ -243,10 +243,36 @@ router.post('/assign', authenticate, async (req, res) => {
 
     try {
       // If purchasing new, purchase from Telnyx first
+      // OR if number already exists in Telnyx but not assigned, we still need to configure it
       if (purchase_new) {
-        console.log(`[Phone Assign] Purchasing new number ${phoneNumberE164}...`);
+        console.log(`[Phone Assign] Purchasing/verifying number ${phoneNumberE164} in Telnyx...`);
         await purchaseTelnyxNumber(phoneNumberE164, req.businessId);
-        console.log(`[Phone Assign] ✅ Number purchased from Telnyx`);
+        console.log(`[Phone Assign] ✅ Number verified/purchased in Telnyx`);
+      } else {
+        // Even if not purchasing new, verify the number exists in Telnyx
+        // This handles the case where number exists but isn't assigned to a connection
+        try {
+          const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+          if (TELNYX_API_KEY) {
+            const axios = (await import("axios")).default;
+            const checkResponse = await axios.get(`https://api.telnyx.com/v2/phone_numbers?filter[phone_number]=${encodeURIComponent(phoneNumberE164)}`, {
+              headers: { Authorization: `Bearer ${TELNYX_API_KEY}` },
+            });
+            
+            if (checkResponse.data?.data && checkResponse.data.data.length > 0) {
+              const existingNumber = checkResponse.data.data[0];
+              console.log(`[Phone Assign] ✅ Number exists in Telnyx: ${phoneNumberE164}`);
+              console.log(`[Phone Assign] Connection ID: ${existingNumber.connection_id || 'NOT SET'}`);
+              // Number exists - we can proceed with assignment even if connection_id is not set
+              // The number will be configured during provisioning
+            } else {
+              console.warn(`[Phone Assign] ⚠️  Number ${phoneNumberE164} not found in Telnyx. You may need to purchase it first.`);
+            }
+          }
+        } catch (checkError) {
+          console.warn(`[Phone Assign] Could not verify number in Telnyx:`, checkError.message);
+          // Continue anyway - provisioning will handle it
+        }
       }
 
       // Check if already in VAPI

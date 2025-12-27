@@ -424,6 +424,8 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
     console.log(`[VAPI] Found ${assignedNumbers.size} phone numbers assigned to businesses (checked vapi_phone_number, telnyx_number, and business_phone_numbers)`);
     
     // Find unassigned numbers in Telnyx
+    // Include ALL numbers that aren't assigned to businesses, regardless of Telnyx connection status
+    // Numbers without connection_id are still available for assignment
     const unassignedTelnyxNumbers = allTelnyxNumbers.filter(telnyxNum => {
       const telnyxPhone = telnyxNum.phone_number || telnyxNum.number;
       if (!telnyxPhone) return false;
@@ -434,10 +436,30 @@ export async function findUnassignedTelnyxNumbers(preferredAreaCode = null) {
         normalized = '+' + normalized;
       }
       
-      return !assignedNumbers.has(normalized);
+      // Check if this number is assigned to a business in our database
+      // We don't care about Telnyx connection_id - if it's not in our DB, it's available
+      const isAssignedInDatabase = assignedNumbers.has(normalized);
+      
+      if (isAssignedInDatabase) {
+        return false; // Already assigned to a business
+      }
+      
+      // Number exists in Telnyx but not assigned to any business - it's available
+      // Even if connection_id is null/undefined, we can still use it
+      return true;
     });
     
     console.log(`[VAPI] Found ${unassignedTelnyxNumbers.length} unassigned phone numbers in Telnyx`);
+    
+    // Log details about unassigned numbers (including connection status)
+    if (unassignedTelnyxNumbers.length > 0) {
+      console.log(`[VAPI] Unassigned numbers details:`);
+      unassignedTelnyxNumbers.slice(0, 5).forEach((num, idx) => {
+        const phone = num.phone_number || num.number;
+        const connectionId = num.connection_id || num.connection_name || 'NOT SET';
+        console.log(`[VAPI]   ${idx + 1}. ${phone} (connection_id: ${connectionId})`);
+      });
+    }
     
     // Also check VAPI for numbers not assigned to businesses
     let unassignedVapiNumbers = [];
