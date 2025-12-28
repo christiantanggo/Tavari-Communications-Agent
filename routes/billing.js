@@ -211,7 +211,7 @@ router.get('/status', authenticate, async (req, res) => {
         if (business.stripe_subscription_id) {
           try {
             subscription = await stripe.subscriptions.retrieve(business.stripe_subscription_id, {
-              expand: ['default_payment_method']
+              expand: ['default_payment_method', 'items.data.price']
             });
           } catch (subError) {
             console.warn('[Billing Status] Could not retrieve subscription:', subError.message);

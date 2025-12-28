@@ -217,7 +217,7 @@ function BillingPage() {
                           {getPlanDetails(billing.plan_tier).name} Plan
                         </p>
                         <p className="text-sm text-gray-600">
-                          ${getPlanDetails(billing.plan_tier).price}/month
+                          ${(billing.subscription?.price || billing.subscription_price || getPlanDetails(billing.plan_tier).price).toFixed(2)}/month
                         </p>
                       </div>
                       <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
