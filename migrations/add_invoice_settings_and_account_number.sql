@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS invoice_settings (
 
 -- Insert default invoice settings (single row - we'll use a singleton pattern)
 INSERT INTO invoice_settings (id, company_name, company_email, tax_rate)
-VALUES (gen_random_uuid(), 'Tavari', 'billing@tavarios.com', 0.13)
+VALUES (gen_random_uuid(), 'Tavari', 'info@tanggo.ca', 0.13)
 ON CONFLICT DO NOTHING;
 
 -- Add account_number to businesses table for invoice numbering

@@ -8,7 +8,7 @@ import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || "noreply@tavari.com";
+const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || "noreply@tanggo.ca";
 const FROM_NAME = "Tavari";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
@@ -636,7 +636,7 @@ export async function sendSupportTicketNotification(ticket, business) {
     const { subject, bodyText, bodyHtml } = await renderEmailTemplate("support_ticket_created", templateData);
 
     // Send to Tavari support email
-    const supportEmail = process.env.SUPPORT_EMAIL || "support@tavari.com";
+    const supportEmail = process.env.SUPPORT_EMAIL || "info@tanggo.ca";
     await sendEmail(supportEmail, subject, bodyText, bodyHtml, "Tavari Support", business.id);
   } catch (error) {
     console.error(`[Notifications] Error sending support ticket notification:`, error);

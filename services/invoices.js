@@ -161,7 +161,7 @@ async function generatePDFInvoice(invoice, business) {
     // Footer
     y = 700;
     doc.fontSize(8).text("Thank you for your business!", 50, y);
-    const supportEmail = invoiceSettings?.company_email || "support@tavari.com";
+    const supportEmail = invoiceSettings?.company_email || "info@tanggo.ca";
     doc.text(`Questions? Contact ${supportEmail}`, 50, y + 15);
 
     doc.end();
