@@ -246,6 +246,25 @@ router.get('/status', authenticate, async (req, res) => {
       }
     }
 
+    // Extract actual subscription price from Stripe subscription
+    let actualSubscriptionPrice = null;
+    if (subscription?.items?.data?.length > 0) {
+      // Get the price from the first subscription item (should only be one)
+      const subscriptionItem = subscription.items.data[0];
+      if (subscriptionItem?.price?.unit_amount) {
+        // Convert from cents to dollars
+        actualSubscriptionPrice = subscriptionItem.price.unit_amount / 100;
+      }
+    }
+    
+    // Fallback to purchased_at_sale_price if available, otherwise use package monthly_price
+    // This handles the case where Stripe data isn't available
+    if (!actualSubscriptionPrice && business.purchased_at_sale_price) {
+      actualSubscriptionPrice = parseFloat(business.purchased_at_sale_price);
+    } else if (!actualSubscriptionPrice && packageDetails?.monthly_price) {
+      actualSubscriptionPrice = parseFloat(packageDetails.monthly_price);
+    }
+
     res.json({
       packageId: packageId,
       package: packageDetails,
@@ -257,7 +276,9 @@ router.get('/status', authenticate, async (req, res) => {
         current_period_start: subscription.current_period_start,
         current_period_end: subscription.current_period_end,
         cancel_at_period_end: subscription.cancel_at_period_end,
+        price: actualSubscriptionPrice, // Actual price being charged
       } : null,
+      subscription_price: actualSubscriptionPrice, // Actual price being charged (for backward compatibility)
       payment_method: paymentMethod ? {
         id: paymentMethod.id,
         type: paymentMethod.type,
