@@ -480,14 +480,8 @@ export default function TermsOfService() {
               <div className="bg-gray-50 p-4 rounded">
                 <p className="text-gray-700">
                   <strong>Email:</strong>{' '}
-                  <a href="mailto:legal@tavarios.com" className="text-blue-600 hover:underline">
-                    legal@tavarios.com
-                  </a>
-                </p>
-                <p className="text-gray-700 mt-2">
-                  <strong>Support:</strong>{' '}
-                  <a href="mailto:support@tavarios.com" className="text-blue-600 hover:underline">
-                    support@tavarios.com
+                  <a href="mailto:info@tanggo.ca" className="text-blue-600 hover:underline">
+                    info@tanggo.ca
                   </a>
                 </p>
               </div>
