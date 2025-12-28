@@ -52,7 +52,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">6. Contact</h2>
             <p>
-              For privacy concerns, contact us at privacy@tavari.com
+              For privacy concerns, contact us at info@tanggo.ca
             </p>
           </section>
 

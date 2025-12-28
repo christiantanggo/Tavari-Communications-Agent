@@ -132,8 +132,8 @@ export default function OptInWorkflow() {
             <div className="mt-8 pt-6 border-t border-gray-200">
               <p className="text-sm text-gray-500">
                 For questions about SMS opt-in, contact support at{' '}
-                <a href="mailto:support@tavarios.com" className="text-blue-600 hover:underline">
-                  support@tavarios.com
+                <a href="mailto:info@tanggo.ca" className="text-blue-600 hover:underline">
+                  info@tanggo.ca
                 </a>
               </p>
               <div className="mt-4 space-x-4">

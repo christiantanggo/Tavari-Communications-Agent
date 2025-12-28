@@ -137,7 +137,7 @@ function InvoiceSettingsPage() {
                   onChange={(e) => setFormData({ ...formData, company_email: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
-                  placeholder="billing@tavarios.com"
+                  placeholder="info@tanggo.ca"
                 />
                 <p className="text-xs text-gray-500 mt-1">Used for invoice contact information</p>
               </div>
