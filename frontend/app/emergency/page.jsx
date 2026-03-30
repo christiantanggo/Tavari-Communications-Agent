@@ -363,8 +363,7 @@ export default function EmergencyPage() {
         </div>
       </section>
 
-      {/* 8) TRUST + LEGAL */}
-      <footer className="bg-white border-t border-[#ddd] py-5 px-4">
+      <section className="bg-white border-t border-[#ddd] py-5 px-4" aria-label="Trust notice">
         <div className="max-w-[900px] mx-auto text-center">
           <p className="text-[13px] text-[#555] leading-relaxed">
             We connect homeowners with independent licensed and insured local professionals. Services are performed by third-party contractors.
@@ -373,7 +372,7 @@ export default function EmergencyPage() {
             <Link href="/" className="hover:text-[#555]">Powered by Tavari</Link>
           </p>
         </div>
-      </footer>
+      </section>
     </div>
   );
 }

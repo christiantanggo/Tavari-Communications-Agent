@@ -50,7 +50,7 @@ function SettingsPage() {
           <div className="bg-white rounded-lg shadow" style={{ minHeight: '600px' }}>
             {activeTab === 'activity' && (
               <iframe
-                src="/admin/activity"
+                src="/admin/activity?embed=1"
                 className="w-full border-0"
                 style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}
                 title="Activity"
@@ -58,7 +58,7 @@ function SettingsPage() {
             )}
             {activeTab === 'phone-numbers' && (
               <iframe
-                src="/admin/phone-numbers"
+                src="/admin/phone-numbers?embed=1"
                 className="w-full border-0"
                 style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}
                 title="Phone Numbers"
@@ -66,7 +66,7 @@ function SettingsPage() {
             )}
             {activeTab === 'test-wizard' && (
               <iframe
-                src="/admin/test-wizard"
+                src="/admin/test-wizard?embed=1"
                 className="w-full border-0"
                 style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}
                 title="Test Wizard"

@@ -109,7 +109,7 @@ function PhoneNumberPage() {
                   setError('');
                 }}
                 selectedNumber={selectedNumber}
-                countryCode="US"
+                countryCode="CA"
                 areaCode={user?.business?.public_phone_number ? extractAreaCode(user.business.public_phone_number) : null}
               />
             </div>

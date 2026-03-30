@@ -9,6 +9,8 @@ import { AIAgent } from '../../models/AIAgent.js';
 import { getStripeInstance } from '../../services/stripe.js';
 import { calculateBillingCycle } from '../../services/billing.js';
 import { getFrontendPublicBaseUrl } from '../../config/public-urls.js';
+import { excludeRetiredModules, isRetiredModuleKey } from '../../config/retired-module-keys.js';
+import { excludeConstructionModules } from '../../config/construction-dashboard.js';
 
 const router = express.Router();
 
@@ -19,7 +21,7 @@ const router = express.Router();
  */
 router.get('/list', authenticate, async (req, res) => {
   try {
-    const modules = filterModulesForCustomerCatalog(await Module.findAll());
+    const modules = excludeConstructionModules(excludeRetiredModules(await Module.findAll()));
     res.json({ modules });
   } catch (error) {
     console.error('[GET /api/v2/modules/list] Error:', error);
@@ -33,7 +35,7 @@ router.get('/list', authenticate, async (req, res) => {
  */
 router.get('/', authenticate, requireBusinessContext, async (req, res) => {
   try {
-    const modules = await Module.findAll();
+    const modules = excludeConstructionModules(excludeRetiredModules(await Module.findAll()));
     const subscriptions = await Subscription.findByBusinessId(req.active_business_id);
     
     // Get business to check for legacy Phone Agent subscription
@@ -91,6 +93,10 @@ router.get('/:moduleKey', authenticate, requireBusinessContext, async (req, res)
   try {
     const { moduleKey } = req.params;
 
+    if (isRetiredModuleKey(moduleKey)) {
+      return res.status(404).json({ error: 'Module not found' });
+    }
+
     const module = await Module.findByKey(moduleKey);
     if (!module) {
       return res.status(404).json({ error: 'Module not found' });
@@ -133,7 +139,7 @@ router.get('/:moduleKey', authenticate, requireBusinessContext, async (req, res)
  */
 // Internal/free modules that don't require Stripe or legal acceptance gate
 // delivery-dispatch removed: uses same billing as rest of app (Stripe subscription, legal acceptance)
-const FREE_MODULES = new Set(['kidquiz', 'movie-review', 'emergency-dispatch', 'emergency-network', 'dad-joke-studio']);
+const FREE_MODULES = new Set(['movie-review', 'emergency-dispatch', 'emergency-network']);
 
 router.post('/:moduleKey/activate',
   authenticate,
@@ -166,6 +172,9 @@ router.post('/:moduleKey/activate',
   async (req, res) => {
     try {
       const { moduleKey } = req.params;
+      if (isRetiredModuleKey(moduleKey)) {
+        return res.status(410).json({ error: 'This module is no longer available.' });
+      }
       const businessId = req.active_business_id;
       const testMode = req.query.test === 'true' || req.body.test === true;
       
@@ -592,10 +601,7 @@ router.post('/:moduleKey/activate',
               }
               
               try {
-                await Business.update(businessId, {
-                  vapi_phone_number: phoneNumberE164,
-                  vapi_assistant_id: assistant.id,
-                });
+                await Business.setVapiAssistant(businessId, assistant.id, phoneNumberE164);
                 assignedPhoneNumber = phoneNumberE164;
                 console.log(`[Module Activation] ✅ Phone number ${phoneNumberE164} automatically assigned to business ${businessId}`);
                 
@@ -636,7 +642,6 @@ router.post('/:moduleKey/activate',
       
       // Redirect to the appropriate dashboard for this module
       const moduleDashboards = {
-        'kidquiz': '/dashboard/v2/modules/kidquiz/dashboard',
         'movie-review': '/dashboard/v2/modules/movie-review/dashboard',
         'emergency-dispatch': '/dashboard/v2/modules/emergency-dispatch',
         'emergency-network': '/dashboard/v2/modules/emergency-dispatch',

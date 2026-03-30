@@ -3,6 +3,8 @@ import { authenticate } from '../../middleware/auth.js';
 import { requireBusinessContext } from '../../middleware/v2/requireBusinessContext.js';
 import { Module } from '../../models/v2/Module.js';
 import { Subscription } from '../../models/v2/Subscription.js';
+import { excludeRetiredModules } from '../../config/retired-module-keys.js';
+import { excludeConstructionModules } from '../../config/construction-dashboard.js';
 
 const router = express.Router();
 
@@ -17,7 +19,7 @@ router.use(requireBusinessContext);
  */
 router.get('/', async (req, res) => {
   try {
-    const modules = await Module.findAll();
+    const modules = excludeConstructionModules(excludeRetiredModules(await Module.findAll()));
     const subscriptions = await Subscription.findActiveByBusinessId(req.active_business_id);
     
     // Create subscription map

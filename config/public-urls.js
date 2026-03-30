@@ -45,14 +45,9 @@ export function getApiPublicBaseUrl() {
   return `http://localhost:${getDevBackendPort()}`;
 }
 
-/** Full Orbix-style YouTube OAuth callback URL (also used as template to derive Kid Quiz / Riddle paths). */
+/** Full Orbix-style YouTube OAuth callback URL (also used as template to derive Riddle paths). */
 export function defaultOrbixYoutubeCallbackUrl() {
   return `${getApiPublicBaseUrl()}/api/v2/orbix-network/youtube/callback`;
-}
-
-/** Kid Quiz YouTube OAuth redirect (must match Google Cloud + kidquiz-youtube-callback). */
-export function kidquizYoutubeCallbackUrl() {
-  return `${getApiPublicBaseUrl()}/api/v2/kidquiz/youtube/callback`;
 }
 
 /** Riddle / per-channel Orbix YouTube OAuth redirect. */
@@ -62,6 +57,15 @@ export function riddleYoutubeCallbackUrl() {
 
 export function getFrontendPublicBaseUrl() {
   const f = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
+
+  // Local dev: partner links, emails, and Stripe return URLs must match the Next.js port in
+  // config/dev-ports.json. A stale FRONTEND_URL=http://localhost:3000 breaks links when dev runs on 3005.
+  if (process.env.NODE_ENV !== 'production' && !deploymentLooksHosted()) {
+    if (!f || f === '*' || /localhost|127\.0\.0\.1/i.test(f)) {
+      return `http://localhost:${getDevFrontendPort()}`;
+    }
+  }
+
   if (f && f !== '*') {
     let resolved = f.startsWith('http') ? f : f.includes('localhost') ? `http://${f}` : `https://${f}`;
     if (deploymentLooksHosted() && /localhost|127\.0\.0\.1/i.test(resolved)) {

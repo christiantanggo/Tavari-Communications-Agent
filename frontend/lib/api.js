@@ -1,7 +1,7 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
 
-const DEFAULT_API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003').replace(/\/$/, '');
+const DEFAULT_API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005').replace(/\/$/, '');
 /** Runtime override: set window.__TAVARI_API_URL__ before app loads to point to your backend without redeploy. */
 export function getApiBaseUrl() {
   if (typeof window !== 'undefined' && window.__TAVARI_API_URL__) {
@@ -185,7 +185,58 @@ export const billingAPI = {
     const params = moduleKey ? { module_key: moduleKey } : {};
     return api.get('/billing/packages', { params });
   },
-  createCheckout: (packageId) => api.post('/billing/checkout', { packageId }),
+  createCheckout: (packageId, opts = {}) => {
+    let joinFunnel = opts.joinFunnel;
+    let joinCode = opts.joinCode;
+    if (typeof window !== 'undefined' && (!joinFunnel || !joinCode)) {
+      try {
+        const m = window.location.pathname.match(/^\/join\/phone-agent\/([A-Za-z0-9]{4,16})\/?$/);
+        if (m) {
+          const c = m[1].trim().toUpperCase();
+          if (/^[A-Z0-9]{4,16}$/.test(c)) {
+            joinFunnel = 'phone-agent';
+            joinCode = c;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    let affiliate_code =
+      typeof opts.affiliate_code === 'string' && opts.affiliate_code.trim()
+        ? opts.affiliate_code.trim().toUpperCase()
+        : undefined;
+    if (typeof document !== 'undefined') {
+      if (!affiliate_code) {
+        const cookies = document.cookie.split(';');
+        const row = cookies.find((c) => c.trim().startsWith('tavari_affiliate_ref='));
+        if (row) {
+          affiliate_code = decodeURIComponent(row.split('=').slice(1).join('=').trim());
+        }
+      }
+      if (!affiliate_code) {
+        try {
+          const q = new URLSearchParams(window.location.search).get('partner');
+          const u = String(q || '')
+            .trim()
+            .toUpperCase();
+          if (/^[A-Z0-9]{4,16}$/.test(u)) affiliate_code = u;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const body = {
+      packageId,
+      ...(affiliate_code ? { affiliate_code } : {}),
+    };
+    if (joinFunnel === 'phone-agent' && joinCode) {
+      body.join_funnel = 'phone-agent';
+      body.join_code = String(joinCode).trim();
+    }
+    return api.post('/billing/checkout', body);
+  },
   verifyStripeSession: (sessionId) => api.get('/billing/verify-session', { params: { session_id: sessionId } }),
   getTestMode: () => api.get('/billing/test-mode'),
 };
@@ -381,6 +432,13 @@ export const modulesAPI = {
   getAll: () => api.get('/v2/modules'),
   getModule: (moduleKey) => api.get(`/v2/modules/${moduleKey}`),
   activate: (moduleKey) => api.post(`/v2/modules/${moduleKey}/activate`),
+};
+
+/** PIN unlock (httpOnly cookie on API host) + construction-only module list */
+export const constructionAPI = {
+  unlock: (pin) => api.post('/v2/construction/unlock', { pin }),
+  lock: () => api.post('/v2/construction/lock'),
+  getModules: () => api.get('/v2/construction/modules'),
 };
 
 // Reviews API (v2)

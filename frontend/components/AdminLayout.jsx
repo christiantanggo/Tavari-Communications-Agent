@@ -11,16 +11,28 @@ const MAIN_NAV = [
   { href: '/admin/settings', label: 'Settings' },
   { href: '/admin/website-analytics', label: 'Website Analytics' },
   { href: '/admin/support', label: 'Support Tickets' },
+  { href: '/admin/affiliates', label: 'Affiliates' },
+  { href: '/admin/affiliates?tab=commission', label: 'Affiliate commission' },
 ];
 
-// Module links (href same as admin-dashboard module cards)
-const MODULE_NAV = [
+const ALL_ADMIN_MODULE_LINKS = [
   { href: '/tavari-ai-phone/admin-dashboard', label: 'Tavari AI Phone', key: 'phone-agent' },
   { href: '/review-reply-ai/admin-dashboard', label: 'Review Reply AI', key: 'reviews' },
   { href: '/admin/delivery-operator', label: 'Last-Mile Delivery', key: 'delivery-dispatch' },
   { href: '/dashboard/v2/modules/emergency-dispatch', label: 'Emergency Dispatch', key: 'emergency-dispatch' },
-  { href: '/dashboard/v2/modules/orbix-network', label: 'Orbix Network', key: 'orbix-network' },
+  { href: '/dashboard/v2/modules/orbix-network/dashboard', label: 'Orbix Network', key: 'orbix-network' },
+  { href: '/dashboard/v2/modules/movie-review/dashboard', label: 'Movie Review', key: 'movie-review' },
 ];
+
+function isAdminModuleLinkActive(pathname, { href, key }) {
+  if (!pathname) return false;
+  if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+  if (key === 'phone-agent') return pathname.startsWith('/tavari-ai-phone');
+  if (key === 'reviews') return pathname.startsWith('/review-reply-ai');
+  if (key === 'delivery-dispatch') return pathname.startsWith('/admin/delivery-operator');
+  if (key && pathname.startsWith(`/dashboard/v2/modules/${key}`)) return true;
+  return false;
+}
 
 function NavLink({ href, label, active }) {
   return (
@@ -59,12 +71,12 @@ export default function AdminLayout({ children }) {
             <div className="pt-4 mt-4 border-t border-gray-200">
               <p className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">Modules</p>
               <div className="mt-1 space-y-0.5">
-                {MODULE_NAV.map(({ href, label, key }) => (
+                {ALL_ADMIN_MODULE_LINKS.map((item) => (
                   <NavLink
-                    key={key}
-                    href={href}
-                    label={label}
-                    active={pathname === href || pathname?.startsWith(href + '/')}
+                    key={item.key}
+                    href={item.href}
+                    label={item.label}
+                    active={isAdminModuleLinkActive(pathname, item)}
                   />
                 ))}
               </div>

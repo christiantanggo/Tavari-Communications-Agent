@@ -140,11 +140,8 @@ router.post('/auto-assign', authenticate, async (req, res) => {
         await linkAssistantToNumber(assistantId, phoneNumberId);
       }
 
-      // Update business
-      await Business.update(business.id, {
-        vapi_phone_number: phoneNumberE164,
-        vapi_assistant_id: assistantId,
-      });
+      // Update business (enable AI when number + assistant are wired — matches admin "Active" badge)
+      await Business.setVapiAssistant(business.id, assistantId, phoneNumberE164);
 
       // Rebuild assistant to ensure it's up to date
       if (assistantId) {
@@ -332,11 +329,7 @@ router.post('/assign', authenticate, async (req, res) => {
         await linkAssistantToNumber(assistantId, phoneNumberId);
       }
 
-      // Update business
-      await Business.update(business.id, {
-        vapi_phone_number: phoneNumberE164,
-        vapi_assistant_id: assistantId,
-      });
+      await Business.setVapiAssistant(business.id, assistantId, phoneNumberE164);
 
       // Rebuild assistant to ensure it's up to date
       if (assistantId) {
@@ -626,11 +619,15 @@ router.post('/admin/change/:businessId', authenticateAdmin, async (req, res) => 
         }
       }
 
-      // Update business (always update, even if VAPI provisioning failed)
-      await Business.update(business.id, {
-        vapi_phone_number: phoneNumberE164,
-        vapi_assistant_id: assistantId,
-      });
+      // Always persist number + assistant; only force ai_enabled when VAPI has the number (linked use)
+      if (phoneNumberId && assistantId) {
+        await Business.setVapiAssistant(business.id, assistantId, phoneNumberE164);
+      } else {
+        await Business.update(business.id, {
+          vapi_phone_number: phoneNumberE164,
+          vapi_assistant_id: assistantId,
+        });
+      }
       
       // If phoneNumberId is missing, warn but don't fail
       if (!phoneNumberId) {

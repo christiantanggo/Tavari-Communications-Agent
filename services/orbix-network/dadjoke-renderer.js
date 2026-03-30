@@ -175,9 +175,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
  * @param {number} [params.episode_number]
  * @param {number} [params.backgroundId]
  * @param {string|null} [params.backgroundStoragePath] - Orbix storage path
- * @param {string|null} [params.backgroundImageUrl] - full URL (e.g. Dad Joke Studio asset); wins over backgroundId/path
- * @param {string|null} [params.musicTrackUrl] - explicit music URL; else Orbix channel music resolution
+ * @param {string|null} [params.backgroundImageUrl] - full URL; wins over backgroundId/path
+ * @param {string|null} [params.musicTrackUrl] - explicit music URL; else Orbix channel music when fallback enabled
  * @param {string|null} [params.orbixChannelIdForMusic] - story.channel_id for music folder
+ * @param {boolean} [params.allowOrbixBackgroundFallback=true] - use Orbix library background when no backgroundImageUrl
+ * @param {boolean} [params.allowOrbixMusicFallback=true] - use Orbix channel music when no musicTrackUrl
  * @param {string} [params.tempId] - prefix for temp files
  * @returns {Promise<{ localPath: string, duration: number }>}
  */
@@ -194,6 +196,8 @@ export async function renderOrbixStyleDadJokeShortToFile(params) {
     backgroundImageUrl = null,
     musicTrackUrl = null,
     orbixChannelIdForMusic = null,
+    allowOrbixBackgroundFallback = true,
+    allowOrbixMusicFallback = true,
     tempId = `dj-${Date.now()}`,
   } = params;
 
@@ -233,7 +237,9 @@ export async function renderOrbixStyleDadJokeShortToFile(params) {
       const imgResp = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 30000 });
       await fs.promises.writeFile(bgPath, imgResp.data);
     } else {
-      throw new Error('Background image URL is required (module uses Dad Joke Studio assets only).');
+      throw new Error(
+        'Background image URL is required when Orbix background fallback is disabled. Enable allowOrbixBackgroundFallback or pass backgroundImageUrl.',
+      );
     }
 
     motionPath = await applyMotionToImage(bgPath, DURATION);

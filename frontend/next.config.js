@@ -2,10 +2,10 @@ const path = require('path');
 const fs = require('fs');
 
 const devPortsPath = path.join(__dirname, '..', 'config', 'dev-ports.json');
-let devBackendPort = 5003;
+let devBackendPort = 5005;
 try {
   const raw = fs.readFileSync(devPortsPath, 'utf8');
-  devBackendPort = Number(JSON.parse(raw).backend) || 5003;
+  devBackendPort = Number(JSON.parse(raw).backend) || 5005;
 } catch {
   // keep default
 }

@@ -464,18 +464,13 @@ export default function EmergencyDispatchPage() {
         </div>
       </section>
 
-      <footer className="bg-[#2c2c2c] text-white py-6 px-4">
+      <section className="bg-[#2c2c2c] text-white py-6 px-4" aria-label="Dispatch disclaimer">
         <div className="max-w-[900px] mx-auto text-center">
           <p className="text-[13px] text-white/80">
             We are a dispatch service for London Ontario. We connect you with independent licensed professionals. Services are performed by third-party providers.
           </p>
-          <p className="mt-3">
-            <Link href="/termsofservice" className="text-white/90 hover:text-white underline text-sm">Terms of Service</Link>
-            <span className="mx-2 text-white/50">|</span>
-            <Link href="/" className="text-white/70 hover:text-white text-sm">Tavari</Link>
-          </p>
         </div>
-      </footer>
+      </section>
 
       {/* Chat panel: same flow as SMS intake — no SMS sent; dispatch only */}
       {chatOpen && (

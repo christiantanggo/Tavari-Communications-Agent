@@ -3,6 +3,7 @@ import { StripeService } from '../services/stripe.js';
 import { authenticate } from '../middleware/auth.js';
 import { Business } from '../models/Business.js';
 import { PricingPackage } from '../models/PricingPackage.js';
+import { normalizeAffiliateCode } from '../services/affiliateProgram.js';
 
 const router = express.Router();
 
@@ -162,12 +163,31 @@ router.post('/checkout', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Business not found' });
     }
     
-    const successUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/billing/success?package_id=${packageId}&from_setup=true&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${req.headers.origin || process.env.FRONTEND_URL}/dashboard/setup`;
-    
+    const feOrigin = String(req.headers.origin || process.env.FRONTEND_URL || '').replace(/\/$/, '');
+    const joinFunnel = req.body?.join_funnel;
+    const joinCodeNorm =
+      joinFunnel === 'phone-agent' ? normalizeAffiliateCode(req.body?.join_code) : null;
+    const pkgModule = String(pkg.module_key || '').trim() || 'phone-agent';
+
+    let successUrl = `${feOrigin}/dashboard/billing/success?package_id=${encodeURIComponent(packageId)}&from_setup=true&session_id={CHECKOUT_SESSION_ID}`;
+    let cancelUrl = `${feOrigin}/dashboard/setup`;
+
+    if (joinCodeNorm && joinFunnel === 'phone-agent' && pkgModule === 'phone-agent') {
+      successUrl = `${feOrigin}/join/phone-agent/${joinCodeNorm}?checkout=success&package_id=${encodeURIComponent(packageId)}&session_id={CHECKOUT_SESSION_ID}`;
+      cancelUrl = `${feOrigin}/join/phone-agent/${joinCodeNorm}`;
+    }
+
     // Create Stripe checkout session with the correct price (sale or regular)
     console.log('[Billing] Creating Stripe checkout session for package:', packageId);
     console.log('[Billing] Package regular price:', pkg.monthly_price, 'Sale price:', pkg.sale_price, 'Charging:', priceToCharge);
+    const affiliateFromBody =
+      typeof req.body?.affiliate_code === "string" ? req.body.affiliate_code.trim() : "";
+    const joinCodeForAffiliate =
+      req.body?.join_funnel === "phone-agent" && typeof req.body?.join_code === "string"
+        ? req.body.join_code.trim()
+        : "";
+    const affiliateCode = affiliateFromBody || joinCodeForAffiliate || null;
+
     const checkoutSession = await StripeService.createCheckoutSession(
       req.businessId,
       packageId,
@@ -176,7 +196,8 @@ router.post('/checkout', authenticate, async (req, res) => {
       successUrl,
       cancelUrl,
       isOnSale ? pkg.sale_name : null, // Pass sale name if on sale
-      salePriceExpiresAt // Pass sale expiration date
+      salePriceExpiresAt, // Pass sale expiration date
+      affiliateCode
     );
     
     console.log('[Billing] ✅ Stripe checkout session created:', checkoutSession.sessionId);
@@ -201,9 +222,12 @@ router.post('/checkout', authenticate, async (req, res) => {
       packageId: packageId || 'not provided',
       businessId: req.businessId,
     });
-    res.status(500).json({ 
-      error: 'Failed to create checkout session', 
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    const status = typeof error.statusCode === 'number' ? error.statusCode : 500;
+    const clientMessage =
+      status >= 400 && status < 500 ? error.message : 'Failed to create checkout session';
+    res.status(status).json({
+      error: clientMessage,
+      ...(status >= 500 && process.env.NODE_ENV === 'development' ? { details: error.message } : {}),
     });
   }
 });

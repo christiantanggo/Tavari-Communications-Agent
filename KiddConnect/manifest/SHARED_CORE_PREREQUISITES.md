@@ -7,7 +7,7 @@ The studio routes use **v2 auth** and **business context** (`X-Active-Business-I
 - `users` — auth user records (often created by your signup flow / legacy migrations)
 - `businesses` — tenant / organization
 - `organization_users` — links user ↔ business with role (`owner` / `admin` / `staff`)
-- `modules` — registry rows for `kidquiz`, `orbix-network`, `movie-review`, `dad-joke-studio`, etc.
+- `modules` — registry rows for `kidquiz`, `orbix-network`, `movie-review`, etc.
 - `module_settings` — per-business JSON (YouTube OAuth tokens, module config)
 - Often: `business_modules` or subscription tables if middleware checks entitlements
 

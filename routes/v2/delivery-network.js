@@ -251,6 +251,7 @@ router.get('/public/delivery/:token', async (req, res) => {
   <h1>Delivery ${escapeHtml(row.reference_number || '—')}</h1>
   <p class="meta">Status: <strong>${escapeHtml(row.status || '—')}</strong></p>
   ${trackBlock}
+  ${actionNeededBlock}
   <p><strong>Pickup</strong><br>${escapeHtml(row.pickup_address || '—')}</p>
   <p><strong>Deliver to</strong><br>${escapeHtml(row.delivery_address || '—')}</p>
   ${row.recipient_name ? `<p><strong>Recipient</strong><br>${escapeHtml(row.recipient_name)}</p>` : ''}
@@ -273,6 +274,144 @@ router.get('/public/delivery/:token', async (req, res) => {
   } catch (err) {
     console.error('[DeliveryNetwork] public/delivery error:', err?.message || err);
     res.status(500).send('Something went wrong.');
+  }
+});
+
+/** Public manage link: same token as SMS/email customer page; no login (dashboard confirm-* requires business session). */
+async function getDeliveryRequestRowByNotifyToken(rawToken) {
+  const token = rawToken && String(rawToken).trim();
+  if (!token) return null;
+  const { data, error } = await supabaseClient
+    .from('delivery_requests')
+    .select('id, status, reference_number, pending_on_demand_snapshot')
+    .eq('customer_notify_token', token)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data;
+}
+
+router.get('/public/delivery-actions/:token', async (req, res) => {
+  try {
+    const row = await getDeliveryRequestRowByNotifyToken(req.params.token);
+    if (!row) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(404).json({ error: 'Not found' });
+    }
+    const out = {
+      reference_number: row.reference_number,
+      status: row.status,
+      confirming_delivery: null,
+      carrier_choice_required: false,
+    };
+    if (row.status === 'ConfirmingDelivery' && row.pending_on_demand_snapshot && typeof row.pending_on_demand_snapshot === 'object') {
+      const snap = row.pending_on_demand_snapshot;
+      out.confirming_delivery = {
+        provider_label: snap.name != null ? String(snap.name) : '',
+        final_price_cad: snap.final_price_cad != null ? String(snap.final_price_cad) : '',
+        amount_cents: snap.amount_cents != null ? snap.amount_cents : null,
+        disclaimer: snap.disclaimer != null ? String(snap.disclaimer) : '',
+      };
+    }
+    if (row.status === 'ChoosingCarrier') {
+      out.carrier_choice_required = true;
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json(out);
+  } catch (err) {
+    console.error('[DeliveryNetwork] public/delivery-actions get error:', err?.message || err);
+    res.status(500).json({ error: 'Failed to load delivery status' });
+  }
+});
+
+router.get('/public/delivery-actions/:token/carrier-options', async (req, res) => {
+  try {
+    const row = await getDeliveryRequestRowByNotifyToken(req.params.token);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const result = await getCarrierOptionsForRequest(row.id, null);
+    if (!result.success) {
+      const code = result.error === 'Forbidden' ? 403 : 400;
+      return res.status(code).json({ error: result.error || 'Failed to load options' });
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      estimates: result.estimates,
+      disclaimer: result.disclaimer,
+      fleet_fallback_available: result.fleet_fallback_available,
+    });
+  } catch (err) {
+    console.error('[DeliveryNetwork] public/delivery-actions carrier-options error:', err?.message || err);
+    res.status(500).json({ error: 'Failed to load carrier options' });
+  }
+});
+
+router.post('/public/delivery-actions/:token/confirm-quote', express.json(), async (req, res) => {
+  try {
+    const row = await getDeliveryRequestRowByNotifyToken(req.params.token);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const result = await confirmStagedOnDemandQuoteForRequest(row.id, null);
+    if (!result.success) {
+      const code = result.error === 'Forbidden' ? 403 : 400;
+      return res.status(code).json({ error: result.error || 'Confirm failed' });
+    }
+    res.json({
+      success: true,
+      amount_cents: result.amount_cents,
+      final_price_cad: result.final_price_cad,
+      disclaimer: result.disclaimer,
+    });
+  } catch (err) {
+    console.error('[DeliveryNetwork] public/delivery-actions confirm-quote error:', err?.message || err);
+    res.status(500).json({ error: 'Confirm failed' });
+  }
+});
+
+router.post('/public/delivery-actions/:token/reject-quote', express.json(), async (req, res) => {
+  try {
+    const row = await getDeliveryRequestRowByNotifyToken(req.params.token);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const result = await rejectStagedOnDemandQuoteForRequest(row.id, null);
+    if (!result.success) {
+      const code = result.error === 'Forbidden' ? 403 : 400;
+      return res.status(code).json({ error: result.error || 'Reject failed' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[DeliveryNetwork] public/delivery-actions reject-quote error:', err?.message || err);
+    res.status(500).json({ error: 'Reject failed' });
+  }
+});
+
+router.post('/public/delivery-actions/:token/confirm-carrier', express.json(), async (req, res) => {
+  try {
+    const row = await getDeliveryRequestRowByNotifyToken(req.params.token);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const body = req.body || {};
+    if (body.mode === 'fleet') {
+      const result = await confirmFleetCarrierForRequest(row.id, null);
+      if (!result.success) {
+        const code = result.error === 'Forbidden' ? 403 : 400;
+        return res.status(code).json({ error: result.error || 'Fleet assign failed' });
+      }
+      return res.json({ success: true, mode: 'fleet', amount_cents: result.amount_cents });
+    }
+    const result = await confirmOnDemandCarrierForRequest(row.id, null, {
+      provider_name: body.provider_name,
+      estimate_id: body.estimate_id,
+    });
+    if (!result.success) {
+      const code = result.error === 'Forbidden' ? 403 : 400;
+      return res.status(code).json({ error: result.error || 'Assign failed' });
+    }
+    res.json({
+      success: true,
+      provider_name: result.provider_name,
+      amount_cents: result.amount_cents,
+      final_price_cad: result.final_price_cad,
+      disclaimer: result.disclaimer,
+    });
+  } catch (err) {
+    console.error('[DeliveryNetwork] public/delivery-actions confirm-carrier error:', err?.message || err);
+    res.status(500).json({ error: 'Confirm carrier failed' });
   }
 });
 
@@ -527,15 +666,33 @@ router.post('/request', express.json(), async (req, res) => {
 
     const businessId = body.business_id && String(body.business_id).trim() ? body.business_id.trim() : null;
     const isIndividual = !businessId;
+    const delivery_city = body.delivery_city?.trim() || null;
+    const delivery_province = body.delivery_province?.trim() || null;
+    const delivery_postal_code = body.delivery_postal_code?.trim() || null;
+    // Structured delivery (street + city/province/postal) for all public form submissions — matches dashboard quality for Shipday/on-demand.
+    if (!delivery_city || !delivery_province || !delivery_postal_code) {
+      return res.status(400).json({
+        error: 'Delivery city, province, and postal code are required.',
+      });
+    }
+
+    const pickup_address = body.pickup_address?.trim() || null;
+    const pickup_city = body.pickup_city?.trim() || null;
+    const pickup_province = body.pickup_province?.trim() || null;
+    const pickup_postal_code = body.pickup_postal_code?.trim() || null;
 
     const request = await createDeliveryRequest({
       business_id: businessId,
       caller_phone: smsIntakePhone || body.caller_phone || null,
       callback_phone: String(callback_phone).trim(),
+      pickup_address,
+      pickup_city,
+      pickup_province,
+      pickup_postal_code,
       delivery_address: String(delivery_address).trim(),
-      delivery_city: body.delivery_city?.trim() || null,
-      delivery_province: body.delivery_province?.trim() || null,
-      delivery_postal_code: body.delivery_postal_code?.trim() || null,
+      delivery_city,
+      delivery_province,
+      delivery_postal_code,
       recipient_name: body.recipient_name || body.name || null,
       recipient_phone: body.recipient_phone || null,
       package_description: body.package_description || body.issue_description || null,
@@ -549,18 +706,55 @@ router.post('/request', express.json(), async (req, res) => {
       payment_status: isIndividual ? 'pending_payment' : null,
     });
 
+    const feBase = getFrontendPublicBaseUrl().replace(/\/$/, '');
+    const notifyTok = request.customer_notify_token && String(request.customer_notify_token).trim();
+    const customer_manage_url = notifyTok
+      ? `${feBase}/deliverydispatch/confirm?token=${encodeURIComponent(notifyTok)}`
+      : null;
+
     if (isIndividual) {
       try {
-        const { createPaymentLinkForDelivery, DEFAULT_AMOUNT_CENTS } = await import('../../services/delivery-network/payment.js');
-        const baseUrl = getFrontendPublicBaseUrl();
-        const successUrl = `${baseUrl.replace(/\/$/, '')}/deliverydispatch?paid=1&ref=${encodeURIComponent(request.reference_number)}`;
-        const cancelUrl = `${baseUrl.replace(/\/$/, '')}/deliverydispatch?cancel=1`;
-        const amountCents = body.amount_quoted_cents != null ? Math.max(50, parseInt(body.amount_quoted_cents, 10)) : DEFAULT_AMOUNT_CENTS;
-        const { url } = await createPaymentLinkForDelivery(request.id, amountCents, successUrl, cancelUrl, body.email || null);
+        const { getIndividualDeliveryCheckoutQuote } = await import('../../services/delivery-network/individualDeliveryQuote.js');
+        const priced = await getIndividualDeliveryCheckoutQuote({
+          pickup_address,
+          pickup_city,
+          pickup_province,
+          pickup_postal_code,
+          delivery_address: String(delivery_address).trim(),
+          delivery_city,
+          delivery_province,
+          delivery_postal_code,
+          callback_phone: String(callback_phone).trim(),
+          recipient_name: body.recipient_name || body.name || null,
+          email: body.email || null,
+        });
+
+        await supabaseClient
+          .from('delivery_requests')
+          .update({
+            amount_quoted_cents: priced.amount_cents,
+            quoted_on_demand_provider: priced.quoted_on_demand_provider,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', request.id);
+
+        const { createPaymentLinkForDelivery } = await import('../../services/delivery-network/payment.js');
+        const successUrl = `${feBase}/deliverydispatch/confirm?paid=1&token=${encodeURIComponent(notifyTok || '')}&ref=${encodeURIComponent(request.reference_number)}`;
+        const cancelUrl = `${feBase}/deliverydispatch?cancel=1`;
+        const affiliateCode =
+          typeof body.affiliate_code === 'string' ? body.affiliate_code.trim() : '';
+        const { url } = await createPaymentLinkForDelivery(
+          request.id,
+          priced.amount_cents,
+          successUrl,
+          cancelUrl,
+          body.email || null,
+          affiliateCode || null,
+        );
         const { sendEmail } = await import('../../services/notifications.js');
         if (body.email && String(body.email).trim()) {
           const subject = `Complete your delivery payment — ${request.reference_number}`;
-          const bodyText = `Pay for your delivery here: ${url}\n\nReference: ${request.reference_number}`;
+          const bodyText = `Amount: $${(priced.amount_cents / 100).toFixed(2)} CAD\nPay for your delivery here: ${url}\n\nReference: ${request.reference_number}`;
           sendEmail(body.email.trim(), subject, bodyText, null, 'Tavari Delivery', null).catch((e) => console.warn('[DeliveryNetwork] Payment link email failed', e?.message));
         }
         return res.status(201).json({
@@ -570,6 +764,11 @@ router.post('/request', express.json(), async (req, res) => {
           reference_number: request.reference_number,
           payment_required: true,
           payment_link_url: url,
+          customer_manage_url,
+          amount_quoted_cents: priced.amount_cents,
+          final_price_cad: priced.final_price_cad,
+          quote_source: priced.quote_source,
+          price_disclaimer: priced.disclaimer,
         });
       } catch (payErr) {
         console.error('[DeliveryNetwork] Payment link creation error:', payErr?.message || payErr);
@@ -586,6 +785,7 @@ router.post('/request', express.json(), async (req, res) => {
       message: "Thanks — we're scheduling your delivery. You'll get updates shortly.",
       request_id: request.id,
       reference_number: request.reference_number,
+      customer_manage_url,
     });
   } catch (err) {
     console.error('[DeliveryNetwork] Form submit error:', err?.message || err);

@@ -158,7 +158,7 @@ export default function PhoneAgentLandingPage() {
               <div className="relative rounded-lg overflow-hidden">
                 <Image
                   src="/SMB-owner-photo.jpg"
-                  alt="Small Business Owner"
+                  alt="Small business owner testimonial: AI phone agent saved bookings and reduced missed calls"
                   width={1200}
                   height={600}
                   className="w-full h-[500px] md:h-[600px] object-cover"
@@ -419,49 +419,6 @@ export default function PhoneAgentLandingPage() {
           </div>
         </section>
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-gray-200 bg-gray-50 py-8 mt-20">
-        <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-center">
-            <div className="mb-4 md:mb-0">
-              <Link href="/" className="flex items-center">
-                <Image
-                  src="/tavari-logo.png"
-                  alt="Tavari AI"
-                  width={400}
-                  height={114}
-                  className="h-28 w-auto opacity-80"
-                  style={{ width: 'auto', height: '7rem' }}
-                />
-              </Link>
-            </div>
-            <div className="flex space-x-6 text-sm text-gray-600">
-              <Link 
-                href="/legal/privacy" 
-                className="hover:text-blue-600 transition-colors"
-                onClick={() => trackLinkClick('privacy_policy', '/legal/privacy', 'footer')}
-              >
-                Privacy Policy
-              </Link>
-              <Link 
-                href="/legal/terms" 
-                className="hover:text-blue-600 transition-colors"
-                onClick={() => trackLinkClick('terms_of_service', '/legal/terms', 'footer')}
-              >
-                Terms of Service
-              </Link>
-              <Link 
-                href="/affiliates" 
-                className="hover:text-blue-600 transition-colors"
-                onClick={() => trackLinkClick('affiliates', '/affiliates', 'footer')}
-              >
-                Affiliates
-              </Link>
-            </div>
-          </div>
-        </div>
-      </footer>
 
       {/* Sticky/Floating CTA Button */}
       {showStickyCTA && (

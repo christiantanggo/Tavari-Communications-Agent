@@ -11,6 +11,7 @@ import ModuleActivationModal from '@/components/ModuleActivationModal';
 import { ArrowLeft, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { modulesAPI } from '@/lib/api';
 import { getModulePostActivatePath } from '@/lib/moduleRoutes';
+import { isRetiredModuleKey } from '@/lib/retired-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -28,11 +29,15 @@ export default function ModuleDetailPage() {
   const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
 
   useEffect(() => {
+    if (moduleKey && isRetiredModuleKey(moduleKey)) {
+      router.replace('/dashboard');
+      return;
+    }
     if (moduleKey) {
       loadModule();
       loadBilling();
     }
-  }, [moduleKey]);
+  }, [moduleKey, router]);
 
   const getAuthHeaders = () => {
     if (typeof document === 'undefined') return {};

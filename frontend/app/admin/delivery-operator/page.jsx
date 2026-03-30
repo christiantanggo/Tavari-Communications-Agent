@@ -877,7 +877,6 @@ function AdminDeliveryOperatorPage() {
                                 base_url: '',
                                 preferred_carrier_ids: '',
                                 on_demand_enabled: false,
-                                on_demand_auto_assign: false,
                                 preferred_on_demand_provider: '',
                               }
                         );
@@ -1135,28 +1134,8 @@ function AdminDeliveryOperatorPage() {
                                   />
                                   <label htmlFor="shipday-on-demand-enabled" className="text-sm text-slate-700">Use on-demand delivery for quotes and dispatch</label>
                                 </div>
-                                <div className="flex items-center gap-2 mb-2">
-                                  <input
-                                    type="checkbox"
-                                    id="shipday-on-demand-auto-assign"
-                                    checked={!!entry.on_demand_auto_assign}
-                                    onChange={(e) =>
-                                      setConfigForm((f) => ({
-                                        ...f,
-                                        brokers: {
-                                          ...(f.brokers || {}),
-                                          shipday: { ...(f.brokers?.shipday || {}), on_demand_auto_assign: e.target.checked },
-                                        },
-                                      }))
-                                    }
-                                    className="rounded border-slate-300"
-                                  />
-                                  <label htmlFor="shipday-on-demand-auto-assign" className="text-sm text-slate-700">
-                                    Quote best on-demand price automatically (user confirms cost before dispatch)
-                                  </label>
-                                </div>
-                                <p className="text-xs text-slate-500 mb-2 -mt-1">
-                                  When enabled, we fetch Shipday estimates after the order is created, show the customer price (not the courier name), and the user must <strong>confirm</strong> to assign or <strong>decline</strong> to delete the Shipday order. If quoting fails, status falls back to <strong>Choosing carrier</strong>.
+                                <p className="text-xs text-slate-600 mb-2 bg-slate-100 border border-slate-200 rounded px-2 py-2">
+                                  After each Shipday order is created, Tavari requests on-demand estimates, picks the <strong>lowest-fee</strong> option (for example DoorDash vs Uber, depending on what Shipday returns), calls Shipday assign, and marks the request <strong>Dispatched</strong>. If there are no estimates or assign fails, status becomes <strong>Choosing carrier</strong> so you can pick manually or use fleet.
                                 </p>
                                 <div>
                                   <label className="block text-sm text-slate-700 mb-1">On-demand provider</label>

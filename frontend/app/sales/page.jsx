@@ -456,40 +456,6 @@ export default function SalesPage() {
         </section>
       </main>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 mt-12">
-        <div className="container mx-auto px-4 py-8">
-          <div className="flex flex-col md:flex-row justify-between items-center">
-            <div className="mb-4 md:mb-0">
-              <Link href="/" className="flex items-center">
-                <Image
-                  src="/tavari-logo.png"
-                  alt="Tavari AI"
-                  width={400}
-                  height={114}
-                  className="h-28 w-auto opacity-80"
-                  style={{ width: 'auto', height: '7rem' }}
-                />
-              </Link>
-            </div>
-            <div className="flex space-x-6 text-sm text-gray-600">
-              <Link href="/legal/privacy" className="hover:text-blue-600 transition-colors">
-                Privacy Policy
-              </Link>
-              <Link href="/legal/terms" className="hover:text-blue-600 transition-colors">
-                Terms of Service
-              </Link>
-              <Link href="/support" className="hover:text-blue-600 transition-colors">
-                Support
-              </Link>
-            </div>
-          </div>
-          <div className="text-center text-gray-500 text-sm mt-4">
-            <p>&copy; {new Date().getFullYear()} Tavari. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
-
       {/* Demo Modal */}
       <DemoModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
       

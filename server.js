@@ -38,7 +38,7 @@ dotenv.config();
 
 // Port: Railway (and similar) inject PORT; the proxy only forwards to that port.
 // We only read PORT when NODE_ENV=production OR Railway is detected — otherwise a stale
-// PORT=5001 in local .env would override dev-ports.json (5003).
+// PORT=5001 in local .env would override dev-ports.json (5005).
 const isProd = process.env.NODE_ENV === 'production';
 const onRailway = Boolean(process.env.RAILWAY_ENVIRONMENT);
 const paasPort = Number(process.env.PORT);
@@ -411,6 +411,7 @@ import agentsRoutes from "./routes/agents.js";
 import vapiRoutes from "./routes/vapi.js";
 import adminRoutes from "./routes/admin.js";
 import supportRoutes from "./routes/support.js";
+import affiliatePortalRoutes from "./routes/affiliate-portal.js";
 import invoicesRoutes from "./routes/invoices.js";
 import accountRoutes from "./routes/account.js";
 import businessRoutes from "./routes/business.js";
@@ -433,6 +434,11 @@ app.use("/api/auth/signup", authLimiter);
 app.use("/api/admin/login", authLimiter); // Use auth limiter for admin login (must be before general admin limiter)
 app.use("/api/vapi/webhook", webhookLimiter);
 app.use("/api/support/contact", contactLimiter); // Stricter rate limiting for public contact form
+app.use("/api/support/affiliate-apply", contactLimiter);
+app.use("/api/affiliate/exchange", contactLimiter);
+app.use("/api/affiliate/request-link", contactLimiter);
+app.use("/api/affiliate/track/click", contactLimiter);
+app.use("/api/affiliate/public-partner", contactLimiter);
 app.use("/api/kiosk", kioskLimiter); // More lenient rate limiting for kiosk (continuous polling)
 
 // Apply admin limiter to all admin routes EXCEPT login (which is handled above)
@@ -454,6 +460,7 @@ app.use("/api/agents", agentsRoutes);
 app.use("/api/vapi", vapiRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/support", supportRoutes);
+app.use("/api/affiliate", affiliatePortalRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/account", accountRoutes);
 app.use("/api/business", businessRoutes);
@@ -495,6 +502,8 @@ try {
   app.use("/api/v2/organizations", v2OrganizationsRoutes);
   console.log('✅ Organizations routes loaded at /api/v2/organizations');
   app.use("/api/v2/modules", v2ModulesRoutes);
+  const v2ConstructionRoutes = (await import("./routes/v2/construction.js")).default;
+  app.use("/api/v2/construction", v2ConstructionRoutes);
   app.use("/api/v2/settings", v2SettingsRoutes);
   app.use("/api/v2/marketplace", v2MarketplaceRoutes);
   app.use("/api/v2/webhooks/stripe", v2StripeWebhookRoutes);
@@ -614,39 +623,6 @@ try {
     console.log('✅ Delivery Network routes loaded at /api/v2/delivery-network');
   } catch (deliveryError) {
     console.warn('⚠️  Delivery Network routes not loaded:', deliveryError.message);
-  }
-
-  // Kid Quiz Studio (PUBLIC callback must be before authenticated routes)
-  try {
-    const kidquizYouTubeCallback = (await import("./routes/v2/kidquiz-youtube-callback.js")).default;
-    app.use("/api/v2/kidquiz", kidquizYouTubeCallback);
-    console.log('✅ Kid Quiz Studio YouTube OAuth callback loaded (public)');
-  } catch (kqCallbackErr) {
-    console.warn('⚠️  Kid Quiz Studio YouTube callback not loaded:', kqCallbackErr.message);
-  }
-
-  try {
-    const kidquizRoutes = (await import("./routes/v2/kidquiz.js")).default;
-    app.use("/api/v2/kidquiz", kidquizRoutes);
-    console.log('✅ Kid Quiz Studio routes loaded at /api/v2/kidquiz');
-  } catch (kqErr) {
-    console.warn('⚠️  Kid Quiz Studio routes not loaded:', kqErr.message);
-  }
-
-  // Dad Joke Studio (PUBLIC YouTube callback before authenticated routes)
-  try {
-    const djsCallback = (await import("./routes/v2/dad-joke-studio-youtube-callback.js")).default;
-    app.use("/api/v2/dad-joke-studio", djsCallback);
-    console.log("✅ Dad Joke Studio YouTube OAuth callback loaded (public)");
-  } catch (djsCbErr) {
-    console.warn("⚠️  Dad Joke Studio YouTube callback not loaded:", djsCbErr.message);
-  }
-  try {
-    const djsRoutes = (await import("./routes/v2/dad-joke-studio.js")).default;
-    app.use("/api/v2/dad-joke-studio", djsRoutes);
-    console.log("✅ Dad Joke Studio routes loaded at /api/v2/dad-joke-studio");
-  } catch (djsErr) {
-    console.warn("⚠️  Dad Joke Studio routes not loaded:", djsErr.message);
   }
 
   // Movie Review Studio (PUBLIC callback must be before authenticated routes)

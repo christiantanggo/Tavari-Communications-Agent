@@ -222,7 +222,7 @@ function MovieReviewSettingsInner() {
           {success && <div className="p-3 mb-4 rounded-lg text-sm" style={{ background: '#f0fdf4', color: '#16a34a' }}>{success}</div>}
 
           <div className="space-y-5">
-            {/* Upload OAuth app — same as Kid Quiz / Orbix */}
+            {/* Upload OAuth app — same pattern as Orbix */}
             <div className="rounded-2xl p-5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <h2 className="font-bold text-base mb-2" style={{ color: 'var(--color-text-main)' }}>📺 Upload OAuth app</h2>
               <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)' }}>
@@ -399,7 +399,7 @@ function MovieReviewSettingsInner() {
             <div className="rounded-2xl p-5" style={{ background: 'rgba(147,51,234,0.08)', border: '1px solid rgba(147,51,234,0.2)' }}>
               <h3 className="font-bold text-sm mb-2" style={{ color: '#7c3aed' }}>ℹ️ About Movie Review Studio</h3>
               <p className="text-xs leading-relaxed" style={{ color: '#7c3aed' }}>
-                Movie Review Studio is completely separate from KidQuiz and Orbix Network. It has its own YouTube channel, its own projects, and its own render queue.
+                Movie Review Studio is separate from Orbix Network. It has its own YouTube channel, its own projects, and its own render queue.
                 Background music is shared with your Orbix Network channels.
               </p>
             </div>

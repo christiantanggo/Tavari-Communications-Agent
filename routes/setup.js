@@ -79,7 +79,9 @@ router.post('/step1', authenticate, async (req, res) => {
 router.post('/step2', authenticate, async (req, res) => {
   try {
     const { greeting_text, opening_greeting, ending_greeting } = req.body;
-    
+
+    await AIAgent.ensureForBusiness(req.businessId);
+
     await AIAgent.update(req.businessId, {
       greeting_text,
       opening_greeting,
@@ -122,7 +124,7 @@ router.post('/step3', authenticate, async (req, res) => {
             const month = String(dateStr.getMonth() + 1).padStart(2, '0');
             const day = String(dateStr.getDate()).padStart(2, '0');
             dateStr = `${year}-${month}-${day}`;
-          } else if (dateStr.includes('T')) {
+          } else if (typeof dateStr === 'string' && dateStr.includes('T')) {
             dateStr = dateStr.split('T')[0];
           }
           return { ...h, date: dateStr };
@@ -176,7 +178,9 @@ router.post('/step4', authenticate, async (req, res) => {
 router.post('/step5', authenticate, async (req, res) => {
   try {
     const { message_settings } = req.body;
-    
+
+    await AIAgent.ensureForBusiness(req.businessId);
+
     await AIAgent.update(req.businessId, {
       message_settings,
     });

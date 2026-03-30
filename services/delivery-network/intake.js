@@ -115,7 +115,7 @@ export async function createDeliveryRequest(params) {
   const { data, error } = await supabaseClient
     .from('delivery_requests')
     .insert(payload)
-    .select('id, status, reference_number, created_at')
+    .select('id, status, reference_number, created_at, customer_notify_token')
     .single();
 
   if (error) throw error;

@@ -40,7 +40,7 @@ function PricingPage() {
           <div className="bg-white rounded-lg shadow" style={{ minHeight: '600px' }}>
             {activeTab === 'packages' && (
               <iframe
-                src="/admin/packages"
+                src="/admin/packages?embed=1"
                 className="w-full border-0"
                 style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}
                 title="Packages"
@@ -48,7 +48,7 @@ function PricingPage() {
             )}
             {activeTab === 'invoice-settings' && (
               <iframe
-                src="/admin/invoice-settings"
+                src="/admin/invoice-settings?embed=1"
                 className="w-full border-0"
                 style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}
                 title="Invoice Settings"

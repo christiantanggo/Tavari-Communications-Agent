@@ -38,7 +38,7 @@ For development with auto-reload:
 npm run dev
 ```
 
-**Local dev ports** (when running multiple projects): backend **5003**, frontend **3003** — single source of truth in [`config/dev-ports.json`](config/dev-ports.json). Details: [`PORTS.md`](PORTS.md). On macOS/Linux use `npm run dev:unix` for the API if you don’t use PowerShell.
+**Local dev ports** (this repo / tavarios local): backend **5005**, frontend **3005** — single source of truth in [`config/dev-ports.json`](config/dev-ports.json). Details: [`PORTS.md`](PORTS.md). On macOS/Linux use `npm run dev:unix` for the API if you don’t use PowerShell.
 
 ## Environment Variables
 

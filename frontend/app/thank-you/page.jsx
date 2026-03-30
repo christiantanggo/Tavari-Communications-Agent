@@ -130,28 +130,6 @@ export default function ThankYouPage() {
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 mt-12">
-        <div className="container mx-auto px-4 py-8">
-          <div className="flex flex-col md:flex-row justify-between items-center">
-            <div className="text-center text-gray-600 mb-4 md:mb-0">
-              <p>&copy; {new Date().getFullYear()} Tavari. All rights reserved.</p>
-            </div>
-            <div className="flex space-x-6 text-sm text-gray-600">
-              <Link href="/legal/privacy" className="hover:text-blue-600 transition-colors">
-                Privacy Policy
-              </Link>
-              <Link href="/legal/terms" className="hover:text-blue-600 transition-colors">
-                Terms of Service
-              </Link>
-              <Link href="/affiliates" className="hover:text-blue-600 transition-colors">
-                Affiliates
-              </Link>
-            </div>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

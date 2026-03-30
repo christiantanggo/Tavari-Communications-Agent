@@ -253,6 +253,7 @@ async function runOnDemandAssignAndMarkDispatched(deliveryRequestId, match, ctx)
       status: 'Dispatched',
       amount_quoted_cents: safeCents,
       quoted_on_demand_provider: providerDb || null,
+      pending_on_demand_snapshot: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', deliveryRequestId);
@@ -386,34 +387,29 @@ async function confirmOnDemandCarrierForRequestImpl(deliveryRequestId, businessI
 }
 
 /**
- * Called from startDispatch while request is still Contacting: collect estimates, price via engine, stage for dashboard confirm (no Shipday assign yet).
- * @returns {Promise<{ success: boolean, error?: string, amount_cents?: number, final_price_cad?: string, disclaimer?: string }>}
+ * After Shipday POST /orders (request still Contacting): fetch on-demand estimates, pick lowest fee, POST /on-demand/assign, mark Dispatched.
+ * Used from startDispatch so every intake path (form, dashboard, SMS, etc.) gets the same broker assignment behavior.
+ * @returns {Promise<{ success: boolean, error?: string, amount_cents?: number, final_price_cad?: string, disclaimer?: string, provider_name?: string }>}
  */
-export async function tryAutoAssignOnDemandAfterShipdayCreate(deliveryRequestId) {
+export async function assignCheapestOnDemandAfterShipdayCreate(deliveryRequestId) {
   try {
     const ctx = await getShipdayOrderContext(deliveryRequestId);
     if (ctx.error) return { success: false, error: ctx.error };
 
-    const { request, shipdayOrderId, onDemandBase, headers } = ctx;
+    const { request, shipdayOrderId, onDemandBase, headers, shipdayConfig } = ctx;
     if (request.status !== 'Contacting') {
-      return { success: false, error: 'Request is not in Contacting status (auto-assign must run before carrier choice)' };
+      return { success: false, error: 'Request is not in Contacting status' };
     }
     if (!onDemandBase) return { success: false, error: 'On-demand is not configured' };
 
-    const fullConfig = await getDeliveryConfigFull();
-    const shipCfg = fullConfig?.brokers?.shipday;
-    if (!isShipdayOnDemandEnabledFlag(shipCfg?.on_demand_enabled)) {
+    if (!isShipdayOnDemandEnabledFlag(ctx.shipdayConfig?.on_demand_enabled)) {
       return { success: false, error: 'On-demand is not enabled' };
     }
 
-    const prefRaw = shipCfg?.preferred_on_demand_provider;
-    const mode =
-      prefRaw != null && String(prefRaw).trim() ? String(prefRaw).trim() : 'cheapest';
-
     const estimates = await collectEstimatesAfterCreate(shipdayOrderId, onDemandBase, headers);
-    const match = pickOnDemandEstimate(estimates, mode);
+    const match = pickOnDemandEstimate(estimates, 'cheapest');
     if (!match) {
-      console.warn('[CarrierChoice] staged on-demand: no estimate for mode', JSON.stringify(mode), 'order', shipdayOrderId);
+      console.warn('[CarrierChoice] on-demand assign-on-create: no estimates for order', shipdayOrderId);
       return { success: false, error: 'No on-demand estimates from Shipday for this order' };
     }
 
@@ -422,53 +418,25 @@ export async function tryAutoAssignOnDemandAfterShipdayCreate(deliveryRequestId)
       return { success: false, error: 'Invalid estimate from Shipday' };
     }
 
-    const pricing = await calculateDeliveryPrice({
-      cost_usd: feeUsd,
-      business_id: request.business_id || null,
-    });
-    const safeCents = Math.max(0, Math.round(Number(pricing.amount_cents) || 0));
-    const snapshot = {
-      name: String(match.name || '').trim(),
-      estimate_id: match.id != null ? String(match.id) : '',
-      fee_usd: feeUsd,
-      amount_cents: safeCents,
-      final_price_cad: pricing.final_price_cad,
-      disclaimer: pricing.disclaimer || PRICE_DISCLAIMER,
-    };
+    const assignOut = await runOnDemandAssignAndMarkDispatched(deliveryRequestId, match, ctx);
+    if (!assignOut.success) return assignOut;
 
-    const { data: updatedRows, error: upErr } = await supabaseClient
-      .from('delivery_requests')
-      .update({
-        status: 'ConfirmingDelivery',
-        amount_quoted_cents: safeCents,
-        pending_on_demand_snapshot: snapshot,
-        quoted_on_demand_provider: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', deliveryRequestId)
-      .eq('status', 'Contacting')
-      .select('id');
-
-    if (upErr) {
-      console.error('[CarrierChoice] staged on-demand: DB update failed', upErr.message || upErr);
-      return { success: false, error: 'Could not save staged quote' };
-    }
-    if (!updatedRows || updatedRows.length === 0) {
-      console.warn('[CarrierChoice] staged on-demand: no row updated (expected Contacting)');
-      return { success: false, error: 'Request state changed; refresh and try again' };
-    }
-
-    console.log('[CarrierChoice] staged on-demand quote for confirmation', deliveryRequestId, 'cents', safeCents);
     return {
       success: true,
-      amount_cents: safeCents,
-      final_price_cad: pricing.final_price_cad,
-      disclaimer: snapshot.disclaimer,
+      amount_cents: assignOut.amount_cents,
+      final_price_cad: assignOut.final_price_cad,
+      disclaimer: assignOut.disclaimer,
+      provider_name: assignOut.provider_name,
     };
   } catch (err) {
-    console.error('[CarrierChoice] tryAutoAssignOnDemandAfterShipdayCreate:', err?.stack || err?.message || err);
-    return { success: false, error: err?.message ? String(err.message) : 'Auto-assign failed' };
+    console.error('[CarrierChoice] assignCheapestOnDemandAfterShipdayCreate:', err?.stack || err?.message || err);
+    return { success: false, error: err?.message ? String(err.message) : 'On-demand assign failed' };
   }
+}
+
+/** @deprecated Use assignCheapestOnDemandAfterShipdayCreate (immediate assign). Kept for any external/scripts. */
+export async function tryAutoAssignOnDemandAfterShipdayCreate(deliveryRequestId) {
+  return assignCheapestOnDemandAfterShipdayCreate(deliveryRequestId);
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 import { getStripeInstance } from '../stripe.js';
 import { supabaseClient } from '../../config/database.js';
+import { normalizeAffiliateCode } from '../affiliateProgram.js';
 
 const DEFAULT_AMOUNT_CENTS = 2000; // $20 fallback when no pricing engine
 
@@ -16,9 +17,17 @@ const DEFAULT_AMOUNT_CENTS = 2000; // $20 fallback when no pricing engine
  * @param {string} [customerEmail] - prefill email
  * @returns {Promise<{ url: string, paymentLinkId: string }>}
  */
-export async function createPaymentLinkForDelivery(deliveryRequestId, amountCents, successUrl, cancelUrl, customerEmail = null) {
+export async function createPaymentLinkForDelivery(
+  deliveryRequestId,
+  amountCents,
+  successUrl,
+  cancelUrl,
+  customerEmail = null,
+  affiliateCodeRaw = null,
+) {
   const stripe = getStripeInstance();
   const amount = Math.max(50, Math.round(amountCents)); // Stripe minimum 50 cents
+  const aff = normalizeAffiliateCode(affiliateCodeRaw);
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
@@ -41,6 +50,8 @@ export async function createPaymentLinkForDelivery(deliveryRequestId, amountCent
     metadata: {
       type: 'delivery_individual',
       delivery_request_id: deliveryRequestId,
+      tavari_module_key: 'delivery-dispatch',
+      ...(aff ? { affiliate_code: aff } : {}),
     },
   });
 

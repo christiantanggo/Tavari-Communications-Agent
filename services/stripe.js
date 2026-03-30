@@ -87,9 +87,26 @@ export function isStripeTestMode() {
   }
 }
 
+/** Package/amount rules Stripe will reject; billing returns HTTP 400 + this message to the client. */
+function checkoutValidationError(message) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  return err;
+}
+
 export class StripeService {
   // Create a checkout session for a package
-  static async createCheckoutSession(businessId, packageId, packagePrice, packageName, successUrl, cancelUrl, saleName = null, salePriceExpiresAt = null) {
+  static async createCheckoutSession(
+    businessId,
+    packageId,
+    packagePrice,
+    packageName,
+    successUrl,
+    cancelUrl,
+    saleName = null,
+    salePriceExpiresAt = null,
+    affiliateCode = null,
+  ) {
     try {
       const business = await Business.findById(businessId);
       if (!business) {
@@ -190,9 +207,9 @@ export class StripeService {
       const minimumAmount = MINIMUM_AMOUNTS[currency.toLowerCase()] || 0.50;
       
       if (totalWithTax < minimumAmount) {
-        throw new Error(
-          `Total amount with tax ($${totalWithTax.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum charge amount of $${minimumAmount.toFixed(2)} ${currency.toUpperCase()}. ` +
-          `Stripe will reject payments below this amount. Please set a valid package price.`
+        throw checkoutValidationError(
+          `Total with tax ($${totalWithTax.toFixed(2)} ${currency.toUpperCase()}) is below Stripe's minimum ($${minimumAmount.toFixed(2)} ${currency.toUpperCase()}). ` +
+            `Increase the package price in admin (before tax, roughly $${(minimumAmount / (1 + taxRate)).toFixed(2)}+ at your current tax rate) or lower the tax rate in invoice settings.`
         );
       }
       
@@ -219,13 +236,33 @@ export class StripeService {
       console.log('[StripeService] - line_items:', JSON.stringify(lineItems, null, 2));
       console.log('[StripeService] - mode: subscription');
       console.log('[StripeService] - automatic_tax: disabled (Tavari controls taxes)');
+      const { normalizeAffiliateCode } = await import('./affiliateProgram.js');
+      const aff = normalizeAffiliateCode(affiliateCode);
+
       console.log('[StripeService] - metadata:', {
         business_id: businessId,
         package_id: packageId,
         sale_name: saleName || '',
         sale_price_expires_at: salePriceExpiresAt || '',
+        affiliate_code: aff || '',
       });
-      
+
+      const sessionMetadata = {
+        business_id: businessId,
+        package_id: packageId,
+        sale_name: saleName || '',
+        sale_price_expires_at: salePriceExpiresAt || '',
+        tavari_module_key: 'phone-agent',
+        ...(aff ? { affiliate_code: aff } : {}),
+      };
+
+      const subscriptionMetadata = {
+        business_id: businessId,
+        package_id: packageId,
+        tavari_module_key: 'phone-agent',
+        ...(aff ? { affiliate_code: aff } : {}),
+      };
+
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
         payment_method_types: ['card'],
@@ -234,17 +271,9 @@ export class StripeService {
         automatic_tax: { enabled: false }, // Disable Stripe automatic tax - Tavari controls taxes
         success_url: successUrl,
         cancel_url: cancelUrl,
-        metadata: {
-          business_id: businessId,
-          package_id: packageId,
-          sale_name: saleName || '',
-          sale_price_expires_at: salePriceExpiresAt || '',
-        },
+        metadata: sessionMetadata,
         subscription_data: {
-          metadata: {
-            business_id: businessId,
-            package_id: packageId,
-          },
+          metadata: subscriptionMetadata,
         },
       });
       
@@ -289,6 +318,10 @@ export class StripeService {
         
         case 'invoice.payment_failed':
           await this.handlePaymentFailed(data);
+          break;
+
+        case 'charge.refunded':
+          await this.handleChargeRefunded(data);
           break;
         
         default:
@@ -444,6 +477,27 @@ export class StripeService {
     console.log('[StripeService] Updated business plan_tier:', updatedBusiness.plan_tier);
     console.log('[StripeService] Updated business usage_limit_minutes:', updatedBusiness.usage_limit_minutes);
     console.log('[StripeService] Updated business package_id:', updatedBusiness.package_id);
+
+    try {
+      let sessionForAffiliate = session;
+      try {
+        const st = getStripe();
+        sessionForAffiliate = await st.checkout.sessions.retrieve(session.id, {
+          expand: ["payment_intent", "payment_intent.latest_charge", "subscription"],
+        });
+      } catch (ex) {
+        console.warn("[StripeService] Could not expand session for affiliate:", ex?.message || ex);
+      }
+      const { recordAffiliateStripeCheckoutCompleted } = await import("./affiliateProgram.js");
+      const affRes = await recordAffiliateStripeCheckoutCompleted(sessionForAffiliate, businessId);
+      if (affRes.recorded) {
+        console.log("[StripeService] ✅ Affiliate earning recorded for checkout session");
+      } else if (affRes.reason && affRes.reason !== "no_code") {
+        console.warn("[StripeService] Affiliate checkout not attributed:", affRes);
+      }
+    } catch (affErr) {
+      console.warn("[StripeService] Affiliate attribution skipped:", affErr?.message || affErr);
+    }
     
     // Increment sale count if package is on sale
     if (isOnSale && pkg) {
@@ -686,6 +740,16 @@ export class StripeService {
           console.log(`[StripeService] ✅ Cleared sale fields for business ${business.id}`);
         }
       }
+
+      try {
+        const { recordAffiliateStripeSubscriptionRenewal } = await import("./affiliateProgram.js");
+        const ren = await recordAffiliateStripeSubscriptionRenewal(invoice, subscription, businessId);
+        if (ren.recorded) {
+          console.log("[StripeService] ✅ Affiliate renewal conversion recorded");
+        }
+      } catch (affErr) {
+        console.warn("[StripeService] Affiliate renewal attribution skipped:", affErr?.message || affErr);
+      }
     } catch (error) {
       console.error('[StripeService] Error in handlePaymentSucceeded:', error);
       // Don't throw - payment succeeded, this is just a cleanup task
@@ -696,6 +760,18 @@ export class StripeService {
   static async handlePaymentFailed(invoice) {
     console.log('[StripeService] Payment failed for invoice:', invoice.id);
     // Could implement grace period logic here
+  }
+
+  static async handleChargeRefunded(charge) {
+    try {
+      const { reverseAffiliateEarningsForStripeCharge } = await import("./affiliateEarnings.js");
+      const { reversed } = await reverseAffiliateEarningsForStripeCharge(charge?.id);
+      if (reversed > 0) {
+        console.log(`[StripeService] Reversed ${reversed} affiliate earning(s) for charge ${charge?.id}`);
+      }
+    } catch (e) {
+      console.warn("[StripeService] Affiliate reversal on refund skipped:", e?.message || e);
+    }
   }
 
   // Cancel subscription

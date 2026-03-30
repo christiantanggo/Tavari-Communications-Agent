@@ -92,7 +92,8 @@ router.get("/me", authenticateAdmin, async (req, res) => {
 router.get("/modules", authenticateAdmin, async (req, res) => {
   try {
     const { Module } = await import('../models/v2/Module.js');
-    const modules = await Module.findAll();
+    const { excludeRetiredModules } = await import('../config/retired-module-keys.js');
+    const modules = excludeRetiredModules(await Module.findAll());
     res.json({ modules });
   } catch (error) {
     console.error('[GET /api/admin/modules] Error:', error);
@@ -1112,6 +1113,601 @@ router.get("/support/tickets", authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error("Get support tickets error:", error);
     res.status(500).json({ error: "Failed to get support tickets" });
+  }
+});
+
+router.get("/affiliate-applications", authenticateAdmin, async (req, res) => {
+  try {
+    const { status: statusFilter } = req.query;
+    const { supabaseClient } = await import("../config/database.js");
+    let query = supabaseClient
+      .from("affiliate_applications")
+      .select("*, affiliate_partners(id, affiliate_code, active, commission_rate_percent)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (statusFilter && ["pending", "approved", "rejected"].includes(String(statusFilter))) {
+      query = query.eq("status", statusFilter);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      const fallback = await supabaseClient
+        .from("affiliate_applications")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (fallback.error) throw fallback.error;
+      let rows = fallback.data || [];
+      if (statusFilter && ["pending", "approved", "rejected"].includes(String(statusFilter))) {
+        rows = rows.filter((r) => r.status === statusFilter);
+      }
+      return res.json({ applications: rows });
+    }
+
+    res.json({ applications: data || [] });
+  } catch (error) {
+    console.error("Get affiliate applications error:", error);
+    res.status(500).json({ error: "Failed to load affiliate applications" });
+  }
+});
+
+router.patch("/affiliate-applications/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    if (!["pending", "approved", "rejected"].includes(status)) {
+      return res.status(400).json({
+        error: "status must be one of: pending, approved, rejected",
+      });
+    }
+
+    const { supabaseClient } = await import("../config/database.js");
+    const nowIso = new Date().toISOString();
+    const updateRow = {
+      status,
+      reviewed_at: status === "pending" ? null : nowIso,
+      reviewed_by_admin_id: status === "pending" ? null : req.adminId,
+    };
+
+    const { data, error } = await supabaseClient
+      .from("affiliate_applications")
+      .update(updateRow)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+
+    try {
+      if (status === "approved") {
+        const { onApplicationApproved } = await import("../services/affiliateProgram.js");
+        await onApplicationApproved(data);
+      } else if (status === "rejected") {
+        const { onApplicationRejected } = await import("../services/affiliateProgram.js");
+        await onApplicationRejected(id);
+      }
+    } catch (progErr) {
+      console.warn("[Admin] Affiliate program hook failed:", progErr?.message || progErr);
+    }
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_application_status",
+        details: {
+          application_id: id,
+          status,
+        },
+      });
+    } catch (logErr) {
+      console.warn("[Admin] Affiliate status log skipped:", logErr?.message || logErr);
+    }
+
+    const { data: refreshed } = await supabaseClient
+      .from("affiliate_applications")
+      .select("*, affiliate_partners(id, affiliate_code, active, commission_rate_percent)")
+      .eq("id", id)
+      .maybeSingle();
+
+    res.json({ application: refreshed || data });
+  } catch (error) {
+    console.error("Patch affiliate application error:", error);
+    res.status(500).json({ error: "Failed to update application" });
+  }
+});
+
+router.post("/affiliate-applications/:id/resend-approval-email", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resendPartnerApprovalEmail } = await import("../services/affiliateProgram.js");
+    const result = await resendPartnerApprovalEmail(id);
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_resend_approval_email",
+        details: { application_id: id, partner_id: result.partnerId },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ success: true, partner_id: result.partnerId });
+  } catch (error) {
+    const msg = error?.message || "Failed to send email";
+    const code = error?.code;
+    if (code === "NOT_FOUND") {
+      return res.status(404).json({ error: msg });
+    }
+    if (code === "NOT_APPROVED" || code === "NO_PARTNER" || code === "INACTIVE") {
+      return res.status(400).json({ error: msg });
+    }
+    console.error("Resend affiliate approval email error:", error);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get("/affiliate-commission-settings", authenticateAdmin, async (req, res) => {
+  try {
+    const { supabaseClient } = await import("../config/database.js");
+    const { getAffiliateGlobalSettings } = await import("../services/affiliateCommissionSettings.js");
+    const global = await getAffiliateGlobalSettings();
+    const { data: modules, error } = await supabaseClient
+      .from("affiliate_module_settings")
+      .select("*")
+      .order("module_key", { ascending: true });
+    if (error) throw error;
+    res.json({ global, modules: modules || [] });
+  } catch (error) {
+    console.error("Get affiliate commission settings error:", error);
+    res.status(500).json({ error: "Failed to load commission settings" });
+  }
+});
+
+router.patch("/affiliate-commission-settings/global", authenticateAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const patch = {};
+    if (b.first_sale_commission_percent !== undefined) {
+      const n = Number(b.first_sale_commission_percent);
+      if (Number.isNaN(n) || n < 0 || n > 100) {
+        return res.status(400).json({ error: "first_sale_commission_percent must be 0–100" });
+      }
+      patch.first_sale_commission_percent = Math.round(n * 100) / 100;
+    }
+    if (b.recurring_commission_percent !== undefined) {
+      const n = Number(b.recurring_commission_percent);
+      if (Number.isNaN(n) || n < 0 || n > 100) {
+        return res.status(400).json({ error: "recurring_commission_percent must be 0–100" });
+      }
+      patch.recurring_commission_percent = Math.round(n * 100) / 100;
+    }
+    if (b.payout_minimum_cents !== undefined) {
+      const n = Math.round(Number(b.payout_minimum_cents));
+      if (Number.isNaN(n) || n < 0) {
+        return res.status(400).json({ error: "payout_minimum_cents must be a non-negative integer" });
+      }
+      patch.payout_minimum_cents = n;
+    }
+    if (b.refund_hold_days !== undefined) {
+      const n = Math.floor(Number(b.refund_hold_days));
+      if (Number.isNaN(n) || n < 0) {
+        return res.status(400).json({ error: "refund_hold_days must be a non-negative integer" });
+      }
+      patch.refund_hold_days = n;
+    }
+    if (b.delivery_min_paid_sales_before_payout !== undefined) {
+      const n = Math.floor(Number(b.delivery_min_paid_sales_before_payout));
+      if (Number.isNaN(n) || n < 0) {
+        return res.status(400).json({ error: "delivery_min_paid_sales_before_payout must be a non-negative integer" });
+      }
+      patch.delivery_min_paid_sales_before_payout = n;
+    }
+    if (b.recurring_limit_mode !== undefined) {
+      const m = String(b.recurring_limit_mode || "").trim();
+      if (!["unlimited", "months", "transactions"].includes(m)) {
+        return res.status(400).json({ error: "recurring_limit_mode must be unlimited, months, or transactions" });
+      }
+      patch.recurring_limit_mode = m;
+    }
+    if (b.recurring_limit_months !== undefined) {
+      if (b.recurring_limit_months === null) {
+        patch.recurring_limit_months = null;
+      } else {
+        const n = Math.floor(Number(b.recurring_limit_months));
+        if (Number.isNaN(n) || n < 1) {
+          return res.status(400).json({ error: "recurring_limit_months must be null or an integer >= 1" });
+        }
+        patch.recurring_limit_months = n;
+      }
+    }
+    if (b.recurring_limit_transactions !== undefined) {
+      if (b.recurring_limit_transactions === null) {
+        patch.recurring_limit_transactions = null;
+      } else {
+        const n = Math.floor(Number(b.recurring_limit_transactions));
+        if (Number.isNaN(n) || n < 1) {
+          return res.status(400).json({ error: "recurring_limit_transactions must be null or an integer >= 1" });
+        }
+        patch.recurring_limit_transactions = n;
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    const { supabaseClient } = await import("../config/database.js");
+    const { data, error } = await supabaseClient
+      .from("affiliate_global_settings")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", 1)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(500).json({ error: "Global settings row missing; run add_affiliate_commission_engine migration" });
+    }
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_commission_global_update",
+        details: patch,
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ global: data });
+  } catch (error) {
+    console.error("Patch affiliate global commission error:", error);
+    res.status(500).json({ error: "Failed to update global settings" });
+  }
+});
+
+router.patch("/affiliate-commission-settings/modules/:moduleKey", authenticateAdmin, async (req, res) => {
+  try {
+    const moduleKey = String(req.params.moduleKey || "").trim();
+    if (!moduleKey) {
+      return res.status(400).json({ error: "moduleKey is required" });
+    }
+
+    const { supabaseClient } = await import("../config/database.js");
+    const { data: existing, error: exErr } = await supabaseClient
+      .from("affiliate_module_settings")
+      .select("module_key")
+      .eq("module_key", moduleKey)
+      .maybeSingle();
+
+    if (exErr) throw exErr;
+    if (!existing) {
+      return res.status(404).json({ error: "Unknown module_key (add a row in affiliate_module_settings first)" });
+    }
+
+    const b = req.body || {};
+    const patch = {};
+
+    const setNullablePercent = (key) => {
+      if (b[key] === undefined) return;
+      if (b[key] === null) {
+        patch[key] = null;
+        return;
+      }
+      const n = Number(b[key]);
+      if (Number.isNaN(n) || n < 0 || n > 100) {
+        throw new Error(`BAD_${key}`);
+      }
+      patch[key] = Math.round(n * 100) / 100;
+    };
+
+    try {
+      setNullablePercent("first_sale_commission_percent");
+      setNullablePercent("recurring_commission_percent");
+    } catch (e) {
+      if (String(e.message || "").startsWith("BAD_")) {
+        return res.status(400).json({ error: "Commission percents must be null or 0–100" });
+      }
+      throw e;
+    }
+
+    if (b.recurring_commission_enabled !== undefined) {
+      patch.recurring_commission_enabled = Boolean(b.recurring_commission_enabled);
+    }
+    if (b.payout_minimum_cents !== undefined) {
+      if (b.payout_minimum_cents === null) {
+        patch.payout_minimum_cents = null;
+      } else {
+        const n = Math.round(Number(b.payout_minimum_cents));
+        if (Number.isNaN(n) || n < 0) {
+          return res.status(400).json({ error: "payout_minimum_cents must be null or a non-negative integer" });
+        }
+        patch.payout_minimum_cents = n;
+      }
+    }
+    if (b.refund_hold_days !== undefined) {
+      if (b.refund_hold_days === null) {
+        patch.refund_hold_days = null;
+      } else {
+        const n = Math.floor(Number(b.refund_hold_days));
+        if (Number.isNaN(n) || n < 0) {
+          return res.status(400).json({ error: "refund_hold_days must be null or a non-negative integer" });
+        }
+        patch.refund_hold_days = n;
+      }
+    }
+    if (b.delivery_min_paid_sales_before_payout !== undefined) {
+      if (b.delivery_min_paid_sales_before_payout === null) {
+        patch.delivery_min_paid_sales_before_payout = null;
+      } else {
+        const n = Math.floor(Number(b.delivery_min_paid_sales_before_payout));
+        if (Number.isNaN(n) || n < 0) {
+          return res
+            .status(400)
+            .json({ error: "delivery_min_paid_sales_before_payout must be null or a non-negative integer" });
+        }
+        patch.delivery_min_paid_sales_before_payout = n;
+      }
+    }
+    if (b.recurring_limit_mode !== undefined) {
+      if (b.recurring_limit_mode === null || b.recurring_limit_mode === "") {
+        patch.recurring_limit_mode = null;
+      } else {
+        const m = String(b.recurring_limit_mode).trim();
+        if (!["unlimited", "months", "transactions"].includes(m)) {
+          return res.status(400).json({ error: "recurring_limit_mode must be null or unlimited, months, or transactions" });
+        }
+        patch.recurring_limit_mode = m;
+      }
+    }
+    if (b.recurring_limit_months !== undefined) {
+      if (b.recurring_limit_months === null) {
+        patch.recurring_limit_months = null;
+      } else {
+        const n = Math.floor(Number(b.recurring_limit_months));
+        if (Number.isNaN(n) || n < 1) {
+          return res.status(400).json({ error: "recurring_limit_months must be null or an integer >= 1" });
+        }
+        patch.recurring_limit_months = n;
+      }
+    }
+    if (b.recurring_limit_transactions !== undefined) {
+      if (b.recurring_limit_transactions === null) {
+        patch.recurring_limit_transactions = null;
+      } else {
+        const n = Math.floor(Number(b.recurring_limit_transactions));
+        if (Number.isNaN(n) || n < 1) {
+          return res.status(400).json({ error: "recurring_limit_transactions must be null or an integer >= 1" });
+        }
+        patch.recurring_limit_transactions = n;
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    const { data, error } = await supabaseClient
+      .from("affiliate_module_settings")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("module_key", moduleKey)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_commission_module_update",
+        details: { module_key: moduleKey, ...patch },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ module: data });
+  } catch (error) {
+    console.error("Patch affiliate module commission error:", error);
+    res.status(500).json({ error: "Failed to update module settings" });
+  }
+});
+
+router.get("/affiliate-partners", authenticateAdmin, async (req, res) => {
+  try {
+    const { supabaseClient } = await import("../config/database.js");
+    const { data, error } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id, application_id, affiliate_code, email, display_name, commission_rate_percent, active, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) throw error;
+    res.json({ partners: data || [] });
+  } catch (error) {
+    console.error("Get affiliate partners error:", error);
+    res.status(500).json({ error: "Failed to load affiliate partners" });
+  }
+});
+
+router.get("/affiliate-partners/:id/events", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || "100"), 10) || 100));
+    const { supabaseClient } = await import("../config/database.js");
+    const { listPartnerEvents } = await import("../services/affiliateProgram.js");
+
+    const { data: partner, error: pErr } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (pErr) throw pErr;
+    if (!partner) {
+      return res.status(404).json({ error: "Partner not found" });
+    }
+
+    const events = await listPartnerEvents(id, { limit });
+    res.json({ events });
+  } catch (error) {
+    console.error("Get affiliate partner events error:", error);
+    res.status(500).json({ error: "Failed to load events" });
+  }
+});
+
+router.patch("/affiliate-partners/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const raw = req.body?.commission_rate_percent;
+    if (raw == null) {
+      return res.status(400).json({ error: "commission_rate_percent is required" });
+    }
+    const n = Number(raw);
+    if (Number.isNaN(n) || n < 0 || n > 100) {
+      return res.status(400).json({ error: "commission_rate_percent must be between 0 and 100" });
+    }
+
+    const { supabaseClient } = await import("../config/database.js");
+    const { data, error } = await supabaseClient
+      .from("affiliate_partners")
+      .update({
+        commission_rate_percent: Math.round(n * 100) / 100,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select(
+        "id, application_id, affiliate_code, email, display_name, commission_rate_percent, active, created_at",
+      )
+      .single();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: "Partner not found" });
+    }
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_partner_update",
+        details: { partner_id: id, commission_rate_percent: data.commission_rate_percent },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ partner: data });
+  } catch (error) {
+    console.error("Patch affiliate partner error:", error);
+    res.status(500).json({ error: "Failed to update partner" });
+  }
+});
+
+router.post("/affiliate-partners/:id/events", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const event_type = String(req.body?.event_type || "").trim();
+    const amount_cents = req.body?.amount_cents != null ? Number(req.body.amount_cents) : null;
+    const metadata =
+      req.body?.metadata && typeof req.body.metadata === "object"
+        ? { ...req.body.metadata, source: req.body.metadata.source || "manual" }
+        : { source: "manual" };
+
+    if (!["lead", "conversion"].includes(event_type)) {
+      return res.status(400).json({ error: "event_type must be lead or conversion" });
+    }
+
+    const { supabaseClient } = await import("../config/database.js");
+    const { data: partner, error: pErr } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id, commission_rate_percent")
+      .eq("id", id)
+      .single();
+
+    if (pErr || !partner) {
+      return res.status(404).json({ error: "Partner not found" });
+    }
+
+    if (event_type === "conversion" && (amount_cents == null || Number.isNaN(amount_cents) || amount_cents < 0)) {
+      return res.status(400).json({ error: "conversion requires amount_cents (integer >= 0)" });
+    }
+
+    const moduleKeyRaw = String(req.body?.module_key || "phone-agent").trim() || "phone-agent";
+
+    let earningId = null;
+    if (event_type === "conversion") {
+      const { createManualAffiliateEarning } = await import("../services/affiliateEarnings.js");
+      earningId = await createManualAffiliateEarning(
+        partner.id,
+        Math.round(amount_cents),
+        partner.commission_rate_percent,
+        { source: "manual_admin" },
+        moduleKeyRaw,
+      );
+    }
+
+    const { data: row, error: insErr } = await supabaseClient
+      .from("affiliate_events")
+      .insert({
+        partner_id: partner.id,
+        event_type,
+        amount_cents: event_type === "conversion" ? Math.round(amount_cents) : null,
+        metadata: {
+          ...metadata,
+          ...(event_type === "conversion"
+            ? { module_key: moduleKeyRaw, affiliate_earning_id: earningId }
+            : {}),
+        },
+      })
+      .select()
+      .single();
+
+    if (insErr) {
+      if (earningId) {
+        await supabaseClient.from("affiliate_earnings").delete().eq("id", earningId);
+      }
+      throw insErr;
+    }
+
+    if (event_type === "conversion" && earningId && row?.id) {
+      const { data: er } = await supabaseClient
+        .from("affiliate_earnings")
+        .select("metadata")
+        .eq("id", earningId)
+        .maybeSingle();
+      const prevMeta = er && typeof er.metadata === "object" ? er.metadata : {};
+      await supabaseClient
+        .from("affiliate_earnings")
+        .update({
+          metadata: { ...prevMeta, affiliate_event_id: row.id },
+        })
+        .eq("id", earningId);
+    }
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_manual_event",
+        details: {
+          partner_id: id,
+          event_type,
+          amount_cents,
+          ...(event_type === "conversion" ? { module_key: moduleKeyRaw, affiliate_earning_id: earningId } : {}),
+        },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ event: row });
+  } catch (error) {
+    console.error("Post affiliate partner event error:", error);
+    res.status(500).json({ error: "Failed to record event" });
   }
 });
 

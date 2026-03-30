@@ -332,6 +332,20 @@ async function handleCheckoutSessionCompleted(session) {
     const { startDispatch } = await import('../../../services/delivery-network/dispatch.js');
     await startDispatch(requestId);
     console.log('[v2 Stripe Webhook] Delivery individual payment completed, dispatch started:', requestId);
+
+    try {
+      const stripe = getStripeInstance();
+      const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
+        expand: ['payment_intent', 'payment_intent.latest_charge'],
+      });
+      const { recordAffiliateEarningDeliveryCheckout } = await import('../../../services/affiliateEarnings.js');
+      const aff = await recordAffiliateEarningDeliveryCheckout(fullSession, requestId, amountPaidCents);
+      if (aff.recorded) {
+        console.log('[v2 Stripe Webhook] Affiliate delivery earning recorded');
+      }
+    } catch (affErr) {
+      console.warn('[v2 Stripe Webhook] Affiliate delivery earning skipped:', affErr?.message || affErr);
+    }
   } catch (err) {
     console.error('[v2 Stripe Webhook] Delivery payment completion error:', err?.message || err);
     throw err;

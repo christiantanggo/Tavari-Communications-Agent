@@ -9,6 +9,21 @@ import { Business } from "../models/Business.js";
 
 const router = express.Router();
 
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function trimField(v, maxLen) {
+  const t = v != null ? String(v).trim() : "";
+  if (t.length > maxLen) return t.slice(0, maxLen);
+  return t;
+}
+
 // Public contact form endpoint (no authentication required)
 // POST /api/support/contact
 router.post("/contact", async (req, res) => {
@@ -146,6 +161,127 @@ The Tavari Support Team
     res.status(500).json({ 
       error: "Failed to send message. Please try again later.",
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Public affiliate / partner application (no auth)
+// POST /api/support/affiliate-apply
+router.post("/affiliate-apply", async (req, res) => {
+  try {
+    const name = trimField(req.body?.name, 120);
+    const email = trimField(req.body?.email, 255);
+    const company = trimField(req.body?.company, 200);
+    const websiteOrChannel = trimField(req.body?.website_or_channel, 500);
+    const audience = trimField(req.body?.audience, 2000);
+    const promotePlan = trimField(req.body?.promote_plan, 4000);
+
+    if (!name || !email || !audience || !promotePlan) {
+      return res.status(400).json({
+        error: "Name, email, audience, and how you will promote are required.",
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: "Invalid email address" });
+    }
+
+    const toEmail =
+      process.env.AFFILIATE_CONTACT_EMAIL ||
+      process.env.NEXT_PUBLIC_AFFILIATE_CONTACT_EMAIL ||
+      process.env.SUPPORT_EMAIL ||
+      "info@tanggo.ca";
+
+    const emailSubject = `Partner application: ${name}`;
+    const safe = {
+      name: escapeHtml(name),
+      email: escapeHtml(email),
+      company: escapeHtml(company),
+      websiteOrChannel: escapeHtml(websiteOrChannel),
+      audience: escapeHtml(audience).replace(/\n/g, "<br>"),
+      promotePlan: escapeHtml(promotePlan).replace(/\n/g, "<br>"),
+    };
+
+    const bodyHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+        <h2 style="color: #1d4ed8;">New partner program application</h2>
+        <table style="width:100%; border-collapse: collapse; font-size: 15px; color: #111;">
+          <tr><td style="padding: 6px 0; font-weight: bold; width: 180px;">Name</td><td>${safe.name}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">Email</td><td><a href="mailto:${safe.email}">${safe.email}</a></td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">Company</td><td>${safe.company || "—"}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold; vertical-align: top;">Website / channel</td><td>${safe.websiteOrChannel || "—"}</td></tr>
+        </table>
+        <h3 style="margin-top: 20px; color: #111;">Audience</h3>
+        <p style="color: #374151; line-height: 1.5;">${safe.audience}</p>
+        <h3 style="margin-top: 20px; color: #111;">Promotion plan</h3>
+        <p style="color: #374151; line-height: 1.5;">${safe.promotePlan}</p>
+        <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">Submitted from the public affiliate application form.</p>
+      </div>
+    `;
+
+    const bodyText = `
+New partner program application
+
+Name: ${name}
+Email: ${email}
+Company: ${company || "—"}
+Website / channel: ${websiteOrChannel || "—"}
+
+Audience:
+${audience}
+
+Promotion plan:
+${promotePlan}
+    `.trim();
+
+    try {
+      const { error: dbError } = await supabaseClient.from("affiliate_applications").insert({
+        name,
+        email,
+        company: company || null,
+        website_or_channel: websiteOrChannel || null,
+        audience,
+        promote_plan: promotePlan,
+        status: "pending",
+      });
+      if (dbError) {
+        console.warn("[Affiliate Apply] Could not save to database:", dbError.message);
+      }
+    } catch (dbErr) {
+      console.warn("[Affiliate Apply] Database save skipped:", dbErr?.message || dbErr);
+    }
+
+    await sendEmail(toEmail, emailSubject, bodyText, bodyHtml, "Tavari Partners", null);
+
+    const confirmationSubject = "We received your partner application";
+    const confirmationHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1d4ed8;">Thanks, ${safe.name}</h2>
+        <p>We've received your application to the partner program. Our team will review it and reply by email.</p>
+        <p style="color: #6b7280; font-size: 14px;">If you have questions, you can reach us at <a href="mailto:${escapeHtml(toEmail)}">${escapeHtml(toEmail)}</a>.</p>
+      </div>
+    `;
+    const confirmationText = `Thanks, ${name}
+
+We've received your application to the partner program. Our team will review it and reply by email.
+
+Questions: ${toEmail}
+    `.trim();
+
+    sendEmail(email, confirmationSubject, confirmationText, confirmationHtml, "Tavari", null).catch((err) => {
+      console.warn("[Affiliate Apply] Confirmation email failed (non-blocking):", err.message);
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Application received. Check your email for a confirmation.",
+    });
+  } catch (error) {
+    console.error("[Affiliate Apply] Error:", error);
+    res.status(500).json({
+      error: "Something went wrong. Please try again later.",
+      details: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });

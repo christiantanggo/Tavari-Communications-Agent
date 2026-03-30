@@ -2,7 +2,7 @@
 
 Copy this pattern into **any** Node + Next.js monorepo so local **backend** and **frontend** ports are fixed per project and documented in one place.
 
-**Reference implementation:** this repo (`KiddConnect Youtube` / Tavari) uses backend **5000** and frontend **3000** via `config/dev-ports.json`. Other projects should pick **different** numbers if they may run at the same time.
+**Reference implementation:** the Tavari Communications / tavarios.com monolith uses backend **5005** and frontend **3005** via `config/dev-ports.json`. A second checkout (e.g. KiddConnect-only) should use **different** ports in its own `dev-ports.json` (e.g. 5003 / 3003) if both run together.
 
 ---
 
@@ -21,9 +21,9 @@ Choose a **backend** + **frontend** pair. While another app is running, **do not
 
 | Example role   | Backend | Frontend |
 |----------------|---------|----------|
-| Reference app (this repo) | 5000 | 3000 |
-| Second project | 5002 | 3001 |
-| Third project  | 5003 | 3002 |
+| Tavari / tavarios (this monolith) | 5005 | 3005 |
+| Second checkout (e.g. KiddConnect) | 5003 | 3003 |
+| Other app | 5002 | 3001 |
 
 **Mac:** Port **5000** is sometimes used by AirPlay Receiver. If the backend fails to bind, use e.g. **5001** for `backend` in JSON and keep frontend at **3000** (or another free port).
 

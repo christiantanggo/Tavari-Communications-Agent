@@ -8,7 +8,7 @@ import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const FALLBACK = { project: 'Tavari', backend: 5003, frontend: 3003 };
+const FALLBACK = { project: 'Tavari', backend: 5005, frontend: 3005 };
 
 let cached;
 

@@ -54,7 +54,7 @@ Before you rely on production URLs, read **[docs/VERIFY_TAVARI_DEPLOYMENT.md](do
 4. **Health check (required for "Application failed to respond"):** In the service → **Settings** → set **Health Check Path** to `/health` (path only; the app listens on `PORT` and exposes `GET /health`). Optionally set env `RAILWAY_HEALTHCHECK_TIMEOUT_SEC=300` if startup is slow.
 5. Deploy. Railway will auto-deploy on push if connected to GitHub.
 
-**Dashboard module layout:** Under **Archive** in the UI: only YouTube studio modules (`kidquiz`, `movie-review`, `orbix-network`). Everything else uses the main marketplace. Edit `frontend/lib/archived-module-keys.js` if that list changes.
+**Module visibility:** The main customer marketplace and sidebar list only **production** modules. **Construction** modules (built-in list + `CONSTRUCTION_MODULE_KEYS` / `metadata.construction_only` in `config/construction-dashboard.js`) appear only after PIN unlock on `/dashboard/v2/construction`. Retired modules (hidden from APIs/UI) are listed in `config/retired-module-keys.js`.
 
 **If using the GitHub Action** (`.github/workflows/deploy-backend.yml`):
 

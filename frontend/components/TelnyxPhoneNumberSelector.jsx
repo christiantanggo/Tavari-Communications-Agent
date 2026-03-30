@@ -14,9 +14,9 @@ const countries = [
 // Only toll-free numbers are available (included in subscription)
 // Additional numbers beyond the first one will be charged separately
 
-export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, countryCode: initialCountryCode = 'US', areaCode: initialAreaCode = null }) {
+export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, countryCode: initialCountryCode = 'CA', areaCode: initialAreaCode = null }) {
   const [countryCode, setCountryCode] = useState(initialCountryCode);
-  const phoneType = 'toll-free'; // Always use toll-free numbers
+  const phoneType = 'toll-free'; // Sent to API; backend maps to Telnyx toll_free
   const [phoneNumberSearch, setPhoneNumberSearch] = useState('');
   const [searchMode, setSearchMode] = useState('browse'); // 'browse' or 'search'
   const [locality, setLocality] = useState(''); // City/Region
@@ -28,6 +28,9 @@ export default function TelnyxPhoneNumberSelector({ onSelect, selectedNumber, co
   const [error, setError] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualNumber, setManualNumber] = useState('');
+
+  // Do not sync initialCountryCode into state on every render — parent re-renders would
+  // reset the user's dropdown choice (e.g. Canada → United States stuck or vice versa).
 
   useEffect(() => {
     if (searchMode === 'browse') {

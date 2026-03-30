@@ -3,12 +3,25 @@
 /**
  * Public last-mile delivery landing: delivery config (branding + CMS), form → POST /delivery-network/request, chat → delivery web intake.
  */
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 const CHAT_REPLY_DELAY_MS = 1100;
+
+function getAffiliateRefFromCookie() {
+  if (typeof document === 'undefined') return null;
+  try {
+    const cookies = document.cookie.split(';');
+    const row = cookies.find((c) => c.trim().startsWith('tavari_affiliate_ref='));
+    if (!row) return null;
+    const v = decodeURIComponent(row.split('=').slice(1).join('=').trim());
+    return v || null;
+  } catch {
+    return null;
+  }
+}
 const CHAT_SESSION_STORAGE_KEY = 'delivery_dispatch_chat_session_id';
 
 function getStoredChatSessionId() {
@@ -25,6 +38,20 @@ function setStoredChatSessionId(id) {
   try {
     window.localStorage.setItem(CHAT_SESSION_STORAGE_KEY, id);
   } catch (_) {}
+}
+
+/** Human-readable NANP display; keeps tel: href as E.164. */
+function formatPhoneForDisplay(e164) {
+  if (!e164 || typeof e164 !== 'string') return '';
+  const digits = e164.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
+    const r = digits.slice(1);
+    return `+1 (${r.slice(0, 3)}) ${r.slice(3, 6)}-${r.slice(6)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return e164.trim();
 }
 
 async function chatIntake(sessionId, message) {
@@ -58,23 +85,9 @@ function useDeliveryPhone() {
   const e164 = clean.startsWith('+') ? clean : clean ? `+${clean}` : '';
   return {
     phone: e164,
+    phoneDisplay: formatPhoneForDisplay(e164),
     telLink: e164 ? `tel:${e164}` : '#',
-    smsLink: e164 ? `sms:${e164}` : '#',
   };
-}
-
-function useDeliveryBranding() {
-  const [name, setName] = useState('Last-Mile Delivery');
-  useEffect(() => {
-    fetch(`${API_URL}/api/v2/delivery-network/public/branding`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        const n = d?.service_line_name && String(d.service_line_name).trim();
-        if (n) setName(n);
-      })
-      .catch(() => {});
-  }, []);
-  return name;
 }
 
 function useWebsitePageContent(pageKey) {
@@ -92,16 +105,16 @@ function useWebsitePageContent(pageKey) {
   return content;
 }
 
-const FALLBACK_HEADER = 'Package pickup & delivery';
+const SITE_BRAND = 'Tavari Delivery Dispatch';
+const FALLBACK_HEADER = SITE_BRAND;
 const FALLBACK_SUB =
-  'Schedule a pickup and delivery online or by phone. You will receive a reference number and updates as your shipment moves.';
+  'Reliable local package pickup and delivery in our service area only—not province-wide, statewide, Canada-wide, or international. Start with the online request when you can—we schedule fastest that way—or call us anytime.';
 
 function DeliveryDispatchContent() {
   const searchParams = useSearchParams();
   const businessIdParam = searchParams.get('business_id')?.trim() || '';
 
-  const { phone, telLink, smsLink } = useDeliveryPhone();
-  const serviceLineName = useDeliveryBranding();
+  const { phone, phoneDisplay, telLink } = useDeliveryPhone();
   const pageContent = useWebsitePageContent('delivery-main');
 
   const [heroImageError, setHeroImageError] = useState(false);
@@ -121,7 +134,13 @@ function DeliveryDispatchContent() {
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPickup, setFormPickup] = useState('');
+  const [formPickupCity, setFormPickupCity] = useState('');
+  const [formPickupProvince, setFormPickupProvince] = useState('');
+  const [formPickupPostal, setFormPickupPostal] = useState('');
   const [formDelivery, setFormDelivery] = useState('');
+  const [formCity, setFormCity] = useState('');
+  const [formProvince, setFormProvince] = useState('');
+  const [formPostal, setFormPostal] = useState('');
   const [formRecipient, setFormRecipient] = useState('');
   const [formRecipientPhone, setFormRecipientPhone] = useState('');
   const [formPackage, setFormPackage] = useState('');
@@ -132,14 +151,23 @@ function DeliveryDispatchContent() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formMessage, setFormMessage] = useState(null);
   const [formError, setFormError] = useState(null);
+  const [formExpanded, setFormExpanded] = useState(false);
 
   const paidRef = searchParams.get('ref');
   const paidOk = searchParams.get('paid') === '1';
   const cancelled = searchParams.get('cancel') === '1';
-  const intakeToken = (searchParams.get('it') || '').trim();
+  const itFromParams = (searchParams.get('it') || '').trim();
+  const [intakeToken, setIntakeToken] = useState(itFromParams);
 
   const [phoneLockedFromSms, setPhoneLockedFromSms] = useState(false);
   const [intakeTokenStatus, setIntakeTokenStatus] = useState('idle'); // idle | loading | ok | error
+
+  // Prefer Next searchParams; fall back to window (some clients/hydration edge cases drop `it` from hooks only).
+  useEffect(() => {
+    const fromWindow =
+      typeof window === 'undefined' ? '' : (new URLSearchParams(window.location.search).get('it') || '').trim();
+    setIntakeToken((itFromParams || fromWindow).trim());
+  }, [itFromParams]);
 
   const heroImage = (pageContent?.hero_image_url && String(pageContent.hero_image_url).trim()) || null;
   const apiHeader = (pageContent?.hero_header && String(pageContent.hero_header).trim()) || '';
@@ -147,11 +175,36 @@ function DeliveryDispatchContent() {
   const heroHeader = apiHeader || FALLBACK_HEADER;
   const heroSubtext = apiSubtext || FALLBACK_SUB;
   const defaultButtons = [
-    { label: 'Call us', url: 'tel' },
-    { label: 'Text us', url: 'sms' },
-    { label: 'Request delivery online', url: '#form' },
+    { label: 'Start here', url: '#form' },
+    { label: 'Call now', url: 'tel' },
   ];
-  const buttons = Array.isArray(pageContent?.buttons) && pageContent.buttons.length > 0 ? pageContent.buttons : defaultButtons;
+  const buttonsRaw = Array.isArray(pageContent?.buttons) && pageContent.buttons.length > 0 ? pageContent.buttons : defaultButtons;
+  const buttons = buttonsRaw.filter((b) => {
+    const u = (b.url || '').trim().toLowerCase();
+    const lab = (b.label || '').trim().toLowerCase();
+    if (u === 'sms' || lab === 'text us' || lab.startsWith('text us') || /^text\b/.test(lab)) return false;
+    return true;
+  });
+
+  const expandFormAndScroll = useCallback(() => {
+    setFormExpanded(true);
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
+
+  const isFormLinkButton = (btn) => {
+    const u = (btn.url || '').trim().toLowerCase();
+    return u === '#form' || u.endsWith('#form');
+  };
+
+  const isChatTriggerButton = (btn) => {
+    if (isFormLinkButton(btn)) return false;
+    const url = (btn.url || '').trim().toLowerCase();
+    if (url === 'tel' || url === 'sms') return false;
+    const label = (btn.label || '').trim();
+    return /^(chat|message us|live chat)/i.test(label) || /\bchat\b/i.test(label);
+  };
 
   const applyReplyAfterDelay = (reply, sessionId) => {
     if (chatDelayTimerRef.current) clearTimeout(chatDelayTimerRef.current);
@@ -174,7 +227,7 @@ function DeliveryDispatchContent() {
         applyReplyAfterDelay(data.reply || '', data.session_id ?? sid);
       })
       .catch(() => {
-        applyReplyAfterDelay("Sorry, we couldn't start chat. Try the form below or call us.", null);
+        applyReplyAfterDelay("Sorry, we couldn't start chat. Call us or use the online request form on this page.", null);
       });
   };
 
@@ -230,7 +283,7 @@ function DeliveryDispatchContent() {
     }
     let cancelled = false;
     setIntakeTokenStatus('loading');
-    fetch(`${API_URL}/api/v2/delivery-network/public/intake-sms-token/validate`, {
+    fetch('/api/delivery-intake/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: intakeToken }),
@@ -245,6 +298,7 @@ function DeliveryDispatchContent() {
           setFormPhone(String(j.phone_e164).trim());
           setPhoneLockedFromSms(true);
           setIntakeTokenStatus('ok');
+          setFormExpanded(true);
           setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
         } else {
           setPhoneLockedFromSms(false);
@@ -262,17 +316,38 @@ function DeliveryDispatchContent() {
     };
   }, [intakeToken]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.hash === '#form') {
+      expandFormAndScroll();
+    }
+  }, [expandFormAndScroll]);
+
   const submitForm = async (e) => {
     e.preventDefault();
     setFormError(null);
     setFormMessage(null);
+    if (!formDelivery.trim()) {
+      setFormError('Delivery street address is required.');
+      return;
+    }
+    if (!formCity.trim() || !formProvince.trim() || !formPostal.trim()) {
+      setFormError('Delivery city, province, and postal code are required.');
+      return;
+    }
     setFormSubmitting(true);
     try {
       const body = {
         phone: formPhone.trim(),
         callback_phone: formPhone.trim(),
         pickup_address: formPickup.trim() || null,
+        pickup_city: formPickupCity.trim() || null,
+        pickup_province: formPickupProvince.trim() || null,
+        pickup_postal_code: formPickupPostal.trim() || null,
         delivery_address: formDelivery.trim(),
+        delivery_city: formCity.trim(),
+        delivery_province: formProvince.trim(),
+        delivery_postal_code: formPostal.trim(),
         recipient_name: formRecipient.trim() || null,
         recipient_phone: formRecipientPhone.trim() || null,
         package_description: formPackage.trim() || null,
@@ -286,6 +361,8 @@ function DeliveryDispatchContent() {
       if (intakeToken && intakeTokenStatus === 'ok') {
         body.sms_intake_token = intakeToken;
       }
+      const affiliateRef = getAffiliateRefFromCookie();
+      if (affiliateRef) body.affiliate_code = affiliateRef;
 
       const res = await fetch(`${API_URL}/api/v2/delivery-network/request`, {
         method: 'POST',
@@ -302,6 +379,10 @@ function DeliveryDispatchContent() {
           text: data.message || 'Complete payment to confirm your delivery.',
           ref: data.reference_number,
           url: data.payment_link_url,
+          manageUrl: data.customer_manage_url || null,
+          amountCents: typeof data.amount_quoted_cents === 'number' ? data.amount_quoted_cents : null,
+          priceDisclaimer: data.price_disclaimer || null,
+          quoteSource: data.quote_source || null,
         });
       } else {
         setFormMessage({
@@ -310,6 +391,13 @@ function DeliveryDispatchContent() {
           ref: data.reference_number,
         });
         setFormDelivery('');
+        setFormCity('');
+        setFormProvince('');
+        setFormPostal('');
+        setFormPickup('');
+        setFormPickupCity('');
+        setFormPickupProvince('');
+        setFormPickupPostal('');
         setFormPackage('');
         setFormNotes('');
       }
@@ -320,20 +408,20 @@ function DeliveryDispatchContent() {
     }
   };
 
-  const isChatButton = (btn) => {
-    const url = (btn.url || '').trim().toLowerCase();
-    const label = (btn.label || '').trim();
-    if (url === '#form' || url.endsWith('#form')) return true;
-    if (/request\s+delivery|delivery\s+online|chat|request\s+online|help\s+online/i.test(label)) return true;
-    return false;
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 antialiased">
       <header className="bg-slate-900 text-white">
-        <div className="max-w-[900px] mx-auto px-4 py-3 flex items-center justify-between">
-          <span className="font-semibold text-[15px]">{serviceLineName}</span>
-          <div className="flex items-center gap-4">
+        <div className="max-w-[900px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <span className="font-semibold text-base sm:text-lg tracking-tight">{SITE_BRAND}</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {phone && phoneDisplay && (
+              <a
+                href={telLink}
+                className="text-lg sm:text-xl font-bold text-emerald-300 hover:text-emerald-200 tabular-nums whitespace-nowrap"
+              >
+                {phoneDisplay}
+              </a>
+            )}
             <Link href="/termsofservice" className="text-slate-400 text-sm hover:text-white transition-colors">
               Terms of Service
             </Link>
@@ -361,6 +449,7 @@ function DeliveryDispatchContent() {
             <img
               src={heroImage}
               alt=""
+              role="presentation"
               className="w-full h-full object-cover object-center"
               loading="eager"
               fetchPriority="high"
@@ -370,24 +459,50 @@ function DeliveryDispatchContent() {
         </div>
         <div className="absolute inset-0 z-10 bg-gradient-to-t from-black/55 to-black/25 pointer-events-none" />
         <div className="relative z-20 w-full max-w-[900px] mx-auto px-4 py-12 text-center">
-          <h1 className="text-3xl sm:text-4xl font-bold text-white drop-shadow-sm mb-3">{heroHeader}</h1>
-          <p className="text-lg text-white/95 max-w-xl mx-auto mb-8">{heroSubtext}</p>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white drop-shadow-sm mb-3">{heroHeader}</h1>
+          <p className="text-lg sm:text-xl text-white/95 max-w-2xl mx-auto mb-8 leading-relaxed">{heroSubtext}</p>
+          {phone && phoneDisplay && (
+            <div className="mb-8">
+              <p className="text-xs sm:text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300/95 mb-3">Call Tavari Delivery Dispatch</p>
+              <a
+                href={telLink}
+                className="inline-block text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide drop-shadow-md hover:text-emerald-200 transition-colors break-words"
+              >
+                {phoneDisplay}
+              </a>
+            </div>
+          )}
           {(phone || buttons.length > 0) && (
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center gap-4">
               {buttons.some((b) => (b.url || '').trim().toLowerCase() === 'tel') && phone && (
                 <a
                   href={telLink}
-                  className="inline-flex justify-center py-4 px-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg shadow-lg"
+                  className="inline-flex justify-center py-4 px-10 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold text-lg shadow-lg ring-2 ring-white/20 md:hidden"
                 >
-                  Call us
+                  Tap to call now
                 </a>
               )}
               <div className="flex flex-wrap gap-3 justify-center">
                 {buttons.map((btn, i) => {
                   const url = (btn.url || '').trim().toLowerCase();
-                  if (url === 'tel') return null;
+                  if (url === 'tel' || url === 'sms') return null;
                   const label = (btn.label || '').trim();
-                  if (isChatButton(btn)) {
+                  if (isFormLinkButton(btn)) {
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          expandFormAndScroll();
+                        }}
+                        className="inline-flex justify-center py-3 px-6 rounded-lg border-2 border-white/90 font-semibold text-white text-base hover:bg-white/10 transition-colors min-w-[200px]"
+                      >
+                        {label || 'Start here'}
+                      </button>
+                    );
+                  }
+                  if (isChatTriggerButton(btn)) {
                     return (
                       <button
                         key={i}
@@ -398,14 +513,14 @@ function DeliveryDispatchContent() {
                         }}
                         className="inline-flex justify-center py-3 px-6 rounded-lg border-2 border-white/90 font-semibold text-white text-base hover:bg-white/10 transition-colors min-w-[200px]"
                       >
-                        {label || 'Request delivery online'}
+                        {label || 'Chat'}
                       </button>
                     );
                   }
                   return (
                     <a
                       key={i}
-                      href={url === 'sms' ? smsLink : btn.url || '#'}
+                      href={btn.url || '#'}
                       className="inline-flex justify-center py-3 px-6 rounded-lg border-2 border-white/90 font-semibold text-white text-base hover:bg-white/10 transition-colors min-w-[200px]"
                     >
                       {label || 'Link'}
@@ -415,33 +530,46 @@ function DeliveryDispatchContent() {
               </div>
             </div>
           )}
-          {phone && <p className="mt-4 text-white/90 font-medium">{phone}</p>}
         </div>
       </section>
 
       <section ref={contentRef} className="py-10 px-4">
         <div className="max-w-[720px] mx-auto">
-          <div className="text-center mb-8">
-            <button
-              type="button"
-              onClick={() => {
-                openChat();
-              }}
-              className="inline-flex items-center justify-center py-3 px-6 rounded-lg bg-emerald-600 text-white font-semibold text-base hover:bg-emerald-700 transition-colors"
-            >
-              Chat to schedule
-            </button>
-            <p className="text-sm text-slate-500 mt-2">Or use the form below — include your phone and full delivery address.</p>
-          </div>
-
-          <div id="form" ref={formRef} className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white shadow-sm p-6 sm:p-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-1">Request a delivery</h2>
-            <p className="text-sm text-slate-600 mb-6">
-              {businessIdParam
-                ? 'Submitting for your business account.'
-                : 'Individuals: you will complete payment online before we dispatch. Businesses: dispatch starts after submit.'}
-            </p>
-            <form onSubmit={submitForm} className="space-y-4">
+          <div className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden ring-1 ring-emerald-600/15">
+            <div id="form" ref={formRef}>
+              <button
+                type="button"
+                onClick={() => setFormExpanded((x) => !x)}
+                aria-expanded={formExpanded}
+                aria-controls="delivery-request-form-panel"
+                className="w-full flex items-center justify-between gap-4 p-5 sm:p-6 text-left hover:bg-emerald-50/40 transition-colors"
+              >
+                <span className="min-w-0 text-lg font-bold text-slate-900">Start here for your delivery</span>
+                <span
+                  className={`text-slate-400 text-xl shrink-0 transition-transform duration-200 ${formExpanded ? 'rotate-180' : ''}`}
+                  aria-hidden
+                >
+                  ▼
+                </span>
+              </button>
+              {formExpanded && (
+                <div id="delivery-request-form-panel" className="px-6 pb-6 sm:px-8 sm:pb-8 pt-2 border-t border-slate-100">
+                  <p className="text-sm text-slate-600 mb-6">
+                    {businessIdParam
+                      ? 'Submitting for your business account. We coordinate local deliveries in our service area only (not long-distance or cross-border).'
+                      : 'Individuals: you will complete payment online before we dispatch. Businesses: dispatch starts after submit. Service is local in our area—not province-wide, statewide, or international.'}
+                  </p>
+                  <form onSubmit={submitForm} className="space-y-4">
+              {intakeToken && intakeTokenStatus === 'loading' && (
+                <p className="text-sm text-slate-600 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+                  Confirming your number from the text link…
+                </p>
+              )}
+              {intakeToken && intakeTokenStatus === 'error' && (
+                <p className="text-sm text-amber-900 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                  This scheduling link is invalid or expired. Enter your phone below, or text us again for a new link.
+                </p>
+              )}
               <div>
                 <label htmlFor="dd-phone" className="block text-sm font-medium text-slate-700 mb-1">
                   Your phone <span className="text-red-600">*</span>
@@ -484,33 +612,134 @@ function DeliveryDispatchContent() {
                   />
                 </div>
               )}
-              <div>
-                <label htmlFor="dd-pickup" className="block text-sm font-medium text-slate-700 mb-1">
-                  Pickup address
-                </label>
-                <input
-                  id="dd-pickup"
-                  type="text"
-                  value={formPickup}
-                  onChange={(e) => setFormPickup(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Where we collect the package"
-                />
-              </div>
-              <div>
-                <label htmlFor="dd-delivery" className="block text-sm font-medium text-slate-700 mb-1">
-                  Delivery address <span className="text-red-600">*</span>
-                </label>
-                <input
-                  id="dd-delivery"
-                  type="text"
-                  required
-                  value={formDelivery}
-                  onChange={(e) => setFormDelivery(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Full street address"
-                />
-              </div>
+              <fieldset className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                <legend className="text-sm font-semibold text-slate-800 px-1">Pickup location (optional)</legend>
+                <p className="text-xs text-slate-600 -mt-1 mb-1">
+                  If different from your phone callback location; leave blank if we pick up from you in person.
+                </p>
+                <div>
+                  <label htmlFor="dd-pickup-street" className="block text-sm font-medium text-slate-700 mb-1">
+                    Street address
+                  </label>
+                  <input
+                    id="dd-pickup-street"
+                    type="text"
+                    value={formPickup}
+                    onChange={(e) => setFormPickup(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+                    placeholder="Number and street"
+                    autoComplete="street-address"
+                  />
+                </div>
+                <div className="grid sm:grid-cols-3 gap-4">
+                  <div>
+                    <label htmlFor="dd-pickup-city" className="block text-sm font-medium text-slate-700 mb-1">
+                      City
+                    </label>
+                    <input
+                      id="dd-pickup-city"
+                      type="text"
+                      value={formPickupCity}
+                      onChange={(e) => setFormPickupCity(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+                      autoComplete="address-level2"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dd-pickup-province" className="block text-sm font-medium text-slate-700 mb-1">
+                      Province
+                    </label>
+                    <input
+                      id="dd-pickup-province"
+                      type="text"
+                      value={formPickupProvince}
+                      onChange={(e) => setFormPickupProvince(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+                      placeholder="ON"
+                      autoComplete="address-level1"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dd-pickup-postal" className="block text-sm font-medium text-slate-700 mb-1">
+                      Postal code
+                    </label>
+                    <input
+                      id="dd-pickup-postal"
+                      type="text"
+                      value={formPickupPostal}
+                      onChange={(e) => setFormPickupPostal(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+                      autoComplete="postal-code"
+                    />
+                  </div>
+                </div>
+              </fieldset>
+
+              <fieldset className="space-y-3 rounded-lg border border-slate-200 p-4">
+                <legend className="text-sm font-semibold text-slate-800 px-1">
+                  Delivery location <span className="text-red-600 font-semibold">*</span>
+                </legend>
+                <div>
+                  <label htmlFor="dd-delivery" className="block text-sm font-medium text-slate-700 mb-1">
+                    Street address <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    id="dd-delivery"
+                    type="text"
+                    required
+                    value={formDelivery}
+                    onChange={(e) => setFormDelivery(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Number and street"
+                    autoComplete="street-address"
+                  />
+                </div>
+                <div className="grid sm:grid-cols-3 gap-4">
+                  <div>
+                    <label htmlFor="dd-city" className="block text-sm font-medium text-slate-700 mb-1">
+                      City <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      id="dd-city"
+                      type="text"
+                      required
+                      value={formCity}
+                      onChange={(e) => setFormCity(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      autoComplete="address-level2"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dd-province" className="block text-sm font-medium text-slate-700 mb-1">
+                      Province <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      id="dd-province"
+                      type="text"
+                      required
+                      value={formProvince}
+                      onChange={(e) => setFormProvince(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="ON"
+                      autoComplete="address-level1"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dd-postal" className="block text-sm font-medium text-slate-700 mb-1">
+                      Postal code <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      id="dd-postal"
+                      type="text"
+                      required
+                      value={formPostal}
+                      onChange={(e) => setFormPostal(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      autoComplete="postal-code"
+                    />
+                  </div>
+                </div>
+              </fieldset>
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="dd-recipient" className="block text-sm font-medium text-slate-700 mb-1">
@@ -608,18 +837,39 @@ function DeliveryDispatchContent() {
               </div>
               {formError && <p className="text-sm text-red-600">{formError}</p>}
               {formMessage?.type === 'ok' && (
-                <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-sm p-4">
-                  {formMessage.text}{' '}
-                  {formMessage.ref && (
-                    <span>
-                      Reference: <strong className="font-mono">{formMessage.ref}</strong>
-                    </span>
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-sm p-4 space-y-2">
+                  <p>
+                    {formMessage.text}{' '}
+                    {formMessage.ref && (
+                      <span>
+                        Reference: <strong className="font-mono">{formMessage.ref}</strong>
+                      </span>
+                    )}
+                  </p>
+                  {formMessage.manageUrl && (
+                    <p className="text-slate-700 pt-1 border-t border-emerald-200/80">
+                      If we need you to confirm a price or carrier, keep this link:{' '}
+                      <a href={formMessage.manageUrl} className="font-semibold text-emerald-800 underline break-all">
+                        open your delivery page
+                      </a>
+                      .
+                    </p>
                   )}
                 </div>
               )}
               {formMessage?.type === 'pay' && (
                 <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-950 text-sm p-4 space-y-2">
                   <p>{formMessage.text}</p>
+                  {formMessage.amountCents != null && Number.isFinite(formMessage.amountCents) && (
+                    <p className="text-base font-semibold tabular-nums">
+                      Total due:{' '}
+                      ${(formMessage.amountCents / 100).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
+                      CAD
+                    </p>
+                  )}
+                  {formMessage.priceDisclaimer && (
+                    <p className="text-xs text-amber-900/80">{formMessage.priceDisclaimer}</p>
+                  )}
                   {formMessage.ref && (
                     <p>
                       Reference: <strong className="font-mono">{formMessage.ref}</strong>
@@ -635,6 +885,15 @@ function DeliveryDispatchContent() {
                       Pay securely
                     </a>
                   )}
+                  {formMessage.manageUrl && (
+                    <p className="text-amber-950/90 pt-2 border-t border-amber-200/80">
+                      After paying, if we need a price or carrier confirmation, open:{' '}
+                      <a href={formMessage.manageUrl} className="font-semibold text-emerald-800 underline break-all">
+                        your delivery page
+                      </a>
+                      .
+                    </p>
+                  )}
                 </div>
               )}
               <button
@@ -645,7 +904,21 @@ function DeliveryDispatchContent() {
                 {formSubmitting ? 'Submitting…' : 'Submit request'}
               </button>
             </form>
+                </div>
+              )}
+            </div>
           </div>
+
+          <p className="text-center text-slate-600 text-[15px] mt-6">
+            Questions while you book?{' '}
+            <button
+              type="button"
+              className="text-emerald-700 font-semibold underline underline-offset-2 hover:text-emerald-800"
+              onClick={openChat}
+            >
+              Open chat
+            </button>
+          </p>
         </div>
       </section>
 
@@ -653,10 +926,15 @@ function DeliveryDispatchContent() {
         <div className="max-w-[720px] mx-auto">
           <h2 className="text-lg font-bold text-slate-900 mb-4 text-center">How it works</h2>
           <ol className="list-decimal list-inside space-y-2 text-[15px] text-slate-700 leading-relaxed">
-            <li>You submit your pickup and delivery details (form, chat, or phone).</li>
-            <li>We create your request and coordinate with our delivery partners.</li>
+            <li>
+              Start with the booking form, or call or chat. Pickup and drop-off must be in our local service area.
+            </li>
+            <li>We create your request and coordinate with our delivery partners for same-day or scheduled local routes.</li>
             <li>You receive updates by SMS/email when enabled, plus a tracking link when the carrier provides one.</li>
           </ol>
+          <p className="mt-4 text-sm text-slate-600 text-center max-w-lg mx-auto">
+            We do not offer province-wide, statewide, national, or international shipping—only local last-mile delivery.
+          </p>
         </div>
       </section>
 
@@ -686,22 +964,13 @@ function DeliveryDispatchContent() {
         </div>
       </section>
 
-      <footer className="bg-slate-900 text-white py-6 px-4">
+      <section className="bg-slate-900 text-white py-6 px-4" aria-label="Delivery disclaimer">
         <div className="max-w-[900px] mx-auto text-center">
           <p className="text-[13px] text-slate-400 leading-relaxed">
-            {serviceLineName} coordinates last-mile deliveries. Carriers are independent third parties. Pricing and final terms may be confirmed before dispatch.
-          </p>
-          <p className="mt-3">
-            <Link href="/termsofservice" className="text-slate-300 hover:text-white underline text-sm">
-              Terms of Service
-            </Link>
-            <span className="mx-2 text-slate-600">|</span>
-            <Link href="/" className="text-slate-400 hover:text-white text-sm">
-              Tavari
-            </Link>
+            {SITE_BRAND} coordinates <strong className="text-slate-300 font-semibold">local</strong> last-mile deliveries only—not provincial, state-wide, national, or international. Carriers are independent third parties. Pricing and final terms may be confirmed before dispatch.
           </p>
         </div>
-      </footer>
+      </section>
 
       {chatOpen && (
         <div
@@ -717,7 +986,7 @@ function DeliveryDispatchContent() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-              <span className="font-semibold text-slate-900">Schedule a delivery</span>
+              <span className="font-semibold text-slate-900">{SITE_BRAND}</span>
               <button type="button" onClick={() => setChatOpen(false)} className="p-1 rounded hover:bg-slate-200 text-slate-600" aria-label="Close">
                 ✕
               </button>

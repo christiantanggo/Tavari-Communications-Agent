@@ -10,17 +10,6 @@
 - `kidquiz_renders`
 - `kidquiz_publishes`
 
-## Dad Joke Studio
-- `dadjoke_studio_formats`
-- `dadjoke_studio_business_formats`
-- `dadjoke_studio_style_recipes`
-- `dadjoke_studio_presets`
-- `dadjoke_studio_assets`
-- `dadjoke_studio_ideas`
-- `dadjoke_studio_generated_content`
-- `dadjoke_studio_rendered_outputs`
-- `dadjoke_studio_publish_queue`
-
 ## Orbix Network (core + longform + extras)
 **Core** (`create_orbix_network_tables.sql`):
 - `orbix_sources`
@@ -53,11 +42,11 @@ Additional columns / enums were added across many `add_orbix_*.sql` and channel-
 - `movie_review_renders`
 
 ## Shared (not YouTube-only but required today)
-- `module_settings` — keys like `kidquiz`, `orbix-network`, `movie-review`, `dad-joke-studio`
+- `module_settings` — keys like `kidquiz`, `orbix-network`, `movie-review` (legacy rows may still use `dad-joke-studio`)
 - `modules`, `businesses`, `users`, `organization_users` — see `SHARED_CORE_PREREQUISITES.md`
 
 ## Storage buckets
 
-**Production list:** see **`STORAGE_BUCKETS.md`** (live Supabase snapshot: Dad Joke, Kid Quiz, Movie Review, Orbix, `website-hero`).
+**Production list:** see **`STORAGE_BUCKETS.md`** (live Supabase snapshot: Kid Quiz, Movie Review, Orbix, `website-hero`; legacy `dadjoke-studio-*` buckets may still exist if migrations ran historically).
 
 Env examples: `SUPABASE_STORAGE_BUCKET_KIDQUIZ_RENDERS` / `kidquiz-videos`; migrations also reference Orbix music/backgrounds policies in `add_orbix_*` SQL files.

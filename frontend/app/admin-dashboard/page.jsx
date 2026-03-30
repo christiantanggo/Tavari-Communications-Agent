@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { getAdminModuleManageHref } from '@/lib/admin-module-hrefs';
+import { isRetiredModuleKey } from '@/lib/retired-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -67,7 +69,8 @@ function AdminDashboardPage() {
         });
         if (response.ok) {
           const data = await response.json();
-          setModules(data.modules || []);
+          const list = (data.modules || []).filter((m) => m?.key && !isRetiredModuleKey(m.key));
+          setModules(list);
           return;
         }
       } catch (e) {
@@ -91,10 +94,15 @@ function AdminDashboardPage() {
   const getModuleConfig = (moduleKey) => {
     const configs = {
       'phone-agent': { icon: '📞', color: 'blue' },
-      'reviews': { icon: '⭐', color: 'yellow' },
+      reviews: { icon: '⭐', color: 'yellow' },
+      'delivery-dispatch': { icon: '🚚', color: 'emerald' },
+      'emergency-dispatch': { icon: '🚨', color: 'red' },
+      'orbix-network': { icon: '📺', color: 'purple' },
+      'movie-review': { icon: '🎬', color: 'indigo' },
     };
     return configs[moduleKey] || { icon: '📦', color: 'gray' };
   };
+
 
   if (loading) {
     return (
@@ -146,23 +154,15 @@ function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* NEW: Module Cards Section */}
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Module Administration</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Module administration</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {modules.map((module) => {
                 const config = getModuleConfig(module.key);
                 return (
                   <Link
                     key={module.key}
-                    href={
-                      module.key === 'phone-agent' ? '/tavari-ai-phone/admin-dashboard'
-                      : module.key === 'reviews' ? '/review-reply-ai/admin-dashboard'
-                      : module.key === 'delivery-dispatch' ? '/admin/delivery-operator'
-                      : module.key === 'emergency-dispatch' ? '/dashboard/v2/modules/emergency-dispatch'
-                      : module.key === 'orbix-network' ? '/dashboard/v2/modules/orbix-network'
-                      : `/${module.key}/admin-dashboard`
-                    }
+                    href={getAdminModuleManageHref(module.key)}
                     className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
                   >
                     <div className="flex items-start justify-between mb-4">
@@ -176,11 +176,11 @@ function AdminDashboardPage() {
                     </div>
                     <p className="text-sm text-gray-600 mb-4">{module.description || 'Module administration'}</p>
                     <div className="flex items-center justify-between">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        module.is_active !== false
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span
+                        className={`px-2 py-1 rounded text-xs font-medium ${
+                          module.is_active !== false ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
                         {module.is_active !== false ? 'Active' : 'Inactive'}
                       </span>
                       <span className="text-blue-600 font-medium">Manage →</span>

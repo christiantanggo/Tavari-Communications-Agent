@@ -350,7 +350,7 @@ function PhoneAgentAdminPage() {
               Manage Accounts
             </Link>
             <Link
-              href="/tavari-ai-phone/package"
+              href="/admin/packages?module_key=phone-agent"
               className="px-6 py-3 bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium"
             >
               Manage Packages

@@ -61,12 +61,6 @@ export default function TermsOfServicePage() {
           </Link>
         </div>
       </main>
-
-      <footer className="border-t border-slate-200 bg-white mt-12 py-4 px-4">
-        <div className="max-w-[720px] mx-auto text-center text-sm text-slate-500">
-          <Link href="/" className="hover:text-slate-700">Tavari</Link>
-        </div>
-      </footer>
     </div>
   );
 }

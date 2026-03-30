@@ -4,7 +4,7 @@
  * Broker API keys can be set in Admin → Last-Mile Delivery → Settings → Delivery company APIs, or via env DELIVERY_SHIPDAY_API_KEY.
  */
 import { supabaseClient } from '../../config/database.js';
-import { getDeliveryConfigFull, isShipdayOnDemandEnabledFlag, isShipdayOnDemandAutoAssignFlag } from './config.js';
+import { getDeliveryConfigFull, isShipdayOnDemandEnabledFlag } from './config.js';
 import { buildShipdayOrderPayload } from './shipdayOrder.js';
 import { localToUTC, toHHmmss } from './shipdayTime.js';
 
@@ -295,33 +295,23 @@ export async function startDispatch(deliveryRequestId) {
       const onDemandBase = getShipdayOnDemandBaseUrl(baseUrl);
       const preferredIds = coalescePreferredCarrierIds(shipdayConfig?.preferred_carrier_ids);
 
-      // On-demand + API base: either stage quote for confirm (price-only modal) or pause for carrier picker (DoorDash/Uber list).
-      // Default to staged flow when preferred is empty/cheapest; explicit DoorDash/Uber need checkbox to skip picker.
+      // On-demand + API base: pick lowest-fee estimate (DoorDash/Uber/etc. as returned by Shipday) and assign immediately.
+      // If assign or estimates fail, fall through to ChoosingCarrier so the dashboard/public link can pick or use fleet.
       if (onDemandEnabled && onDemandBase) {
-        const prefRaw = shipdayConfig?.preferred_on_demand_provider;
-        const pref =
-          prefRaw != null && String(prefRaw).trim()
-            ? String(prefRaw).trim().toLowerCase()
-            : 'cheapest';
-        const autoAssign =
-          isShipdayOnDemandAutoAssignFlag(shipdayConfig?.on_demand_auto_assign) ||
-          pref === 'cheapest';
-        if (autoAssign) {
-          const { tryAutoAssignOnDemandAfterShipdayCreate } = await import('./carrierChoice.js');
-          const auto = await tryAutoAssignOnDemandAfterShipdayCreate(deliveryRequestId);
-          if (auto.success) {
-            console.log(
-              '[DeliveryNetwork] startDispatch: Shipday order',
-              shipdayOrderId,
-              '— staged on-demand quote (user confirms price in app)'
-            );
-            return;
-          }
-          console.warn(
-            '[DeliveryNetwork] startDispatch: staged on-demand quote failed; user can pick carrier in app',
-            auto.error || ''
+        const { assignCheapestOnDemandAfterShipdayCreate } = await import('./carrierChoice.js');
+        const assigned = await assignCheapestOnDemandAfterShipdayCreate(deliveryRequestId);
+        if (assigned.success) {
+          console.log(
+            '[DeliveryNetwork] startDispatch: Shipday order',
+            shipdayOrderId,
+            '— on-demand cheapest assigned (Dispatched)'
           );
+          return;
         }
+        console.warn(
+          '[DeliveryNetwork] startDispatch: on-demand cheapest assign failed; opening carrier choice',
+          assigned.error || ''
+        );
         await supabaseClient
           .from('delivery_requests')
           .update({ status: 'ChoosingCarrier', updated_at: new Date().toISOString() })

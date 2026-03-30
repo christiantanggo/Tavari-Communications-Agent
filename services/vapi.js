@@ -148,10 +148,8 @@ export async function createAssistant(businessData) {
         provider: "deepgram",
         model: "nova-2", // Best model for noise reduction
         language: "en-US",
-        // Additional Deepgram settings for better noise handling
-        smartFormat: true, // Better formatting helps with accuracy
-        endpointing: 300, // Milliseconds of silence before considering speech ended (helps with noisy environments)
-        punctuate: true, // Better punctuation improves understanding
+        smartFormat: true,
+        endpointing: 300,
       },
       // Enable background denoising to filter out ambient noise (TV, traffic, etc.)
       backgroundDenoisingEnabled: true,
@@ -317,46 +315,76 @@ export async function getTelnyxCredentials() {
  * @returns {Promise<Array>} Array of available phone numbers
  */
 export async function searchAvailablePhoneNumbers(countryCode = 'US', phoneType = 'local', limit = 5, areaCode = null) {
-  try {
-    // Check if we have Telnyx API key for direct search
-    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-    if (!TELNYX_API_KEY) {
-      console.warn("[VAPI] TELNYX_API_KEY not set - cannot search for numbers directly");
-      return [];
-    }
+  const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+  if (!TELNYX_API_KEY) {
+    console.warn("[VAPI] TELNYX_API_KEY not set - cannot search for numbers directly");
+    return [];
+  }
 
-    const axios = (await import("axios")).default;
+  const axios = (await import("axios")).default;
+  // Telnyx expects snake_case enums (e.g. toll_free), not toll-free
+  const telnyxPhoneType = String(phoneType || 'local').trim().replace(/-/g, '_');
+  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 250);
+  const ccPrimary = String(countryCode || 'US').toUpperCase();
+  const cleanArea =
+    areaCode ? String(areaCode).replace(/\D/g, '') : '';
+  const hasAreaFilter = cleanArea.length === 3;
+
+  const fetchForCountry = async (cc) => {
     const params = new URLSearchParams({
-      'filter[country_code]': countryCode,
-      'filter[phone_number_type]': phoneType,
-      'page[size]': limit.toString(),
+      'filter[country_code]': cc,
+      'filter[phone_number_type]': telnyxPhoneType,
+      'page[size]': String(limitNum),
     });
-
-    // Add area code filter if provided (Telnyx uses national_destination_code)
-    if (areaCode) {
-      const cleanAreaCode = areaCode.replace(/\D/g, ''); // Remove non-digits
-      if (cleanAreaCode.length === 3) {
-        params.append('filter[national_destination_code]', cleanAreaCode);
-        console.log(`[VAPI] Searching for numbers with area code: ${cleanAreaCode}`);
-      }
+    if (hasAreaFilter) {
+      params.append('filter[national_destination_code]', cleanArea);
+      console.log(`[VAPI] Searching for numbers with area code: ${cleanArea}`);
     }
-
     const response = await axios.get(`https://api.telnyx.com/v2/available_phone_numbers?${params.toString()}`, {
       headers: {
         Authorization: `Bearer ${TELNYX_API_KEY}`,
         'Content-Type': 'application/json',
       },
     });
+    return response.data?.data || [];
+  };
 
-    const numbers = response.data?.data || [];
-    console.log(`[VAPI] Found ${numbers.length} available ${phoneType} numbers for ${countryCode}${areaCode ? ` (area code: ${areaCode})` : ''}`);
-    return numbers.map(num => ({
+  const mapRows = (rows) =>
+    rows.map((num) => ({
       phone_number: num.phone_number,
       phone_price: num.cost_information?.upfront_cost || 0,
       region_information: num.region_information,
     }));
+
+  try {
+    let raw = await fetchForCountry(ccPrimary);
+
+    // Telnyx often exposes NANP toll-free under US; CA-only toll_free queries frequently return 0.
+    if (
+      raw.length === 0 &&
+      ccPrimary === 'CA' &&
+      telnyxPhoneType === 'toll_free' &&
+      !hasAreaFilter
+    ) {
+      console.warn('[VAPI] No CA toll_free results; retrying US toll_free (shared +1 NANP inventory)');
+      raw = await fetchForCountry('US');
+    }
+
+    console.log(
+      `[VAPI] Found ${raw.length} available ${telnyxPhoneType} numbers (requested country ${ccPrimary})${hasAreaFilter ? ` (area code: ${cleanArea})` : ''}`,
+    );
+    return mapRows(raw);
   } catch (error) {
-    console.error("[VAPI] Error searching for phone numbers:", error.response?.data || error.message);
+    console.error('[VAPI] Error searching for phone numbers:', error.response?.data || error.message);
+    if (ccPrimary === 'CA' && telnyxPhoneType === 'toll_free' && !hasAreaFilter) {
+      try {
+        console.warn('[VAPI] CA toll_free request failed; retrying US toll_free');
+        const raw = await fetchForCountry('US');
+        return mapRows(raw);
+      } catch (e2) {
+        console.error('[VAPI] US toll_free fallback failed:', e2.response?.data || e2.message);
+      }
+    }
     return [];
   }
 }

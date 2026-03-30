@@ -109,7 +109,7 @@ function PackageDetailPage() {
                 pkg.module_key === 'reviews' 
                   ? '/review-reply-ai/package'
                   : pkg.module_key === 'phone-agent'
-                  ? '/tavari-ai-phone/package'
+                  ? '/admin/packages?module_key=phone-agent'
                   : '/admin/packages'
               } 
               className="text-blue-600 hover:text-blue-800 mb-4 inline-block"

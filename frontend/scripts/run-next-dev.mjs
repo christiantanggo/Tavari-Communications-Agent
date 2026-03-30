@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = join(here, '..');
 const repoRoot = join(frontendRoot, '..');
 const ports = JSON.parse(readFileSync(join(repoRoot, 'config', 'dev-ports.json'), 'utf8'));
-const port = Number(ports.frontend) || 3003;
+const port = Number(ports.frontend) || 3005;
 
 const nextCli = join(frontendRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
 if (!existsSync(nextCli)) {

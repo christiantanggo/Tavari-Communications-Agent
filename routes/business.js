@@ -254,7 +254,7 @@ router.put("/settings", authenticate, async (req, res) => {
 router.get("/phone-numbers/search", authenticate, async (req, res) => {
   try {
     const { 
-      countryCode = 'US', 
+      countryCode = 'CA', 
       phoneType, // Ignore frontend phoneType - always use toll-free
       limit = 20, 
       areaCode,
@@ -368,9 +368,9 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
         businessId: business.id, // CRITICAL: Include businessId in metadata for webhook lookup
       });
       
-      // Store assistant ID
+      // Store assistant ID and enable AI (final provision step also calls setVapiAssistant)
       console.log('[Business Provision] ✅ Assistant created:', assistant.id);
-      await Business.update(req.businessId, { vapi_assistant_id: assistant.id });
+      await Business.update(req.businessId, { vapi_assistant_id: assistant.id, ai_enabled: true });
     } else {
       console.log('[Business Provision] Using existing assistant:', business.vapi_assistant_id);
       // Fetch existing assistant
@@ -533,11 +533,8 @@ router.post("/phone-numbers/provision", authenticate, async (req, res) => {
       // Don't fail provisioning - number still works, just needs manual assignment
     }
 
-    // Store VAPI phone number in database
-    await Business.update(req.businessId, { 
-      vapi_phone_number: provisionedNumber,
-      vapi_assistant_id: assistant.id, // Make sure assistant ID is stored
-    });
+    // Store VAPI phone number + assistant; enable AI so admin/dashboard match live VAPI behavior
+    await Business.setVapiAssistant(req.businessId, assistant.id, provisionedNumber);
 
     // Initialize billing cycle if not already done
     if (!business.next_billing_date) {

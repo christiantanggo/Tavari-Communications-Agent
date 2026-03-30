@@ -40,7 +40,6 @@ router.get('/youtube/callback', async (req, res) => {
     let businessId = rest;
     let orbixChannelId = null;
     let redirectToSetup = false;
-    let isKidquiz = false;
     let isMovieReview = false;
     let usageManual = false;
     if (rest && rest.includes(':')) {
@@ -51,10 +50,6 @@ router.get('/youtube/callback', async (req, res) => {
       }
       if (parts[parts.length - 1] === 'manual') {
         usageManual = true;
-        parts.pop();
-      }
-      if (parts[parts.length - 1] === 'kidquiz') {
-        isKidquiz = true;
         parts.pop();
       }
       if (parts[parts.length - 1] === 'movie-review') {
@@ -96,7 +91,7 @@ router.get('/youtube/callback', async (req, res) => {
           clientSecret = yt.client_secret;
         }
       }
-    } else if (orbixChannelId && !isKidquiz) {
+    } else if (orbixChannelId) {
       const existing = await ModuleSettings.findByBusinessAndModule(businessId, 'orbix-network');
       const byChannel = existing?.settings?.youtube_by_channel || {};
       const channelEntry = byChannel[orbixChannelId];
@@ -150,15 +145,6 @@ router.get('/youtube/callback', async (req, res) => {
       refresh_token: tokens.refresh_token,
       token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null
     };
-
-    if (isKidquiz) {
-      const kqExisting = await ModuleSettings.findByBusinessAndModule(businessId, 'kidquiz');
-      const kqSettings = kqExisting?.settings ? { ...kqExisting.settings } : {};
-      kqSettings.youtube = ytCreds;
-      await ModuleSettings.update(businessId, 'kidquiz', kqSettings);
-      console.log('[YouTube Callback] Saved YouTube credentials for KidQuiz businessId=', businessId, 'youtube_channel_id=', channel.id);
-      return res.redirect(`${redirectBase}/dashboard/v2/modules/kidquiz/settings?youtube_connected=true`);
-    }
 
     if (isMovieReview) {
       const mrExisting = await ModuleSettings.findByBusinessAndModule(businessId, 'movie-review');

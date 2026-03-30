@@ -138,7 +138,8 @@ router.post('/notifications', async (req, res) => {
  */
 router.get('/modules', async (req, res) => {
   try {
-    const modules = await Module.findAll(true); // Include inactive modules for admin
+    const { excludeRetiredModules } = await import('../../config/retired-module-keys.js');
+    const modules = excludeRetiredModules(await Module.findAll(true)); // Include inactive modules for admin
     
     res.json({
       modules: modules || [],
@@ -189,7 +190,8 @@ router.put('/modules/:moduleKey', async (req, res) => {
  */
 router.get('/pricing', async (req, res) => {
   try {
-    const modules = await Module.findAll(true); // Include inactive for admin view
+    const { excludeRetiredModules } = await import('../../config/retired-module-keys.js');
+    const modules = excludeRetiredModules(await Module.findAll(true)); // Include inactive for admin view
     
     const pricing = modules.map(module => ({
       module_key: module.key,

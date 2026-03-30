@@ -290,8 +290,8 @@ export default function V2TestPage() {
             <div className="bg-red-50 border border-red-200 rounded p-4">
               <h3 className="font-semibold text-red-800 mb-2">🔧 Troubleshooting HTML Errors:</h3>
               <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
-                <li><strong>If API Base shows production URL:</strong> Set <code>NEXT_PUBLIC_API_URL=http://localhost:5003</code> in <code>.env.local</code> or fix <code>config/dev-ports.json</code> / <code>PORTS.md</code></li>
-                <li><strong>If server not running:</strong> Start the API (default local port <strong>5003</strong> per <code>dev-ports.json</code>)</li>
+                <li><strong>If API Base shows production URL:</strong> Set <code>NEXT_PUBLIC_API_URL=http://localhost:5005</code> in <code>.env.local</code> or fix <code>config/dev-ports.json</code> / <code>PORTS.md</code></li>
+                <li><strong>If server not running:</strong> Start the API (default local port <strong>5005</strong> per <code>dev-ports.json</code>)</li>
                 <li><strong>If routes don't exist:</strong> Check server console for v2 route loading errors</li>
                 <li><strong>Quick test:</strong> Try "Test V2 Health" button first - it should work if routes are loaded</li>
                 <li><strong>Check server logs:</strong> Look for "✅ Tavari AI Core v2 routes loaded" message</li>

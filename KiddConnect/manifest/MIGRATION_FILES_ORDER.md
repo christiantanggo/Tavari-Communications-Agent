@@ -17,11 +17,9 @@ Tip: `grep -l orbix migrations/*.sql` for a full file list.
 - `add_kidquiz_module.sql`  
 - Any follow-ups matching `*kidquiz*`
 
-## Dad Joke Studio
+## Legacy Dad Joke Studio (tables only — app code removed)
 
-- `add_dad_joke_studio_module.sql`  
-- `add_dad_joke_studio_asset_scope.sql`  
-- `add_dad_joke_studio_storage_buckets.sql` (buckets + policies)
+If your database was built with the old module: `add_dad_joke_studio_module.sql`, `add_dad_joke_studio_asset_scope.sql`, `add_dad_joke_studio_storage_buckets.sql`. No longer mounted in the Node app.
 
 ## Movie Review
 
@@ -30,7 +28,7 @@ Tip: `grep -l orbix migrations/*.sql` for a full file list.
 
 ## Storage
 
-Run bucket/policy migrations for `kidquiz-videos`, Orbix music/assets, `dadjoke-studio-*` as referenced in those SQL files.
+Run bucket/policy migrations for `kidquiz-videos`, Orbix music/assets, and any legacy `dadjoke-studio-*` buckets only if those migrations already apply to your project.
 
 ## Reliable approach
 

@@ -218,7 +218,15 @@ function SetupWizardContent({ testMode = false }) {
   const [business, setBusiness] = useState(null);
   const [agent, setAgent] = useState(null);
   const [packages, setPackages] = useState([]);
+  /** From GET /billing/status — used to skip duplicate checkout after join-funnel payment */
+  const [billingSnap, setBillingSnap] = useState(null);
   const [selectedPackage, setSelectedPackage] = useState(null);
+
+  const hasExistingPhonePlan = Boolean(
+    billingSnap?.packageId ||
+      (billingSnap?.subscription &&
+        ['active', 'trialing', 'past_due'].includes(billingSnap.subscription.status)),
+  );
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState(null);
   const [phoneNumberCountry, setPhoneNumberCountry] = useState('US');
   
@@ -256,7 +264,7 @@ function SetupWizardContent({ testMode = false }) {
       sms_allowed_end_time: '21:00:00',
     },
     step5: { packageId: null }, // Package selection
-    step6: { phoneNumber: null, countryCode: 'US' }, // Phone number
+    step6: { phoneNumber: null, countryCode: 'CA' }, // Phone number
     step7: { opening_greeting: '', ending_greeting: '' },
     step8: { faqs: [] },
     step9: {
@@ -279,15 +287,29 @@ function SetupWizardContent({ testMode = false }) {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [userRes, setupRes, packagesRes] = await Promise.all([
+      const [userRes, setupRes, packagesRes, billingRes] = await Promise.all([
         authAPI.getMe(),
         api.get('/setup/data').catch(() => ({ data: { business: null, agent: null } })),
-        billingAPI.getPackages().catch(() => ({ data: { packages: [] } })),
+        billingAPI.getPackages('phone-agent').catch(() => ({ data: { packages: [] } })),
+        billingAPI.getStatus().catch(() => ({ data: null })),
       ]);
-      
+
+      const bs = billingRes?.data || null;
+      setBillingSnap(bs);
+
       setBusiness(setupRes.data.business || userRes.data?.business);
       setAgent(setupRes.data.agent);
-      setPackages(packagesRes.data.packages || []);
+      const list = packagesRes.data.packages || [];
+      setPackages(list);
+
+      if (bs?.packageId) {
+        const match = list.find((p) => p.id === bs.packageId);
+        if (match) setSelectedPackage(match);
+        setFormData((prev) => ({
+          ...prev,
+          step5: { packageId: bs.packageId },
+        }));
+      }
       
       // Load existing data into form
       if (setupRes.data.business) {
@@ -353,6 +375,16 @@ function SetupWizardContent({ testMode = false }) {
   };
 
   const handleNext = async () => {
+    if (currentStep === 5 && hasExistingPhonePlan) {
+      setCurrentStep(6);
+      return;
+    }
+
+    if (currentStep === 5 && !hasExistingPhonePlan && !formData.step5.packageId) {
+      showError('Please select a package, or use Skip if you will add billing later.');
+      return;
+    }
+
     console.log('[Setup Wizard] ========== handleNext CALLED ==========');
     console.log('[Setup Wizard] handleNext called, currentStep:', currentStep);
     console.log('[Setup Wizard] formData.step5:', formData.step5);
@@ -367,7 +399,7 @@ function SetupWizardContent({ testMode = false }) {
     
     // Special handling for Step 5 (Package Selection) - redirect to payment if package selected
     // In test mode, we'll still show the payment flow but log that it's test mode
-    if (currentStep === 5 && formData.step5.packageId) {
+    if (currentStep === 5 && formData.step5.packageId && !hasExistingPhonePlan) {
       if (testMode) {
         console.log('[Setup Wizard] ⚠️  Step 5 payment flow triggered in TEST MODE - payment will be skipped');
         alert('TEST MODE: Payment flow would trigger here, but payment is skipped in test mode.\n\nIn production, this would redirect to Stripe payment page.');
@@ -454,22 +486,28 @@ function SetupWizardContent({ testMode = false }) {
         console.error('[Setup Wizard] ❌ Payment initiation error:', paymentError);
         console.error('[Setup Wizard] Error response:', paymentError.response);
         console.error('[Setup Wizard] Error data:', paymentError.response?.data);
+
+        if (!paymentError.response) {
+          showError(
+            'Cannot reach the billing server (check that the API is running, e.g. localhost:5005). Staying on this step so you can try again.',
+          );
+          setSaving(false);
+          return;
+        }
+
         const errorData = paymentError.response?.data || {};
-        const errorMsg = errorData.error || 
-                        errorData.message || 
+        const errorMsg = errorData.error ||
+                        errorData.message ||
                         'Failed to initiate payment. You can complete payment later in billing settings.';
-        
+
         if (paymentError.response?.status === 402) {
-          // Payment method required
           warning('Payment method required. You can add one later in billing settings.');
         } else if (paymentError.response?.status === 503) {
-          // Payment not configured
           warning('Payment processing is not fully configured. You can complete payment later in billing settings.');
         } else {
           warning(errorMsg);
         }
-        
-        // Continue to next step even if payment fails
+
         setCurrentStep(6);
         setSaving(false);
         return;
@@ -575,8 +613,8 @@ function SetupWizardContent({ testMode = false }) {
         }
       }
       
-      // Handle package payment if selected
-      if (formData.step5.packageId && !testMode) {
+      // Handle package payment if selected (not if they already paid elsewhere, e.g. affiliate join)
+      if (formData.step5.packageId && !testMode && !hasExistingPhonePlan) {
         try {
           const checkoutRes = await billingAPI.createCheckout(formData.step5.packageId);
           if (checkoutRes.data.paymentUrl) {
@@ -1046,12 +1084,24 @@ function SetupWizardContent({ testMode = false }) {
               {currentStep === 5 && (
                 <div className="space-y-4">
                   <h2 className="text-2xl font-bold mb-4 text-gray-900">Choose Your Package</h2>
-                  <p className="text-sm text-gray-600 mb-4">Select a package that fits your needs</p>
-                  {packages.length === 0 ? (
+                  {hasExistingPhonePlan ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+                      <p className="font-semibold">Billing is already set up</p>
+                      <p className="mt-2 text-sm">
+                        {billingSnap?.package?.name
+                          ? `You're on the ${billingSnap.package.name} plan.`
+                          : 'You have an active subscription for the AI phone agent.'}{' '}
+                        Click Next to continue — you won't be charged again on this step.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-600 mb-4">Select a package that fits your needs</p>
+                  )}
+                  {!hasExistingPhonePlan && packages.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       <p>No packages available at this time. Please contact support.</p>
                     </div>
-                  ) : (
+                  ) : !hasExistingPhonePlan ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {packages.map((pkg) => {
                         const isOnSale = pkg.isOnSale && pkg.saleAvailable;
@@ -1118,8 +1168,8 @@ function SetupWizardContent({ testMode = false }) {
                         );
                       })}
                     </div>
-                  )}
-                  {selectedPackage && (
+                  ) : null}
+                  {selectedPackage && !hasExistingPhonePlan && (
                     <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                       <p className="text-sm text-blue-800">
                         <strong>Selected:</strong> {selectedPackage.name} - {
@@ -1128,7 +1178,7 @@ function SetupWizardContent({ testMode = false }) {
                             : `$${(parseFloat(selectedPackage.monthly_price) || 0).toFixed(2)}/month`
                         }
                         <br />
-                        You'll complete payment in the next step.
+                        You'll complete payment when you continue.
                       </p>
                     </div>
                   )}

@@ -1,5 +1,6 @@
 import './globals.css';
 import { ToastProvider } from '@/components/ToastProvider';
+import AppChrome from '@/components/AppChrome';
 import Script from 'next/script';
 
 const title = (process.env.NEXT_PUBLIC_APP_DISPLAY_NAME || 'Tavari Ai').trim();
@@ -39,7 +40,9 @@ export default function RootLayout({ children }) {
             </Script>
           </>
         )}
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <AppChrome>{children}</AppChrome>
+        </ToastProvider>
       </body>
     </html>
   );
