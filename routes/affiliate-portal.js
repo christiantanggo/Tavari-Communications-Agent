@@ -27,7 +27,7 @@ router.post("/exchange", async (req, res) => {
 
     const { data: partner, error } = await supabaseClient
       .from("affiliate_partners")
-      .select("id, affiliate_code, display_name, email, commission_rate_percent, active")
+      .select("id, affiliate_code, display_name, email, active")
       .eq("id", result.partnerId)
       .single();
 
@@ -44,7 +44,6 @@ router.post("/exchange", async (req, res) => {
         affiliate_code: partner.affiliate_code,
         display_name: partner.display_name,
         email: partner.email,
-        commission_rate_percent: partner.commission_rate_percent,
       },
     });
   } catch (e) {
@@ -107,6 +106,7 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
     const {
       getAffiliateGlobalSettings,
       resolveCommissionRules,
+      explainAffiliateCommissionSelectionForLog,
       AFFILIATE_MODULE_PHONE,
       AFFILIATE_MODULE_DELIVERY,
     } = await import("../services/affiliateCommissionSettings.js");
@@ -115,9 +115,7 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
 
     const { data: partner, error: pErr } = await supabaseClient
       .from("affiliate_partners")
-      .select(
-        "id, affiliate_code, display_name, email, commission_rate_percent, active, created_at, delivery_attributed_paid_count",
-      )
+      .select("id, affiliate_code, display_name, email, active, created_at, delivery_attributed_paid_count")
       .eq("id", req.affiliatePartnerId)
       .single();
 
@@ -159,16 +157,42 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
     if (gErr) throw gErr;
     const grossSalesCents = (grossRows || []).reduce((s, r) => s + (Number(r.gross_amount_cents) || 0), 0);
 
-    const [programPhone, programDelivery, effectivePhone, effectiveDelivery] = await Promise.all([
-      resolveCommissionRules(AFFILIATE_MODULE_PHONE, { partnerCommissionOverride: null }),
-      resolveCommissionRules(AFFILIATE_MODULE_DELIVERY, { partnerCommissionOverride: null }),
-      resolveCommissionRules(AFFILIATE_MODULE_PHONE, {
-        partnerCommissionOverride: partner.commission_rate_percent,
-      }),
-      resolveCommissionRules(AFFILIATE_MODULE_DELIVERY, {
-        partnerCommissionOverride: partner.commission_rate_percent,
-      }),
+    const [programPhone, programDelivery] = await Promise.all([
+      resolveCommissionRules(AFFILIATE_MODULE_PHONE),
+      resolveCommissionRules(AFFILIATE_MODULE_DELIVERY),
     ]);
+
+    const { data: moduleRowsForLog, error: moduleRowsLogErr } = await supabaseClient
+      .from("affiliate_module_settings")
+      .select("*")
+      .in("module_key", [AFFILIATE_MODULE_PHONE, AFFILIATE_MODULE_DELIVERY]);
+
+    if (moduleRowsLogErr) {
+      console.warn("[affiliate-portal] /me commission log: could not load affiliate_module_settings:", moduleRowsLogErr.message);
+    }
+
+    const moduleRowOrStub = (key) =>
+      (moduleRowsForLog || []).find((r) => r.module_key === key) || { module_key: key };
+
+    const commissionPolicyLog = {
+      event: "affiliate_portal_me_commission_policy",
+      at: new Date().toISOString(),
+      partner_id: partner.id,
+      affiliate_code: partner.affiliate_code,
+      modules: [
+        explainAffiliateCommissionSelectionForLog(moduleRowOrStub(AFFILIATE_MODULE_PHONE), programPhone, globalSettings),
+        explainAffiliateCommissionSelectionForLog(
+          moduleRowOrStub(AFFILIATE_MODULE_DELIVERY),
+          programDelivery,
+          globalSettings,
+        ),
+      ],
+    };
+    // console.log so it always appears in typical local `node server.js` terminals (some setups hide console.info).
+    console.log("[affiliate-portal] /me commission selection", JSON.stringify(commissionPolicyLog));
+
+    const attachCommissionDebugToResponse =
+      process.env.NODE_ENV !== "production" || process.env.AFFILIATE_ME_DEBUG === "1";
 
     let purchases = [];
     try {
@@ -184,6 +208,7 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
         module_key: r.module_key,
         earning_type: r.earning_type,
         source: r.metadata?.source || null,
+        attribution_source: r.metadata?.attribution_source || null,
         stripe_checkout_session_id: r.stripe_checkout_session_id || r.metadata?.stripe_checkout_session_id || null,
         stripe_invoice_id: r.stripe_invoice_id || r.metadata?.stripe_invoice_id || null,
       }));
@@ -191,8 +216,22 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
       purchases = [];
     }
 
+    let linked_businesses = [];
+    try {
+      const { data: lb, error: lbErr } = await supabaseClient
+        .from("businesses")
+        .select("id, name, email, created_at, package_id")
+        .eq("referred_by_partner_id", partner.id)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (!lbErr) linked_businesses = lb || [];
+    } catch {
+      linked_businesses = [];
+    }
+
     const base = getFrontendPublicBaseUrl();
-    res.json({
+    const mePayload = {
       partner,
       stats: {
         clicks,
@@ -211,25 +250,7 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
         payout_minimum_cents: Number(globalSettings.payout_minimum_cents),
         refund_hold_days_default: Number(globalSettings.refund_hold_days),
         delivery_paid_checkouts_attributed: partner.delivery_attributed_paid_count || 0,
-        /** Tavari-set % on gross when present; actual payouts use this instead of program % below. */
-        partner_commission_override_percent:
-          partner.commission_rate_percent != null && !Number.isNaN(Number(partner.commission_rate_percent))
-            ? Number(partner.commission_rate_percent)
-            : null,
-        /** Percentages used for your ledger (after any partner override). */
-        effective_by_module: [
-          {
-            module_key: AFFILIATE_MODULE_PHONE,
-            first_sale_commission_percent: effectivePhone.first_sale_commission_percent,
-            recurring_commission_percent: effectivePhone.recurring_commission_percent,
-          },
-          {
-            module_key: AFFILIATE_MODULE_DELIVERY,
-            first_sale_commission_percent: effectiveDelivery.first_sale_commission_percent,
-            recurring_commission_percent: effectiveDelivery.recurring_commission_percent,
-          },
-        ],
-        /** Same global/module rules as Admin → Affiliate program → Commission & payout (program defaults). */
+        /** Per-module first / renewal % (affiliate_module_settings only; NULL column → 0%). */
         by_module: [
           {
             module_key: AFFILIATE_MODULE_PHONE,
@@ -263,7 +284,12 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
         phone_agent: `${base}/join/phone-agent/${partner.affiliate_code}`,
       },
       purchases,
-    });
+      linked_businesses,
+    };
+    if (attachCommissionDebugToResponse) {
+      mePayload.commission_selection_debug = commissionPolicyLog;
+    }
+    res.json(mePayload);
   } catch (e) {
     console.error("[affiliate-portal] me:", e);
     res.status(500).json({ error: "Failed to load dashboard" });

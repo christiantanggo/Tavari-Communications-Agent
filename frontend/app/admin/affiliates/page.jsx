@@ -58,8 +58,6 @@ export default function AdminAffiliatesPage() {
   const [eventDollars, setEventDollars] = useState('');
   const [eventBusy, setEventBusy] = useState(false);
   const [eventMsg, setEventMsg] = useState('');
-  const [rateInputs, setRateInputs] = useState({});
-  const [rateSavingId, setRateSavingId] = useState(null);
   const [purchasesModal, setPurchasesModal] = useState(null);
   const [resendBusyId, setResendBusyId] = useState(null);
   const [resendMsg, setResendMsg] = useState({});
@@ -134,48 +132,6 @@ export default function AdminAffiliatesPage() {
     setEventModuleKey('phone-agent');
     setEventDollars('');
     setEventModal({ partnerId, partnerName });
-  };
-
-  const savePartnerCommission = async (partnerId) => {
-    const raw = rateInputs[partnerId];
-    const n = parseFloat(raw != null ? raw : '');
-    if (Number.isNaN(n) || n < 0 || n > 100) {
-      setActionError('Commission must be between 0 and 100');
-      return;
-    }
-    setActionError('');
-    setRateSavingId(partnerId);
-    try {
-      const token = getAdminToken();
-      const res = await fetch(`${API_URL}/api/admin/affiliate-partners/${partnerId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ commission_rate_percent: n }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      const pct = data.partner?.commission_rate_percent;
-      setApplications((prev) =>
-        prev.map((app) => {
-          const p = pickPartner(app);
-          if (!p || p.id !== partnerId) return app;
-          const nextP = { ...p, commission_rate_percent: pct };
-          return { ...app, affiliate_partners: [nextP] };
-        }),
-      );
-      setRateInputs((s) => {
-        const next = { ...s };
-        delete next[partnerId];
-        return next;
-      });
-    } catch (e) {
-      setActionError(e.message || 'Failed to save rate');
-    } finally {
-      setRateSavingId(null);
-    }
   };
 
   const openPurchasesModal = async (partnerId, partnerName) => {
@@ -524,35 +480,17 @@ export default function AdminAffiliatesPage() {
                             <span className="block text-[10px] text-amber-700 mt-0.5">inactive</span>
                           )}
                           {partner?.id && partner.active && (
-                            <div className="mt-2 space-y-1">
-                              <label className="text-[10px] text-gray-500 uppercase tracking-wide">
-                                Commission %
-                              </label>
-                              <div className="flex gap-1 items-center flex-wrap">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  step={0.5}
-                                  className="w-14 border border-gray-300 rounded text-xs px-1 py-0.5"
-                                  value={
-                                    rateInputs[partner.id] ??
-                                    String(partner.commission_rate_percent ?? 15)
-                                  }
-                                  onChange={(e) =>
-                                    setRateInputs((s) => ({ ...s, [partner.id]: e.target.value }))
-                                  }
-                                />
-                                <button
-                                  type="button"
-                                  disabled={rateSavingId === partner.id}
-                                  onClick={() => savePartnerCommission(partner.id)}
-                                  className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-50"
-                                >
-                                  {rateSavingId === partner.id ? '…' : 'Save'}
-                                </button>
-                              </div>
-                            </div>
+                            <p className="mt-2 text-[10px] text-gray-600 leading-snug max-w-[11rem]">
+                              Commission % is set per module under{' '}
+                              <button
+                                type="button"
+                                onClick={() => goSection('commission')}
+                                className="text-blue-600 hover:underline font-medium"
+                              >
+                                Commission &amp; payout
+                              </button>
+                              .
+                            </p>
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm">

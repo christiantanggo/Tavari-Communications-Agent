@@ -59,6 +59,13 @@ export default function AppSiteFooter() {
           >
             Affiliate Program
           </Link>
+          <Link
+            href="/affiliate/dashboard"
+            className="hover:text-blue-600 transition-colors font-medium"
+            onClick={() => trackLinkClick('affiliate_login', '/affiliate/dashboard', 'footer')}
+          >
+            Affiliate Login
+          </Link>
         </nav>
       </div>
     </footer>

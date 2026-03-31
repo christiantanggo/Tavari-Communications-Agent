@@ -492,7 +492,7 @@ export class StripeService {
       const affRes = await recordAffiliateStripeCheckoutCompleted(sessionForAffiliate, businessId);
       if (affRes.recorded) {
         console.log("[StripeService] ✅ Affiliate earning recorded for checkout session");
-      } else if (affRes.reason && affRes.reason !== "no_code") {
+      } else if (affRes.reason && !["no_partner", "duplicate"].includes(affRes.reason)) {
         console.warn("[StripeService] Affiliate checkout not attributed:", affRes);
       }
     } catch (affErr) {
@@ -746,6 +746,8 @@ export class StripeService {
         const ren = await recordAffiliateStripeSubscriptionRenewal(invoice, subscription, businessId);
         if (ren.recorded) {
           console.log("[StripeService] ✅ Affiliate renewal conversion recorded");
+        } else if (ren.reason && !["no_partner", "duplicate", "not_renewal", "recurring_disabled"].includes(ren.reason)) {
+          console.warn("[StripeService] Affiliate renewal not attributed:", ren);
         }
       } catch (affErr) {
         console.warn("[StripeService] Affiliate renewal attribution skipped:", affErr?.message || affErr);

@@ -331,48 +331,72 @@ export function normalizeAffiliateCode(raw) {
 }
 
 /**
+ * Resolve partner for phone-agent Stripe events.
+ * Priority: affiliate_code on checkout session or embedded subscription metadata, then subscription metadata alone,
+ * then businesses.referred_by_partner_id (admin-assigned).
+ */
+export async function resolveAffiliatePartnerForPhoneAgentStripe(businessId, { session = null, subscription = null } = {}) {
+  let code = null;
+  if (session) {
+    code = normalizeAffiliateCode(session.metadata?.affiliate_code);
+    if (!code && session.subscription && typeof session.subscription === "object") {
+      code = normalizeAffiliateCode(session.subscription.metadata?.affiliate_code);
+    }
+  }
+  if (!code && subscription) {
+    code = normalizeAffiliateCode(subscription.metadata?.affiliate_code);
+  }
+
+  if (code) {
+    const { data: partner, error: pErr } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id")
+      .eq("affiliate_code", code)
+      .eq("active", true)
+      .maybeSingle();
+    if (pErr) throw pErr;
+    if (partner) return { partner, attributionSource: "stripe_metadata" };
+  }
+
+  if (businessId) {
+    const { Business } = await import("../models/Business.js");
+    const business = await Business.findById(businessId);
+    const refId = business?.referred_by_partner_id;
+    if (refId) {
+      const { data: partner, error: pErr } = await supabaseClient
+        .from("affiliate_partners")
+        .select("id")
+        .eq("id", refId)
+        .eq("active", true)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (partner) return { partner, attributionSource: "business_referral_assignment" };
+    }
+  }
+
+  return { partner: null, attributionSource: null };
+}
+
+/**
  * First subscription payment from Checkout — ledger row + refund hold + module rates.
  */
 export async function recordAffiliateStripeCheckoutCompleted(session, businessId) {
-  let code = normalizeAffiliateCode(session.metadata?.affiliate_code);
-  if (!code && session.subscription && typeof session.subscription === "object") {
-    code = normalizeAffiliateCode(session.subscription.metadata?.affiliate_code);
-  }
-  if (!code) return { recorded: false, reason: "no_code" };
-
-  const { data: partner, error: pErr } = await supabaseClient
-    .from("affiliate_partners")
-    .select("id, commission_rate_percent")
-    .eq("affiliate_code", code)
-    .eq("active", true)
-    .maybeSingle();
-
-  if (pErr) throw pErr;
-  if (!partner) return { recorded: false, reason: "invalid_partner" };
+  const { partner, attributionSource } = await resolveAffiliatePartnerForPhoneAgentStripe(businessId, { session });
+  if (!partner) return { recorded: false, reason: "no_partner" };
 
   const { recordAffiliateEarningStripeFirstSubscription } = await import("./affiliateEarnings.js");
-  return recordAffiliateEarningStripeFirstSubscription(session, businessId, partner);
+  return recordAffiliateEarningStripeFirstSubscription(session, businessId, partner, { attributionSource });
 }
 
 /**
  * Recurring subscription charge (not the initial checkout invoice).
  */
 export async function recordAffiliateStripeSubscriptionRenewal(invoice, subscription, businessId) {
-  const code = normalizeAffiliateCode(subscription?.metadata?.affiliate_code);
-  if (!code) return { recorded: false, reason: "no_code" };
-
-  const { data: partner, error: pErr } = await supabaseClient
-    .from("affiliate_partners")
-    .select("id, commission_rate_percent")
-    .eq("affiliate_code", code)
-    .eq("active", true)
-    .maybeSingle();
-
-  if (pErr) throw pErr;
-  if (!partner) return { recorded: false, reason: "invalid_partner" };
+  const { partner, attributionSource } = await resolveAffiliatePartnerForPhoneAgentStripe(businessId, { subscription });
+  if (!partner) return { recorded: false, reason: "no_partner" };
 
   const { recordAffiliateEarningStripeRenewal } = await import("./affiliateEarnings.js");
-  return recordAffiliateEarningStripeRenewal(invoice, subscription, businessId, partner);
+  return recordAffiliateEarningStripeRenewal(invoice, subscription, businessId, partner, { attributionSource });
 }
 
 export async function listPartnerEvents(partnerId, { limit = 100, eventType = null } = {}) {

@@ -58,8 +58,6 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
     const fd = new FormData(e.target);
     const limitMode = String(fd.get('recurring_limit_mode') || 'unlimited');
     const body = {
-      first_sale_commission_percent: parseFloat(fd.get('first_sale_commission_percent')),
-      recurring_commission_percent: parseFloat(fd.get('recurring_commission_percent')),
       payout_minimum_cents: Math.round(parseFloat(fd.get('payout_minimum_dollars')) * 100),
       refund_hold_days: Math.floor(parseInt(fd.get('refund_hold_days'), 10)),
       delivery_min_paid_sales_before_payout: Math.floor(
@@ -118,10 +116,20 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
     const body = {
       recurring_commission_enabled: fd.get('recurring_commission_enabled') === 'on',
     };
-    if (firstRaw === '') body.first_sale_commission_percent = null;
-    else body.first_sale_commission_percent = parseFloat(firstRaw);
-    if (recRaw === '') body.recurring_commission_percent = null;
-    else body.recurring_commission_percent = parseFloat(recRaw);
+    const firstN = parseFloat(firstRaw);
+    const recN = parseFloat(recRaw);
+    if (firstRaw === '' || Number.isNaN(firstN) || firstN < 0 || firstN > 100) {
+      setModuleMsg((m) => ({ ...m, [moduleKey]: 'First sale % must be a number from 0 to 100.' }));
+      setModuleBusy(null);
+      return;
+    }
+    if (recRaw === '' || Number.isNaN(recN) || recN < 0 || recN > 100) {
+      setModuleMsg((m) => ({ ...m, [moduleKey]: 'Recurring % must be a number from 0 to 100.' }));
+      setModuleBusy(null);
+      return;
+    }
+    body.first_sale_commission_percent = firstN;
+    body.recurring_commission_percent = recN;
     if (payoutRaw === '') body.payout_minimum_cents = null;
     else body.payout_minimum_cents = Math.round(parseFloat(payoutRaw) * 100);
     if (holdRaw === '') body.refund_hold_days = null;
@@ -202,9 +210,10 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Affiliate commission rules</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Global defaults apply to every module unless a module row overrides a field (empty override = inherit
-            global). Delivery uses a minimum number of paid checkouts per partner before delivery commissions can leave
-            the hold pipeline. Run migrations{' '}
+            Ledger commissions use the <strong>module</strong> on each sale (e.g. phone-agent vs delivery-dispatch):
+            first-payment % and renewal % come from that module&apos;s row below, or from global defaults when a field is
+            left empty. There is no separate per-partner commission percentage. Delivery uses a minimum number of paid
+            checkouts per partner before delivery commissions can leave the hold pipeline. Run migrations{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_commission_engine.sql</code> and{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_recurring_commission_limits.sql</code> if
             columns are missing.
@@ -219,7 +228,8 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-gray-900">Commission & payout rules</h2>
           <p className="mt-1 text-sm text-gray-600 max-w-3xl">
-            Global defaults apply unless a module overrides a field. Run{' '}
+            Set first and renewal commission % on each module. Global block is for payout/hold/duration defaults only.
+            Run{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_commission_engine.sql</code> and{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_recurring_commission_limits.sql</code> if
             API errors mention missing columns.
@@ -238,34 +248,12 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
           onSubmit={saveGlobal}
           className="bg-white rounded-xl shadow border border-gray-100 p-6 space-y-4 mb-8"
         >
-          <h2 className="text-lg font-semibold text-gray-900">Global defaults</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Global defaults (no commission %)</h2>
+          <p className="text-sm text-gray-600">
+            Payout minimum, refund hold, delivery gate, and default renewal limits. Commission rates are set only under
+            each module.
+          </p>
           <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">First sale commission (%)</label>
-              <input
-                name="first_sale_commission_percent"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                required
-                defaultValue={g.first_sale_commission_percent ?? 15}
-                className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Recurring commission (%)</label>
-              <input
-                name="recurring_commission_percent"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                required
-                defaultValue={g.recurring_commission_percent ?? 10}
-                className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              />
-            </div>
             <div className="sm:col-span-2 rounded-lg border border-violet-200 bg-violet-50/40 p-4">
               <label className="block text-sm font-semibold text-gray-900">Recurring commission duration</label>
               <p className="text-xs text-gray-600 mt-1 mb-3">
@@ -371,10 +359,10 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
       )}
 
       <div className="space-y-6">
-        <h2 className="text-lg font-semibold text-gray-900">Per-module overrides</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Per-module commission &amp; rules</h2>
         <p className="text-sm text-gray-600">
-          Leave a field empty to inherit from global. Check &quot;Recurring enabled&quot; for subscriptions (phone
-          module).
+          First and recurring % are required here (use 0 if intended). Other fields can be left empty to inherit global
+          defaults. Check &quot;Recurring enabled&quot; for subscription renewals (phone module).
         </p>
         {modules.map((m) => (
           <form
@@ -388,24 +376,28 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
             <h3 className="text-md font-semibold text-gray-900 font-mono">{m.module_key}</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">First sale % (override)</label>
+                <label className="block text-sm font-medium text-gray-700">First sale %</label>
                 <input
                   name="first_sale_commission_percent"
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="inherit"
-                  defaultValue={m.first_sale_commission_percent ?? ''}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  required
+                  defaultValue={m.first_sale_commission_percent ?? 0}
                   className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Recurring % (override)</label>
+                <label className="block text-sm font-medium text-gray-700">Recurring %</label>
                 <input
                   name="recurring_commission_percent"
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="inherit"
-                  defaultValue={m.recurring_commission_percent ?? ''}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  required
+                  defaultValue={m.recurring_commission_percent ?? 0}
                   className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>

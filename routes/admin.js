@@ -155,6 +155,227 @@ router.get("/accounts/:id", authenticateAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Assign or clear affiliate partner for this business (referred_by_partner_id).
+ * Future Stripe checkouts/renewals without affiliate_code in metadata will credit this partner.
+ * When assigning a partner for the first time (was unset), paid subscription invoices are backfilled
+ * into affiliate_earnings so the partner portal shows historical revenue. Optional body:
+ * sync_affiliate_ledger: true — run that backfill even when changing between partners or re-saving.
+ */
+router.patch("/accounts/:id/referred-by-partner", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const raw = req.body?.referred_by_partner_id;
+
+    const business = await Business.findById(id);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    const prevPartnerId = business.referred_by_partner_id || null;
+
+    let partnerId = null;
+    if (raw === null || raw === undefined || raw === "") {
+      partnerId = null;
+    } else if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        partnerId = null;
+      } else {
+        const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRe.test(trimmed)) {
+          return res.status(400).json({ error: "referred_by_partner_id must be a valid UUID or null" });
+        }
+        const { supabaseClient } = await import("../config/database.js");
+        const { data: p, error: pErr } = await supabaseClient
+          .from("affiliate_partners")
+          .select("id, affiliate_code, display_name, active")
+          .eq("id", trimmed)
+          .maybeSingle();
+        if (pErr) throw pErr;
+        if (!p) {
+          return res.status(400).json({ error: "Affiliate partner not found" });
+        }
+        partnerId = trimmed;
+      }
+    } else {
+      return res.status(400).json({ error: "referred_by_partner_id must be a string UUID or null" });
+    }
+
+    await Business.update(id, { referred_by_partner_id: partnerId });
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: id,
+        action: "business_referred_by_partner",
+        details: {
+          referred_by_partner_id: partnerId,
+          business_name: business.name,
+        },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    const updated = await Business.findById(id);
+
+    let affiliate_backfill = null;
+    const shouldBackfill =
+      Boolean(partnerId) &&
+      (req.body?.sync_affiliate_ledger === true || (partnerId && !prevPartnerId));
+    if (shouldBackfill) {
+      const { supabaseClient } = await import("../config/database.js");
+      const { data: prow, error: prowErr } = await supabaseClient
+        .from("affiliate_partners")
+        .select("id")
+        .eq("id", partnerId)
+        .eq("active", true)
+        .maybeSingle();
+      if (prowErr) throw prowErr;
+      if (prow) {
+        const { backfillPhoneAgentAffiliateEarningsFromInvoices } = await import("../services/affiliateEarnings.js");
+        affiliate_backfill = await backfillPhoneAgentAffiliateEarningsFromInvoices(id, prow);
+      }
+    }
+
+    res.json({ success: true, business: updated, affiliate_backfill });
+  } catch (error) {
+    console.error("Patch referred-by-partner error:", error);
+    res.status(500).json({ error: error.message || "Failed to update affiliate assignment" });
+  }
+});
+
+/** Idempotent: add missing affiliate_earnings from paid subscription invoices for current referred_by_partner_id. */
+router.post("/accounts/:id/sync-affiliate-ledger", authenticateAdmin, async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+    const refId = business.referred_by_partner_id;
+    if (!refId) {
+      return res.status(400).json({ error: "Assign an affiliate partner first (referred_by_partner_id is empty)." });
+    }
+    const { supabaseClient } = await import("../config/database.js");
+    const { data: prow, error: prowErr } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id")
+      .eq("id", refId)
+      .eq("active", true)
+      .maybeSingle();
+    if (prowErr) throw prowErr;
+    if (!prow) {
+      return res.status(400).json({ error: "Partner not found or inactive." });
+    }
+    const { backfillPhoneAgentAffiliateEarningsFromInvoices } = await import("../services/affiliateEarnings.js");
+    const affiliate_backfill = await backfillPhoneAgentAffiliateEarningsFromInvoices(business.id, prow);
+    res.json({ success: true, affiliate_backfill });
+  } catch (error) {
+    console.error("sync-affiliate-ledger error:", error);
+    res.status(500).json({ error: error.message || "Failed to sync affiliate ledger" });
+  }
+});
+
+/**
+ * Record a corrective manual sale (gross amount in cents or dollars) for a partner on this account.
+ * Creates affiliate_earnings (manual) + conversion event; commission follows first-sale rules for the module.
+ */
+router.post("/accounts/:id/manual-affiliate-sale", authenticateAdmin, async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+
+    const rawPartner = req.body?.partner_id;
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!rawPartner || typeof rawPartner !== "string" || !uuidRe.test(rawPartner.trim())) {
+      return res.status(400).json({ error: "partner_id must be a valid UUID" });
+    }
+    const partnerId = rawPartner.trim();
+
+    let grossCents;
+    if (req.body?.amount_cents != null && req.body.amount_cents !== "") {
+      grossCents = Math.round(Number(req.body.amount_cents));
+      if (Number.isNaN(grossCents) || grossCents <= 0) {
+        return res.status(400).json({ error: "amount_cents must be a positive integer" });
+      }
+    } else if (req.body?.gross_amount_dollars != null && req.body.gross_amount_dollars !== "") {
+      const d = Number(req.body.gross_amount_dollars);
+      if (Number.isNaN(d) || d <= 0) {
+        return res.status(400).json({ error: "gross_amount_dollars must be a positive number" });
+      }
+      grossCents = Math.round(d * 100);
+    } else {
+      return res.status(400).json({
+        error: "Provide amount_cents or gross_amount_dollars (gross customer payment before commission)",
+      });
+    }
+
+    const moduleKeyRaw = String(req.body?.module_key || "phone-agent").trim() || "phone-agent";
+    const note = req.body?.note != null ? String(req.body.note) : null;
+
+    const { supabaseClient } = await import("../config/database.js");
+    const { data: partner, error: pErr } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id, active")
+      .eq("id", partnerId)
+      .maybeSingle();
+    if (pErr) throw pErr;
+    if (!partner) {
+      return res.status(400).json({ error: "Affiliate partner not found" });
+    }
+    if (!partner.active) {
+      return res.status(400).json({ error: "Affiliate partner is inactive" });
+    }
+
+    const { recordManualAffiliateConversionLedger } = await import("../services/affiliateEarnings.js");
+    let result;
+    try {
+      result = await recordManualAffiliateConversionLedger({
+        partnerId: partner.id,
+        grossAmountCents: grossCents,
+        moduleKey: moduleKeyRaw,
+        businessId: business.id,
+        note,
+        metadataExtra: { corrective_sale: true, account_manual_entry: true },
+        eventMetadataExtra: { corrective_sale: true, account_manual_entry: true },
+      });
+    } catch (e) {
+      if (e.code === "INVALID_AMOUNT") {
+        return res.status(400).json({ error: e.message });
+      }
+      throw e;
+    }
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        business_id: business.id,
+        action: "affiliate_manual_sale_account",
+        details: {
+          partner_id: partnerId,
+          amount_cents: grossCents,
+          module_key: moduleKeyRaw,
+          affiliate_earning_id: result.earningId,
+        },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({
+      success: true,
+      earning_id: result.earningId,
+      event: result.event,
+    });
+  } catch (error) {
+    console.error("manual-affiliate-sale error:", error);
+    res.status(500).json({ error: error.message || "Failed to record manual affiliate sale" });
+  }
+});
+
 // Cancel account: stop all Stripe charges and mark account inactive
 router.post("/accounts/:id/cancel", authenticateAdmin, async (req, res) => {
   try {
@@ -1122,7 +1343,7 @@ router.get("/affiliate-applications", authenticateAdmin, async (req, res) => {
     const { supabaseClient } = await import("../config/database.js");
     let query = supabaseClient
       .from("affiliate_applications")
-      .select("*, affiliate_partners(id, affiliate_code, active, commission_rate_percent)")
+      .select("*, affiliate_partners(id, affiliate_code, active)")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -1210,7 +1431,7 @@ router.patch("/affiliate-applications/:id", authenticateAdmin, async (req, res) 
 
     const { data: refreshed } = await supabaseClient
       .from("affiliate_applications")
-      .select("*, affiliate_partners(id, affiliate_code, active, commission_rate_percent)")
+      .select("*, affiliate_partners(id, affiliate_code, active)")
       .eq("id", id)
       .maybeSingle();
 
@@ -1273,19 +1494,10 @@ router.patch("/affiliate-commission-settings/global", authenticateAdmin, async (
   try {
     const b = req.body || {};
     const patch = {};
-    if (b.first_sale_commission_percent !== undefined) {
-      const n = Number(b.first_sale_commission_percent);
-      if (Number.isNaN(n) || n < 0 || n > 100) {
-        return res.status(400).json({ error: "first_sale_commission_percent must be 0–100" });
-      }
-      patch.first_sale_commission_percent = Math.round(n * 100) / 100;
-    }
-    if (b.recurring_commission_percent !== undefined) {
-      const n = Number(b.recurring_commission_percent);
-      if (Number.isNaN(n) || n < 0 || n > 100) {
-        return res.status(400).json({ error: "recurring_commission_percent must be 0–100" });
-      }
-      patch.recurring_commission_percent = Math.round(n * 100) / 100;
+    if (b.first_sale_commission_percent !== undefined || b.recurring_commission_percent !== undefined) {
+      return res.status(400).json({
+        error: "Global commission % is removed. Set first and recurring % on each module (Affiliate commission → per module).",
+      });
     }
     if (b.payout_minimum_cents !== undefined) {
       const n = Math.round(Number(b.payout_minimum_cents));
@@ -1523,7 +1735,7 @@ router.get("/affiliate-partners", authenticateAdmin, async (req, res) => {
     const { supabaseClient } = await import("../config/database.js");
     const { data, error } = await supabaseClient
       .from("affiliate_partners")
-      .select("id, application_id, affiliate_code, email, display_name, commission_rate_percent, active, created_at")
+      .select("id, application_id, affiliate_code, email, display_name, active, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
 
@@ -1561,53 +1773,6 @@ router.get("/affiliate-partners/:id/events", authenticateAdmin, async (req, res)
   }
 });
 
-router.patch("/affiliate-partners/:id", authenticateAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const raw = req.body?.commission_rate_percent;
-    if (raw == null) {
-      return res.status(400).json({ error: "commission_rate_percent is required" });
-    }
-    const n = Number(raw);
-    if (Number.isNaN(n) || n < 0 || n > 100) {
-      return res.status(400).json({ error: "commission_rate_percent must be between 0 and 100" });
-    }
-
-    const { supabaseClient } = await import("../config/database.js");
-    const { data, error } = await supabaseClient
-      .from("affiliate_partners")
-      .update({
-        commission_rate_percent: Math.round(n * 100) / 100,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id)
-      .select(
-        "id, application_id, affiliate_code, email, display_name, commission_rate_percent, active, created_at",
-      )
-      .single();
-
-    if (error) throw error;
-    if (!data) {
-      return res.status(404).json({ error: "Partner not found" });
-    }
-
-    try {
-      await AdminActivityLog.create({
-        admin_user_id: req.adminId,
-        action: "affiliate_partner_update",
-        details: { partner_id: id, commission_rate_percent: data.commission_rate_percent },
-      });
-    } catch (_) {
-      /* non-blocking */
-    }
-
-    res.json({ partner: data });
-  } catch (error) {
-    console.error("Patch affiliate partner error:", error);
-    res.status(500).json({ error: "Failed to update partner" });
-  }
-});
-
 router.post("/affiliate-partners/:id/events", authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1625,7 +1790,7 @@ router.post("/affiliate-partners/:id/events", authenticateAdmin, async (req, res
     const { supabaseClient } = await import("../config/database.js");
     const { data: partner, error: pErr } = await supabaseClient
       .from("affiliate_partners")
-      .select("id, commission_rate_percent")
+      .select("id")
       .eq("id", id)
       .single();
 
@@ -1633,60 +1798,56 @@ router.post("/affiliate-partners/:id/events", authenticateAdmin, async (req, res
       return res.status(404).json({ error: "Partner not found" });
     }
 
-    if (event_type === "conversion" && (amount_cents == null || Number.isNaN(amount_cents) || amount_cents < 0)) {
-      return res.status(400).json({ error: "conversion requires amount_cents (integer >= 0)" });
+    if (event_type === "conversion" && (amount_cents == null || Number.isNaN(amount_cents) || amount_cents <= 0)) {
+      return res.status(400).json({ error: "conversion requires amount_cents (positive integer, cents)" });
     }
 
     const moduleKeyRaw = String(req.body?.module_key || "phone-agent").trim() || "phone-agent";
+    const uuidReBiz = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+    let row;
     let earningId = null;
+    let businessIdForLog = null;
+
     if (event_type === "conversion") {
-      const { createManualAffiliateEarning } = await import("../services/affiliateEarnings.js");
-      earningId = await createManualAffiliateEarning(
-        partner.id,
-        Math.round(amount_cents),
-        partner.commission_rate_percent,
-        { source: "manual_admin" },
-        moduleKeyRaw,
-      );
-    }
-
-    const { data: row, error: insErr } = await supabaseClient
-      .from("affiliate_events")
-      .insert({
-        partner_id: partner.id,
-        event_type,
-        amount_cents: event_type === "conversion" ? Math.round(amount_cents) : null,
-        metadata: {
-          ...metadata,
-          ...(event_type === "conversion"
-            ? { module_key: moduleKeyRaw, affiliate_earning_id: earningId }
-            : {}),
-        },
-      })
-      .select()
-      .single();
-
-    if (insErr) {
-      if (earningId) {
-        await supabaseClient.from("affiliate_earnings").delete().eq("id", earningId);
+      const { recordManualAffiliateConversionLedger } = await import("../services/affiliateEarnings.js");
+      const rawBiz = req.body?.business_id;
+      let businessId = null;
+      if (rawBiz && typeof rawBiz === "string" && uuidReBiz.test(rawBiz.trim())) {
+        businessId = rawBiz.trim();
+        businessIdForLog = businessId;
       }
-      throw insErr;
-    }
-
-    if (event_type === "conversion" && earningId && row?.id) {
-      const { data: er } = await supabaseClient
-        .from("affiliate_earnings")
-        .select("metadata")
-        .eq("id", earningId)
-        .maybeSingle();
-      const prevMeta = er && typeof er.metadata === "object" ? er.metadata : {};
-      await supabaseClient
-        .from("affiliate_earnings")
-        .update({
-          metadata: { ...prevMeta, affiliate_event_id: row.id },
+      try {
+        const result = await recordManualAffiliateConversionLedger({
+          partnerId: partner.id,
+          grossAmountCents: Math.round(amount_cents),
+          moduleKey: moduleKeyRaw,
+          businessId,
+          note: req.body?.note,
+          metadataExtra: metadata,
+          eventMetadataExtra: metadata,
+        });
+        earningId = result.earningId;
+        row = result.event;
+      } catch (e) {
+        if (e.code === "INVALID_AMOUNT") {
+          return res.status(400).json({ error: e.message });
+        }
+        throw e;
+      }
+    } else {
+      const { data: inserted, error: insErr } = await supabaseClient
+        .from("affiliate_events")
+        .insert({
+          partner_id: partner.id,
+          event_type,
+          amount_cents: null,
+          metadata: { ...metadata },
         })
-        .eq("id", earningId);
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      row = inserted;
     }
 
     try {
@@ -1697,6 +1858,7 @@ router.post("/affiliate-partners/:id/events", authenticateAdmin, async (req, res
           partner_id: id,
           event_type,
           amount_cents,
+          ...(businessIdForLog ? { business_id: businessIdForLog } : {}),
           ...(event_type === "conversion" ? { module_key: moduleKeyRaw, affiliate_earning_id: earningId } : {}),
         },
       });

@@ -41,6 +41,12 @@ export default function AffiliateDashboardPage() {
         if (res.status === 401) clearAffiliateToken();
         throw new Error(json.error || 'Session expired');
       }
+      if (json.commission_selection_debug && typeof console !== 'undefined' && console.log) {
+        console.log(
+          '[affiliate /me] commission_selection_debug (see API terminal too if NEXT_PUBLIC_API_URL points at local backend)',
+          json.commission_selection_debug,
+        );
+      }
       setData(json);
     } catch (e) {
       setError(e.message || 'Could not load dashboard');
@@ -86,6 +92,7 @@ export default function AffiliateDashboardPage() {
   }
 
   const purchases = data?.purchases || [];
+  const linkedBusinesses = data?.linked_businesses || [];
   const earningsSummary = data?.earnings_summary;
   const commissionPolicy = data?.commission_policy;
 
@@ -135,7 +142,19 @@ export default function AffiliateDashboardPage() {
     join_urls: joinUrls,
   } = data;
 
+  const activeLedgerPurchases = purchases.filter((p) => p.status !== 'reversed');
+  const allPurchasesReversed =
+    purchases.length > 0 && activeLedgerPurchases.length === 0;
+  const noLedgerButLinked =
+    linkedBusinesses.length > 0 &&
+    (stats?.attributed_sales ?? 0) === 0 &&
+    (stats?.gross_sales_cents ?? 0) === 0;
+
   const formatLedgerSource = (p) => {
+    if (p.attribution_source === 'business_referral_assignment') {
+      if (p.source === 'stripe_subscription_renewal') return 'Stripe renewal (account assignment)';
+      if (p.source === 'stripe_checkout') return 'Stripe first payment (account assignment)';
+    }
     if (p.source === 'stripe_checkout') return 'Stripe (first payment)';
     if (p.source === 'stripe_subscription_renewal') return 'Stripe (renewal)';
     if (p.source === 'stripe_delivery_checkout') return 'Stripe (delivery)';
@@ -166,22 +185,6 @@ export default function AffiliateDashboardPage() {
     return null;
   };
 
-  /** True when ledger uses different % than program (partner-level deal in admin). */
-  const ledgerRatesDifferFromProgram = (policy) => {
-    if (!policy?.by_module || !Array.isArray(policy.effective_by_module)) return false;
-    for (const p of policy.by_module) {
-      const e = policy.effective_by_module.find((x) => x.module_key === p.module_key);
-      if (!e) continue;
-      const pf = Number(p.first_sale_commission_percent);
-      const pr = Number(p.recurring_commission_percent);
-      const ef = Number(e.first_sale_commission_percent);
-      const er = Number(e.recurring_commission_percent);
-      if (Number.isFinite(pf) && Number.isFinite(ef) && Math.abs(pf - ef) > 0.01) return true;
-      if (Number.isFinite(pr) && Number.isFinite(er) && Math.abs(pr - er) > 0.01) return true;
-    }
-    return false;
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="max-w-2xl mx-auto">
@@ -202,6 +205,42 @@ export default function AffiliateDashboardPage() {
 
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 text-red-800 text-sm px-4 py-2">{error}</div>
+        )}
+
+        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <p className="font-medium text-slate-900">How the numbers work</p>
+          <ul className="mt-2 list-disc pl-5 space-y-1 text-slate-600">
+            <li>
+              <strong>Gross sales (ledger)</strong> and <strong>Attributed sales</strong> come from your{' '}
+              <strong>commission ledger</strong> only — created when Stripe confirms a payment we attribute to you (or
+              when staff records a manual sale).
+            </li>
+            <li>
+              <strong>Customers assigned to you</strong> only sets who gets credit on <strong>future</strong> checkouts
+              and renewals when checkout metadata has no other affiliate code. It does <strong>not</strong> import older
+              charges.
+            </li>
+            <li>
+              <strong>Event conversions</strong> / <strong>Event revenue</strong> count separate tracking events, not the
+              ledger — often zero unless those events were posted.
+            </li>
+          </ul>
+        </div>
+
+        {noLedgerButLinked && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            You have linked customers but <strong>no ledger sales yet</strong>. The payment you are thinking of was
+            probably processed before the link existed or before our system could attribute it. The next subscription
+            renewal or new checkout (with no other affiliate code in Stripe) should add a row here and update the top
+            totals. To credit a past payment now, Tavari staff can record it under Admin → Affiliates.
+          </div>
+        )}
+
+        {allPurchasesReversed && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            Your ledger only shows <strong>reversed</strong> rows (e.g. refunds). The top cards intentionally exclude
+            those, so gross can show <strong>$0.00</strong> even though the table lists old amounts.
+          </div>
         )}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8 items-stretch">
@@ -314,33 +353,10 @@ export default function AffiliateDashboardPage() {
               </li>
             </ul>
 
-            {ledgerRatesDifferFromProgram(commissionPolicy) &&
-              Array.isArray(commissionPolicy.effective_by_module) &&
-              commissionPolicy.effective_by_module.length > 0 && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3">
-                  <p className="text-sm font-semibold text-amber-950">Custom rate on your account</p>
-                  <p className="text-sm text-amber-950/90 mt-1">
-                    Tavari set a different percentage on your partner record. Your ledger and payouts use these
-                    effective rates (not the program % in each box above):
-                  </p>
-                  <ul className="mt-2 text-sm text-amber-950 space-y-1 list-disc pl-5">
-                    {commissionPolicy.effective_by_module.map((e) => (
-                      <li key={e.module_key}>
-                        <span className="font-medium">{moduleLabel(e.module_key)}:</span> first payment{' '}
-                        <strong>{Number(e.first_sale_commission_percent)}%</strong>, renewals{' '}
-                        <strong>{Number(e.recurring_commission_percent)}%</strong>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-            {!ledgerRatesDifferFromProgram(commissionPolicy) && (
-              <p className="text-xs text-gray-600 border-t border-gray-100 pt-3">
-                Your commissions are calculated with the program percentages above (no separate override on your
-                partner account).
-              </p>
-            )}
+            <p className="text-xs text-gray-600 border-t border-gray-100 pt-3">
+              Commission on each ledger row was computed from the module rules in effect when that payment was
+              recorded (and the module on that row, e.g. phone agent vs delivery).
+            </p>
           </div>
         )}
 
@@ -377,6 +393,40 @@ export default function AffiliateDashboardPage() {
             </div>
           ) : null}
         </div>
+
+        {linkedBusinesses.length > 0 && (
+          <div className="mt-8 bg-white rounded-xl shadow overflow-hidden border border-slate-100">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Customers assigned to you</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Tavari linked these accounts to your partner record. Future subscription payments will credit you when
+                checkout does not carry a different affiliate code. Use this list to match customers you referred.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase">
+                  <tr>
+                    <th className="px-4 py-2">Business</th>
+                    <th className="px-4 py-2">Email</th>
+                    <th className="px-4 py-2">Since</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {linkedBusinesses.map((b) => (
+                    <tr key={b.id}>
+                      <td className="px-4 py-2 font-medium text-gray-900">{b.name || '—'}</td>
+                      <td className="px-4 py-2 text-gray-700">{b.email || '—'}</td>
+                      <td className="px-4 py-2 text-gray-600 whitespace-nowrap">
+                        {b.created_at ? new Date(b.created_at).toLocaleDateString() : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {purchases.length > 0 && (
           <div className="mt-8 bg-white rounded-xl shadow overflow-hidden">

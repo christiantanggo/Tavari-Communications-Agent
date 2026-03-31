@@ -35,7 +35,14 @@ function AdminAccountDetailPage() {
   const [rebuildingAssistant, setRebuildingAssistant] = useState(false);
   const [agentData, setAgentData] = useState(null);
   const [savingAgent, setSavingAgent] = useState(false);
-  
+  const [affiliatePartners, setAffiliatePartners] = useState([]);
+  const [referredPartnerDraft, setReferredPartnerDraft] = useState('');
+  const [affiliateReferralSaving, setAffiliateReferralSaving] = useState(false);
+  const [affiliateLedgerSyncing, setAffiliateLedgerSyncing] = useState(false);
+  const [manualAffiliateGross, setManualAffiliateGross] = useState('');
+  const [manualAffiliateNote, setManualAffiliateNote] = useState('');
+  const [manualAffiliateSaleSaving, setManualAffiliateSaleSaving] = useState(false);
+
   // Agent editing state
   const [editingFAQs, setEditingFAQs] = useState([]);
   const [editingBusinessHours, setEditingBusinessHours] = useState({});
@@ -68,11 +75,22 @@ function AdminAccountDetailPage() {
       
       if (accountRes.ok) {
         const accountData = await accountRes.json();
-        setAccount(accountData.business);
-        setBonusMinutes(accountData.business.bonus_minutes || '');
-        setCustomMonthly(accountData.business.custom_pricing_monthly || '');
-        setCustomOverage(accountData.business.custom_pricing_overage || '');
+        const biz = accountData.business;
+        setAccount(biz);
+        setBonusMinutes(biz.bonus_minutes || '');
+        setCustomMonthly(biz.custom_pricing_monthly || '');
+        setCustomOverage(biz.custom_pricing_overage || '');
+        setReferredPartnerDraft(biz.referred_by_partner_id || '');
         await loadBusinessPhoneNumbers(); // Load phone numbers after account loads
+        try {
+          const pr = await fetch(`${API_URL}/api/admin/affiliate-partners`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const pd = await pr.json().catch(() => ({}));
+          if (pr.ok) setAffiliatePartners(pd.partners || []);
+        } catch {
+          /* non-blocking */
+        }
       }
       
       if (usageRes && usageRes.ok) {
@@ -242,6 +260,109 @@ function AdminAccountDetailPage() {
       showError('Failed to rebuild assistant');
     } finally {
       setRebuildingAssistant(false);
+    }
+  };
+
+  const saveAffiliateReferral = async () => {
+    if (!accountId) return;
+    setAffiliateReferralSaving(true);
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`${API_URL}/api/admin/accounts/${accountId}/referred-by-partner`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          referred_by_partner_id: referredPartnerDraft ? referredPartnerDraft : null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setAccount(data.business);
+      setReferredPartnerDraft(data.business.referred_by_partner_id || '');
+      const bf = data.affiliate_backfill;
+      if (bf && typeof bf.inserted === 'number' && bf.inserted > 0) {
+        success(`Affiliate assignment saved. Partner ledger: added ${bf.inserted} commission row(s) from past billing.`);
+      } else {
+        success('Affiliate assignment saved.');
+      }
+    } catch (e) {
+      showError(e.message || 'Failed to save affiliate assignment');
+    } finally {
+      setAffiliateReferralSaving(false);
+    }
+  };
+
+  const syncAffiliateLedgerFromBilling = async () => {
+    if (!accountId) return;
+    setAffiliateLedgerSyncing(true);
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`${API_URL}/api/admin/accounts/${accountId}/sync-affiliate-ledger`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const bf = data.affiliate_backfill;
+      if (bf && typeof bf.inserted === 'number') {
+        success(
+          bf.inserted > 0
+            ? `Synced partner ledger: added ${bf.inserted} row(s) (${bf.skipped || 0} already attributed or skipped).`
+            : `Ledger is up to date (${bf.skipped || 0} invoice(s) skipped — already credited or not eligible).`,
+        );
+      } else {
+        success('Partner ledger sync completed.');
+      }
+    } catch (e) {
+      showError(e.message || 'Failed to sync affiliate ledger');
+    } finally {
+      setAffiliateLedgerSyncing(false);
+    }
+  };
+
+  const submitManualAffiliateSale = async () => {
+    if (!accountId) return;
+    if (!referredPartnerDraft) {
+      showError('Select the partner to credit in the dropdown above.');
+      return;
+    }
+    const gross = parseFloat(String(manualAffiliateGross).replace(/[^0-9.]/g, ''));
+    if (Number.isNaN(gross) || gross <= 0) {
+      showError('Enter a positive gross sale amount in CAD (what the customer paid, before commission).');
+      return;
+    }
+    setManualAffiliateSaleSaving(true);
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`${API_URL}/api/admin/accounts/${accountId}/manual-affiliate-sale`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          partner_id: referredPartnerDraft,
+          gross_amount_dollars: gross,
+          ...(manualAffiliateNote.trim() ? { note: manualAffiliateNote.trim() } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setManualAffiliateGross('');
+      setManualAffiliateNote('');
+      success(
+        'Manual sale recorded. The partner ledger includes this commission (subject to the usual refund hold and payout rules).',
+      );
+    } catch (e) {
+      showError(e.message || 'Failed to record manual sale');
+    } finally {
+      setManualAffiliateSaleSaving(false);
     }
   };
 
@@ -528,6 +649,104 @@ function AdminAccountDetailPage() {
             <div className="p-6">
               {activeTab === 'details' && (
                 <div className="space-y-4">
+                  <div className="rounded-lg border-2 border-indigo-400 bg-indigo-50 p-4">
+                    <h3 className="text-base font-bold text-indigo-950">Affiliate partner — assign this customer</h3>
+                    <p className="mt-1 text-sm text-indigo-900">
+                      Credits this account to a partner when Stripe checkout has no affiliate code. A tracking link on
+                      checkout still overrides this. The first time you assign a partner, paid subscription invoices we
+                      already stored are copied into the partner&apos;s commission ledger so their dashboard shows
+                      revenue. Use &quot;Sync ledger&quot; if you assigned the partner earlier and amounts are still
+                      missing.
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <select
+                        value={referredPartnerDraft}
+                        onChange={(e) => setReferredPartnerDraft(e.target.value)}
+                        className="border-2 border-indigo-300 rounded-md px-3 py-2 text-sm min-w-[280px] max-w-full bg-white text-gray-900"
+                        aria-label="Affiliate partner"
+                      >
+                        <option value="">— No affiliate —</option>
+                        {affiliatePartners.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {(p.display_name || p.email || p.affiliate_code) + ` (${p.affiliate_code})`}
+                            {!p.active ? ' [inactive]' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={saveAffiliateReferral}
+                        disabled={affiliateReferralSaving}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 text-sm font-semibold"
+                      >
+                        {affiliateReferralSaving ? 'Saving…' : 'Save assignment'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={syncAffiliateLedgerFromBilling}
+                        disabled={affiliateLedgerSyncing || !referredPartnerDraft}
+                        title="Adds missing commission rows from paid subscription invoices (idempotent)"
+                        className="px-4 py-2 border-2 border-indigo-600 text-indigo-800 rounded-md hover:bg-indigo-100 disabled:opacity-50 text-sm font-semibold"
+                      >
+                        {affiliateLedgerSyncing ? 'Syncing…' : 'Sync ledger from billing'}
+                      </button>
+                    </div>
+                    {affiliatePartners.length === 0 && (
+                      <p className="mt-3 text-sm text-amber-900 font-medium">
+                        Dropdown empty: approve a partner under{' '}
+                        <Link href="/admin/affiliates" className="underline">
+                          Admin → Affiliates
+                        </Link>{' '}
+                        then refresh this page.
+                      </p>
+                    )}
+                    <div className="mt-6 pt-4 border-t border-indigo-200">
+                      <h4 className="text-sm font-bold text-indigo-950">Manual sale (payout correction)</h4>
+                      <p className="mt-1 text-xs text-indigo-900">
+                        When Stripe or sync missed attribution, record the customer&apos;s gross payment (CAD). The
+                        selected partner receives commission using their rate and phone-agent first-sale rules; refund
+                        hold and payout minimums still apply.
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-end gap-3">
+                        <div>
+                          <label htmlFor="manual-affiliate-gross" className="block text-xs font-medium text-indigo-900 mb-1">
+                            Gross sale (CAD)
+                          </label>
+                          <input
+                            id="manual-affiliate-gross"
+                            type="text"
+                            inputMode="decimal"
+                            value={manualAffiliateGross}
+                            onChange={(e) => setManualAffiliateGross(e.target.value)}
+                            placeholder="e.g. 99.00"
+                            className="border-2 border-indigo-300 rounded-md px-3 py-2 text-sm w-36 bg-white text-gray-900"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-[200px]">
+                          <label htmlFor="manual-affiliate-note" className="block text-xs font-medium text-indigo-900 mb-1">
+                            Note (optional)
+                          </label>
+                          <input
+                            id="manual-affiliate-note"
+                            type="text"
+                            value={manualAffiliateNote}
+                            onChange={(e) => setManualAffiliateNote(e.target.value)}
+                            placeholder="Ticket # or reason"
+                            className="border-2 border-indigo-300 rounded-md px-3 py-2 text-sm w-full max-w-md bg-white text-gray-900"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={submitManualAffiliateSale}
+                          disabled={manualAffiliateSaleSaving || !referredPartnerDraft}
+                          className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 text-sm font-semibold"
+                        >
+                          {manualAffiliateSaleSaving ? 'Recording…' : 'Record manual sale'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Business Name</label>
