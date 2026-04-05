@@ -75,7 +75,13 @@ async function generatePDFInvoice(invoice, business) {
     // Header - use company name from invoice settings
     const companyName = invoiceSettings?.company_name || "Tavari";
     doc.fontSize(20).text(companyName, 50, 50);
-    doc.fontSize(12).text("AI Phone Receptionist", 50, 75);
+    const productLine =
+      invoice.module_key === "reviews"
+        ? "Review Reply"
+        : invoice.module_key === "delivery-dispatch"
+          ? "Delivery Dispatch"
+          : "AI Phone Receptionist";
+    doc.fontSize(12).text(productLine, 50, 75);
     
     // Company address and info (if available)
     let headerY = 100;
@@ -231,6 +237,8 @@ export async function generateInvoice(businessId, invoiceData) {
     prorated_days: invoiceData.prorated_days || null,
     status: "paid",
     paid_at: new Date().toISOString(),
+    module_key: invoiceData.module_key ?? null,
+    package_id: invoiceData.package_id ?? null,
   };
 
   // Generate PDF
@@ -280,6 +288,34 @@ export async function getInvoiceById(invoiceId) {
   }
 
   return data;
+}
+
+/**
+ * After a minimal DB row is created (e.g. Stripe webhook), generate PDF, upload to S3 when configured, set pdf_url.
+ */
+export async function finalizeInvoicePdfAndStorage(invoiceId) {
+  const invoice = await getInvoiceById(invoiceId);
+  if (invoice.pdf_url) return invoice;
+  const business = await Business.findById(invoice.business_id);
+  if (!business) {
+    throw new Error("Business not found");
+  }
+  const pdfBuffer = await generatePDFInvoice(invoice, business);
+  const storageInfo = await storePDFInS3(pdfBuffer, invoice.invoice_number);
+  if (storageInfo) {
+    const { error } = await supabaseClient
+      .from("invoices")
+      .update({
+        pdf_url: storageInfo.url,
+        pdf_storage_path: storageInfo.path,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", invoiceId);
+    if (error) {
+      console.error("[Invoices] Failed to update invoice PDF fields:", error.message);
+    }
+  }
+  return getInvoiceById(invoiceId);
 }
 
 /**

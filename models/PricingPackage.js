@@ -91,7 +91,7 @@ export class PricingPackage {
   }
 
   static async findAll(options = {}) {
-    const { includeInactive = false, includePrivate = false, moduleKey = null } = options;
+    const { includeInactive = false, includePrivate = false, moduleKey = null, excludeClickbank = false } = options;
     
     let query = supabaseClient
       .from('pricing_packages')
@@ -115,7 +115,7 @@ export class PricingPackage {
     if (error) throw error;
     
     // Add sale status to each package
-    const packages = (data || []).map(pkg => {
+    let packages = (data || []).map(pkg => {
       const isOnSale = PricingPackage.isSaleActive(pkg);
       const saleAvailable = PricingPackage.isSaleAvailable(pkg);
       return {
@@ -124,7 +124,11 @@ export class PricingPackage {
         saleAvailable,
       };
     });
-    
+
+    if (excludeClickbank) {
+      packages = packages.filter((p) => !p.is_clickbank_package);
+    }
+
     return packages;
   }
 

@@ -44,6 +44,84 @@ export function normalizeAffiliateCodeParam(raw) {
   return code;
 }
 
+/** Query keys treated as partner / affiliate code on signup and landings. */
+const SIGNUP_REF_QUERY_KEYS = ['partner', 'affiliate_code', 'affiliate', 'ref', 'referral_code'];
+
+/**
+ * Parse a valid affiliate code from a query string (e.g. `window.location.search`).
+ * URL wins over cookie when both are present via {@link resolveAffiliateCodeForSignup}.
+ */
+export function parseAffiliateRefFromSearch(search) {
+  if (search == null || search === '') return null;
+  const raw = String(search).trim();
+  const qs = raw.startsWith('?') ? raw : `?${raw}`;
+  let sp;
+  try {
+    sp = new URLSearchParams(qs);
+  } catch {
+    return null;
+  }
+  for (const key of SIGNUP_REF_QUERY_KEYS) {
+    const v = sp.get(key);
+    const n = normalizeAffiliateCodeParam(v);
+    if (n) return n;
+  }
+  return null;
+}
+
+/**
+ * Read `tavari_affiliate_ref` from a `document.cookie`-style string.
+ */
+export function parseAffiliateRefFromCookieString(cookieStr) {
+  if (!cookieStr || typeof cookieStr !== 'string') return null;
+  const parts = cookieStr.split(';');
+  for (const p of parts) {
+    const t = p.trim();
+    if (!t.startsWith(`${AFFILIATE_REF_COOKIE}=`)) continue;
+    const raw = decodeURIComponent(t.slice(AFFILIATE_REF_COOKIE.length + 1).trim());
+    return normalizeAffiliateCodeParam(raw);
+  }
+  return null;
+}
+
+/**
+ * Resolve code for signup: explicit prop (e.g. join funnel path) → URL params → `tavari_affiliate_ref` cookie.
+ */
+export function resolveAffiliateCodeForSignup(options = {}) {
+  const e = normalizeAffiliateCodeParam(options.explicit);
+  if (e) return e;
+  const search =
+    options.search !== undefined
+      ? options.search
+      : typeof window !== 'undefined'
+        ? window.location.search
+        : '';
+  const fromSearch = parseAffiliateRefFromSearch(search);
+  if (fromSearch) return fromSearch;
+  const cookieStr =
+    options.cookieString !== undefined
+      ? options.cookieString
+      : typeof document !== 'undefined'
+        ? document.cookie
+        : '';
+  return parseAffiliateRefFromCookieString(cookieStr);
+}
+
+/**
+ * If the URL contains a valid ref, set `tavari_affiliate_ref` (same shape as short hub / affiliate go).
+ * Call on signup and public landings so `?partner=` deep links persist across navigation.
+ */
+export function syncAffiliateRefCookieFromUrl(search) {
+  if (typeof document === 'undefined') return null;
+  const s =
+    search !== undefined ? search : typeof window !== 'undefined' ? window.location.search : '';
+  const code = parseAffiliateRefFromSearch(s);
+  if (code) {
+    document.cookie = buildAffiliateRefClientCookie(code);
+  }
+  return code;
+}
+
 /** Same-origin path only (for ?next= on affiliate landing). */
 export function sanitizeInternalNextPath(raw) {
   if (typeof raw !== 'string') return null;

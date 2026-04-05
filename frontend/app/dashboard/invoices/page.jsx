@@ -5,6 +5,7 @@ import AuthGuard from '@/components/AuthGuard';
 import { invoicesAPI } from '@/lib/api';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import { moduleKeyInvoiceLabel } from '@/lib/moduleKeyLabel';
 
 function InvoicesPage() {
   const { error: showError } = useToast();
@@ -83,6 +84,7 @@ function InvoicesPage() {
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -107,6 +109,9 @@ function InvoicesPage() {
                             }
                             return date.toLocaleDateString('en-US');
                           })()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                          {moduleKeyInvoiceLabel(invoice.module_key)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
                           {invoice.invoice_type.replace('_', ' ')}

@@ -2,9 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Import Inter font */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-
 :root {
   /* Tavari AI v2 Design System - From Specification */
   --color-primary: #0F172A;
@@ -53,7 +50,6 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   color: var(--color-text-main);
   background-color: var(--color-background);
 }

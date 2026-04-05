@@ -9,6 +9,7 @@ import { StripeService } from '../services/stripe.js';
 import { getStripeInstance } from '../services/stripe.js';
 import { hashPassword } from '../utils/auth.js';
 import { User } from '../models/User.js';
+import { Subscription } from '../models/v2/Subscription.js';
 
 dotenv.config();
 
@@ -157,6 +158,14 @@ async function testPaymentFlowAutomated() {
             console.log(`❌ FAIL: stripe_subscription_status incorrect. Expected: active, Got: ${updatedBusiness.stripe_subscription_status}`);
           } else {
             console.log('✅ stripe_subscription_status correctly set: active');
+          }
+
+          const modKey = String(testPackage.module_key || 'phone-agent').trim() || 'phone-agent';
+          const v2Sub = await Subscription.findByBusinessAndModule(testBusinessId, modKey);
+          if (!v2Sub || v2Sub.status !== 'active') {
+            console.log(`❌ FAIL: v2 subscriptions row missing or inactive for module_key=${modKey}`);
+          } else {
+            console.log(`✅ v2 subscription active for module_key=${modKey}`);
           }
           console.log('');
         }

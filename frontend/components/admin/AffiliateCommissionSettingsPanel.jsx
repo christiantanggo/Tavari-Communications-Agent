@@ -210,10 +210,13 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Affiliate commission rules</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Ledger commissions use the <strong>module</strong> on each sale (e.g. phone-agent vs delivery-dispatch):
-            first-payment % and renewal % come from that module&apos;s row below, or from global defaults when a field is
-            left empty. There is no separate per-partner commission percentage. Delivery uses a minimum number of paid
-            checkouts per partner before delivery commissions can leave the hold pipeline. Run migrations{' '}
+            Ledger commissions use the <strong>module</strong> on each sale (<code className="text-xs bg-gray-100 px-1 rounded">phone-agent</code>,{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">reviews</code>,{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">delivery-dispatch</code>): first-payment % and renewal %
+            come from that module&apos;s row below, or from global defaults when a field is left empty. There is no
+            separate per-partner commission percentage. Delivery uses a minimum number of paid checkouts per partner
+            before delivery commissions can leave the hold pipeline. Opening this page ensures rows exist for all three
+            modules. Run migrations{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_commission_engine.sql</code> and{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_recurring_commission_limits.sql</code> if
             columns are missing.
@@ -228,8 +231,8 @@ export default function AffiliateCommissionSettingsPanel({ variant = 'embedded' 
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-gray-900">Commission & payout rules</h2>
           <p className="mt-1 text-sm text-gray-600 max-w-3xl">
-            Set first and renewal commission % on each module. Global block is for payout/hold/duration defaults only.
-            Run{' '}
+            Set first and renewal commission % on each module (phone-agent, reviews, delivery-dispatch). Global block is
+            for payout/hold/duration defaults only. Run{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_commission_engine.sql</code> and{' '}
             <code className="text-xs bg-gray-200 px-1 rounded">add_affiliate_recurring_commission_limits.sql</code> if
             API errors mention missing columns.

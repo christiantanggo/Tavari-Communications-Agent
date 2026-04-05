@@ -219,9 +219,11 @@ export class StripeService {
       console.log('[StripeService] - line_items:', JSON.stringify(lineItems, null, 2));
       console.log('[StripeService] - mode: subscription');
       console.log('[StripeService] - automatic_tax: disabled (Tavari controls taxes)');
+      const tavariModuleKey = String(pkg.module_key || 'phone-agent').trim() || 'phone-agent';
       console.log('[StripeService] - metadata:', {
         business_id: businessId,
         package_id: packageId,
+        tavari_module_key: tavariModuleKey,
         sale_name: saleName || '',
         sale_price_expires_at: salePriceExpiresAt || '',
       });
@@ -239,11 +241,13 @@ export class StripeService {
           package_id: packageId,
           sale_name: saleName || '',
           sale_price_expires_at: salePriceExpiresAt || '',
+          tavari_module_key: tavariModuleKey,
         },
         subscription_data: {
           metadata: {
             business_id: businessId,
             package_id: packageId,
+            tavari_module_key: tavariModuleKey,
           },
         },
       });
@@ -297,6 +301,83 @@ export class StripeService {
     } catch (error) {
       console.error('[StripeService] Error handling webhook:', error);
       throw error;
+    }
+  }
+
+  /**
+   * After package checkout, upsert v2 `subscriptions` so module dashboards see an active entitlement.
+   * (Mirrors main Tavari API — was referenced but missing, which broke checkout completion.)
+   */
+  static async syncV2SubscriptionRowFromPackageCheckout(businessId, businessRecord, pkg, stripeSubscriptionId) {
+    try {
+      if (!businessId || !pkg || !stripeSubscriptionId) return;
+
+      const moduleKey = String(pkg.module_key || "phone-agent").trim() || "phone-agent";
+
+      const { Module } = await import("../models/v2/Module.js");
+      const mod = await Module.findByKey(moduleKey);
+      if (!mod) {
+        console.warn(`[StripeService] syncV2Subscription: no modules row for "${moduleKey}", skipping`);
+        return;
+      }
+
+      let meta = mod.metadata;
+      if (meta && typeof meta === "string") {
+        try {
+          meta = JSON.parse(meta);
+        } catch {
+          meta = {};
+        }
+      }
+      if (!meta || typeof meta !== "object") meta = {};
+      const pricing = meta.pricing || {};
+
+      let usageLimit = pricing.usage_limit ?? null;
+      if (moduleKey === "reviews") {
+        const prompts = pkg.prompts_included != null ? Number(pkg.prompts_included) : NaN;
+        if (Number.isFinite(prompts) && prompts > 0) {
+          usageLimit = Math.floor(prompts);
+        }
+      }
+
+      const stripe = getStripe();
+      const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId, { expand: ["items.data"] });
+      const itemId = sub.items?.data?.[0]?.id;
+      if (!itemId) {
+        console.warn("[StripeService] syncV2Subscription: subscription has no items:", stripeSubscriptionId);
+        return;
+      }
+
+      const { calculateBillingCycle } = await import("./billing.js");
+      const billingCycle = calculateBillingCycle(businessRecord);
+      const resetDate = new Date(billingCycle.end);
+      resetDate.setDate(resetDate.getDate() + 1);
+      const usage_limit_reset_date = resetDate.toISOString().split("T")[0];
+
+      const { Subscription } = await import("../models/v2/Subscription.js");
+      const existing = await Subscription.findByBusinessAndModule(businessId, moduleKey);
+      const payload = {
+        stripe_subscription_item_id: itemId,
+        status: "active",
+        plan: "standard",
+        usage_limit: usageLimit,
+        usage_limit_reset_date,
+      };
+
+      if (existing) {
+        await Subscription.update(existing.id, payload);
+        console.log(`[StripeService] ✅ v2 subscriptions row updated for module "${moduleKey}"`);
+      } else {
+        await Subscription.create({
+          business_id: businessId,
+          module_key: moduleKey,
+          ...payload,
+          started_at: new Date().toISOString(),
+        });
+        console.log(`[StripeService] ✅ v2 subscriptions row created for module "${moduleKey}"`);
+      }
+    } catch (e) {
+      console.warn("[StripeService] syncV2Subscription skipped:", e?.message || e);
     }
   }
 
@@ -444,6 +525,8 @@ export class StripeService {
     console.log('[StripeService] Updated business plan_tier:', updatedBusiness.plan_tier);
     console.log('[StripeService] Updated business usage_limit_minutes:', updatedBusiness.usage_limit_minutes);
     console.log('[StripeService] Updated business package_id:', updatedBusiness.package_id);
+
+    await this.syncV2SubscriptionRowFromPackageCheckout(businessId, updatedBusiness, pkg, subscriptionId);
     
     // Increment sale count if package is on sale
     if (isOnSale && pkg) {
@@ -479,6 +562,9 @@ export class StripeService {
       
       // Create invoice record directly (simpler than using generateInvoice which requires PDF)
       const { supabaseClient } = await import('../config/database.js');
+      const moduleKeyForInvoice = pkg
+        ? String(pkg.module_key || '').trim() || null
+        : null;
       const { data: createdInvoice, error: invoiceError } = await supabaseClient
         .from('invoices')
         .insert({
@@ -493,6 +579,8 @@ export class StripeService {
           invoice_type: 'subscription_setup',
           status: 'paid',
           paid_at: new Date().toISOString(),
+          module_key: moduleKeyForInvoice,
+          package_id: pkg?.id || null,
         })
         .select()
         .single();
@@ -502,6 +590,14 @@ export class StripeService {
       }
       
       console.log('[StripeService] ✅ Invoice created for initial payment:', createdInvoice.invoice_number);
+      if (createdInvoice?.id) {
+        try {
+          const { finalizeInvoicePdfAndStorage } = await import('../services/invoices.js');
+          await finalizeInvoicePdfAndStorage(createdInvoice.id);
+        } catch (pdfEx) {
+          console.warn('[StripeService] Invoice PDF finalize:', pdfEx?.message || pdfEx);
+        }
+      }
     } catch (invoiceError) {
       // Don't fail the whole process if invoice creation fails
       console.error('[StripeService] ⚠️ Failed to create invoice:', invoiceError.message);
@@ -603,7 +699,7 @@ export class StripeService {
           .single();
         
         if (!existingInvoice) {
-          const { generateInvoiceNumber } = await import('../services/invoices.js');
+          const { generateInvoiceNumber, finalizeInvoicePdfAndStorage } = await import('../services/invoices.js');
           const { InvoiceSettings } = await import('../models/InvoiceSettings.js');
           
           // Get invoice settings for tax rate
@@ -617,6 +713,20 @@ export class StripeService {
           
           // Generate invoice number
           const invoiceNumber = await generateInvoiceNumber(businessId);
+
+          let recurringPackageId = subscription.metadata?.package_id || null;
+          let recurringModuleKey = null;
+          if (recurringPackageId) {
+            try {
+              const { PricingPackage } = await import('../models/PricingPackage.js');
+              const pkgRow = await PricingPackage.findById(recurringPackageId);
+              if (pkgRow) {
+                recurringModuleKey = String(pkgRow.module_key || '').trim() || null;
+              }
+            } catch (_) {
+              /* non-blocking */
+            }
+          }
           
           const { data: createdInvoice, error: invoiceError } = await supabaseClient
             .from('invoices')
@@ -634,6 +744,8 @@ export class StripeService {
               period_end: invoice.period_end ? new Date(invoice.period_end * 1000).toISOString().split('T')[0] : null,
               status: 'paid',
               paid_at: new Date().toISOString(),
+              module_key: recurringModuleKey,
+              package_id: recurringPackageId,
             })
             .select()
             .single();
@@ -643,6 +755,13 @@ export class StripeService {
           }
           
           console.log('[StripeService] ✅ Invoice created for recurring payment:', createdInvoice.invoice_number);
+          if (createdInvoice?.id) {
+            try {
+              await finalizeInvoicePdfAndStorage(createdInvoice.id);
+            } catch (pdfEx) {
+              console.warn('[StripeService] Recurring invoice PDF finalize:', pdfEx?.message || pdfEx);
+            }
+          }
         } else {
           console.log('[StripeService] Invoice already exists for Stripe invoice:', invoice.id);
         }

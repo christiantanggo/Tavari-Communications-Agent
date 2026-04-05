@@ -5,14 +5,20 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { trackButtonClick, trackLinkClick, trackPageView } from '@/lib/analytics';
 
-/** Full ClickBank checkout URL from Vercel (`NEXT_PUBLIC_CLICKBANK_PAYLINK`), or internal funnel if unset. */
-const REVIEW_REPLY_CHECKOUT_HREF =
-  process.env.NEXT_PUBLIC_CLICKBANK_PAYLINK?.trim() || '/review-reply-ai/clickbank';
+/**
+ * One primary story per deploy:
+ * - If `NEXT_PUBLIC_CLICKBANK_PAYLINK` is set → hero CTAs go to ClickBank (retailer).
+ * - Otherwise → Stripe path: `/join/reviews` (account + plan + Stripe Checkout), same as affiliate short hub.
+ */
+const CLICKBANK_PAYLINK = process.env.NEXT_PUBLIC_CLICKBANK_PAYLINK?.trim() || '';
+const PRIMARY_CHECKOUT_HREF = CLICKBANK_PAYLINK || '/join/reviews';
+const CHECKOUT_IS_CLICKBANK = !!CLICKBANK_PAYLINK;
 
 export default function ReviewReplyAILandingPage() {
   const [pageStartTime] = useState(Date.now());
 
   useEffect(() => {
+    syncAffiliateRefCookieFromUrl();
     trackPageView('review-reply-ai-landing');
   }, []);
 
@@ -78,15 +84,25 @@ export default function ReviewReplyAILandingPage() {
             
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-6">
-              <a
-                href={REVIEW_REPLY_CHECKOUT_HREF}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-blue-600 text-white px-10 py-4 rounded-lg text-lg font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 w-full sm:w-auto text-center"
-                onClick={handleGetStarted}
-              >
-                Get Started
-              </a>
+              {CHECKOUT_IS_CLICKBANK ? (
+                <a
+                  href={PRIMARY_CHECKOUT_HREF}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-blue-600 text-white px-10 py-4 rounded-lg text-lg font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 w-full sm:w-auto text-center"
+                  onClick={handleGetStarted}
+                >
+                  Get Started
+                </a>
+              ) : (
+                <Link
+                  href={PRIMARY_CHECKOUT_HREF}
+                  className="bg-blue-600 text-white px-10 py-4 rounded-lg text-lg font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 w-full sm:w-auto text-center"
+                  onClick={handleGetStarted}
+                >
+                  Get Started
+                </Link>
+              )}
               <Link
                 href="#features"
                 className="bg-white text-blue-600 border-2 border-blue-600 px-10 py-4 rounded-lg text-lg font-semibold hover:bg-blue-50 transition-all w-full sm:w-auto"
@@ -95,9 +111,11 @@ export default function ReviewReplyAILandingPage() {
               </Link>
             </div>
             
-            {/* Trust Signal */}
+            {/* Trust Signal — wording matches primary CTA (Stripe vs ClickBank). */}
             <p className="text-xs text-gray-500">
-              ✓ No credit card required • ✓ Set up in minutes • ✓ Cancel anytime
+              {CHECKOUT_IS_CLICKBANK
+                ? '✓ No credit card required • ✓ Set up in minutes • ✓ Cancel anytime'
+                : '✓ Secure card checkout (Stripe) • ✓ Set up in minutes • ✓ Cancel anytime'}
             </p>
           </div>
         </section>
@@ -240,15 +258,25 @@ export default function ReviewReplyAILandingPage() {
             <p className="text-xl mb-8 opacity-90">
               Join businesses that are saving time while maintaining professional review responses.
             </p>
-            <a
-              href={REVIEW_REPLY_CHECKOUT_HREF}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block bg-white text-blue-600 px-10 py-4 rounded-lg text-lg font-semibold hover:bg-gray-100 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-              onClick={handleGetStarted}
-            >
-              Get Started Now
-            </a>
+            {CHECKOUT_IS_CLICKBANK ? (
+              <a
+                href={PRIMARY_CHECKOUT_HREF}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block bg-white text-blue-600 px-10 py-4 rounded-lg text-lg font-semibold hover:bg-gray-100 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                onClick={handleGetStarted}
+              >
+                Get Started Now
+              </a>
+            ) : (
+              <Link
+                href={PRIMARY_CHECKOUT_HREF}
+                className="inline-block bg-white text-blue-600 px-10 py-4 rounded-lg text-lg font-semibold hover:bg-gray-100 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                onClick={handleGetStarted}
+              >
+                Get Started Now
+              </Link>
+            )}
           </div>
         </section>
       </main>

@@ -13,6 +13,120 @@ import { getFrontendPublicBaseUrl } from '../../config/public-urls.js';
 const router = express.Router();
 
 /**
+ * Resolve a monthly recurring Stripe price that matches modules.metadata.pricing.
+ * Rotates the stored stripe_price_id when amount/currency no longer match (fixes $0 / stale prices).
+ */
+async function ensureModuleRecurringPriceId(stripe, module, moduleKey, pricing) {
+  const rawCents = pricing.monthly_price_cents;
+  const amount = Number.isFinite(Number(rawCents)) ? Number(rawCents) : 2900;
+  const currency = String(pricing.currency || 'usd').toLowerCase();
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Invalid module pricing: monthly_price_cents must be a positive number');
+  }
+
+  let productId =
+    module.metadata?.stripe_product_id ||
+    process.env[`STRIPE_PRODUCT_ID_${moduleKey.toUpperCase().replace(/-/g, '_')}`];
+  let priceId =
+    module.metadata?.stripe_price_id ||
+    process.env[`STRIPE_PRICE_ID_${moduleKey.toUpperCase().replace(/-/g, '_')}`];
+
+  const persistMetadata = async (nextProductId, nextPriceId) => {
+    const mergedPricing = {
+      ...(module.metadata?.pricing || {}),
+      ...pricing,
+      monthly_price_cents: amount,
+      currency,
+    };
+    await Module.update(moduleKey, {
+      metadata: {
+        ...module.metadata,
+        stripe_product_id: nextProductId,
+        stripe_price_id: nextPriceId,
+        pricing: mergedPricing,
+      },
+    });
+    module.metadata = {
+      ...module.metadata,
+      stripe_product_id: nextProductId,
+      stripe_price_id: nextPriceId,
+      pricing: mergedPricing,
+    };
+  };
+
+  if (!productId || !priceId) {
+    const products = await stripe.products.list({ limit: 100 });
+    let product = products.data.find((p) => p.metadata?.module_key === moduleKey);
+    if (!product) {
+      product = await stripe.products.create({
+        name: module.name,
+        metadata: { module_key: moduleKey },
+      });
+    }
+    productId = product.id;
+
+    const prices = await stripe.prices.list({ product: productId, active: true, limit: 100 });
+    let price = prices.data.find(
+      (p) =>
+        p.active &&
+        p.recurring?.interval === 'month' &&
+        p.unit_amount === amount &&
+        p.currency === currency
+    );
+    if (!price) {
+      price = await stripe.prices.create({
+        product: productId,
+        unit_amount: amount,
+        currency,
+        recurring: { interval: 'month' },
+        metadata: { module_key: moduleKey },
+      });
+    }
+    priceId = price.id;
+    await persistMetadata(productId, priceId);
+    return priceId;
+  }
+
+  try {
+    const existing = await stripe.prices.retrieve(priceId);
+    if (
+      existing.active &&
+      existing.recurring?.interval === 'month' &&
+      existing.unit_amount === amount &&
+      existing.currency === currency
+    ) {
+      return priceId;
+    }
+  } catch (e) {
+    console.warn(`[activate] Could not retrieve Stripe price ${priceId}, creating new:`, e.message);
+  }
+
+  if (!productId) {
+    const products = await stripe.products.list({ limit: 100 });
+    const found = products.data.find((p) => p.metadata?.module_key === moduleKey);
+    if (found) productId = found.id;
+  }
+  if (!productId) {
+    const p = await stripe.products.create({
+      name: module.name,
+      metadata: { module_key: moduleKey },
+    });
+    productId = p.id;
+  }
+
+  const newPrice = await stripe.prices.create({
+    product: productId,
+    unit_amount: amount,
+    currency,
+    recurring: { interval: 'month' },
+    metadata: { module_key: moduleKey },
+  });
+  await persistMetadata(productId, newPrice.id);
+  return newPrice.id;
+}
+
+/**
  * GET /api/v2/modules/list
  * Get all available modules (no business context required - for dropdowns, etc.)
  * This route must come BEFORE /:moduleKey to avoid route conflicts
@@ -187,12 +301,22 @@ router.post('/:moduleKey/activate',
       // Get business
       const business = await Business.findById(businessId);
       
-      // Get module pricing from metadata or defaults
+      // Get module pricing from metadata or defaults (admin API must write into metadata.pricing)
       const pricing = module.metadata?.pricing || {
         monthly_price_cents: 2900, // $29.00 in cents
         currency: 'usd',
         usage_limit: 100
       };
+
+      if (!testMode && !FREE_MODULES.has(moduleKey)) {
+        const cents = Number(pricing.monthly_price_cents ?? 2900);
+        if (!Number.isFinite(cents) || cents <= 0) {
+          return res.status(400).json({
+            error: 'Module pricing misconfigured',
+            message: 'This module has no valid monthly price. Ask an admin to set pricing in metadata.',
+          });
+        }
+      }
       
       let subscriptionItemId = null;
       
@@ -236,51 +360,7 @@ router.post('/:moduleKey/activate',
         await Business.update(businessId, { stripe_customer_id: customerId });
       }
       
-      // Get or create Stripe product and price for module (must have priceId before creating subscription)
-      let productId = module.metadata?.stripe_product_id || process.env[`STRIPE_PRODUCT_ID_${moduleKey.toUpperCase().replace(/-/g, '_')}`];
-      let priceId = module.metadata?.stripe_price_id || process.env[`STRIPE_PRICE_ID_${moduleKey.toUpperCase().replace(/-/g, '_')}`];
-
-      if (!productId || !priceId) {
-        const products = await stripe.products.list({ limit: 100 });
-        let product = products.data.find(p => p.metadata?.module_key === moduleKey);
-
-        if (!product) {
-          product = await stripe.products.create({
-            name: module.name,
-            metadata: {
-              module_key: moduleKey,
-            },
-          });
-        }
-        productId = product.id;
-
-        const prices = await stripe.prices.list({ product: productId, limit: 1 });
-        let price = prices.data[0];
-
-        if (!price || price.unit_amount !== pricing.monthly_price_cents) {
-          price = await stripe.prices.create({
-            product: productId,
-            unit_amount: pricing.monthly_price_cents,
-            currency: pricing.currency || 'usd',
-            recurring: {
-              interval: 'month',
-            },
-            metadata: {
-              module_key: moduleKey,
-            },
-          });
-        }
-        priceId = price.id;
-
-        await Module.update(moduleKey, {
-          metadata: {
-            ...module.metadata,
-            stripe_product_id: productId,
-            stripe_price_id: priceId,
-            pricing: pricing,
-          },
-        });
-      }
+      const priceId = await ensureModuleRecurringPriceId(stripe, module, moduleKey, pricing);
 
       // Get or create main subscription (Stripe requires at least one item when creating)
       let subscriptionId = business.stripe_subscription_id;

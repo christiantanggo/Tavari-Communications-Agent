@@ -1473,17 +1473,41 @@ router.post("/affiliate-applications/:id/resend-approval-email", authenticateAdm
   }
 });
 
+const AFFILIATE_COMMISSION_MODULE_KEYS = ["delivery-dispatch", "phone-agent", "reviews"];
+
 router.get("/affiliate-commission-settings", authenticateAdmin, async (req, res) => {
   try {
     const { supabaseClient } = await import("../config/database.js");
     const { getAffiliateGlobalSettings } = await import("../services/affiliateCommissionSettings.js");
     const global = await getAffiliateGlobalSettings();
-    const { data: modules, error } = await supabaseClient
+    let { data: modules, error } = await supabaseClient
       .from("affiliate_module_settings")
       .select("*")
       .order("module_key", { ascending: true });
     if (error) throw error;
-    res.json({ global, modules: modules || [] });
+    modules = modules || [];
+    const have = new Set(modules.map((m) => m.module_key));
+    const missing = AFFILIATE_COMMISSION_MODULE_KEYS.filter((k) => !have.has(k));
+    if (missing.length) {
+      const rows = missing.map((module_key) => ({
+        module_key,
+        recurring_commission_enabled: true,
+      }));
+      const { error: insErr } = await supabaseClient.from("affiliate_module_settings").insert(rows);
+      if (insErr) {
+        console.error(
+          "[affiliate-commission-settings] Could not ensure affiliate_module_settings rows:",
+          insErr.message || insErr,
+        );
+      } else {
+        const again = await supabaseClient
+          .from("affiliate_module_settings")
+          .select("*")
+          .order("module_key", { ascending: true });
+        if (!again.error) modules = again.data || modules;
+      }
+    }
+    res.json({ global, modules });
   } catch (error) {
     console.error("Get affiliate commission settings error:", error);
     res.status(500).json({ error: "Failed to load commission settings" });
@@ -1735,7 +1759,7 @@ router.get("/affiliate-partners", authenticateAdmin, async (req, res) => {
     const { supabaseClient } = await import("../config/database.js");
     const { data, error } = await supabaseClient
       .from("affiliate_partners")
-      .select("id, application_id, affiliate_code, email, display_name, active, created_at")
+      .select("id, application_id, affiliate_code, email, display_name, active, is_sales_rep, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
 
@@ -1744,6 +1768,137 @@ router.get("/affiliate-partners", authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error("Get affiliate partners error:", error);
     res.status(500).json({ error: "Failed to load affiliate partners" });
+  }
+});
+
+router.post("/affiliate-partners", authenticateAdmin, async (req, res) => {
+  try {
+    const { createPartnerRecordAdmin } = await import("../services/affiliateProgram.js");
+    const email = req.body?.email;
+    const display_name = req.body?.display_name;
+    const is_sales_rep = !!req.body?.is_sales_rep;
+    const active = req.body?.active !== false;
+
+    const partner = await createPartnerRecordAdmin({ email, display_name, is_sales_rep, active });
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_partner_create_admin",
+        details: { partner_id: partner.id, is_sales_rep: partner.is_sales_rep },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.status(201).json({ partner });
+  } catch (error) {
+    if (error.code === "INVALID_EMAIL" || error.code === "DUPLICATE_EMAIL") {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error("Create affiliate partner error:", error);
+    res.status(500).json({ error: "Failed to create partner" });
+  }
+});
+
+router.patch("/affiliate-partners/:id", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { supabaseClient } = await import("../config/database.js");
+    const patch = { updated_at: new Date().toISOString() };
+
+    if (typeof req.body?.is_sales_rep === "boolean") {
+      patch.is_sales_rep = req.body.is_sales_rep;
+    }
+    if (typeof req.body?.active === "boolean") {
+      patch.active = req.body.active;
+    }
+    if (typeof req.body?.display_name === "string" && req.body.display_name.trim()) {
+      patch.display_name = req.body.display_name.trim();
+    }
+    if (typeof req.body?.email === "string" && req.body.email.trim()) {
+      patch.email = req.body.email.trim().toLowerCase();
+    }
+
+    const meaningfulKeys = Object.keys(patch).filter((k) => k !== "updated_at");
+    if (meaningfulKeys.length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    const { data: partner, error } = await supabaseClient
+      .from("affiliate_partners")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!partner) {
+      return res.status(404).json({ error: "Partner not found" });
+    }
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "affiliate_partner_patch",
+        details: { partner_id: id, ...patch },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ partner });
+  } catch (error) {
+    console.error("Patch affiliate partner error:", error);
+    res.status(500).json({ error: "Failed to update partner" });
+  }
+});
+
+/** Email a one-time sales portal magic link (same token table as affiliates; link opens /sales/portal). */
+router.post("/affiliate-partners/:id/send-sales-login-link", authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { supabaseClient } = await import("../config/database.js");
+    const { createPortalLoginToken, sendSalesMagicLinkEmail } = await import("../services/affiliateProgram.js");
+
+    const { data: partner, error } = await supabaseClient
+      .from("affiliate_partners")
+      .select("id, email, display_name, active, is_sales_rep")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!partner) {
+      return res.status(404).json({ error: "Partner not found" });
+    }
+    if (!partner.active) {
+      return res.status(400).json({ error: "Partner is inactive" });
+    }
+    if (!partner.is_sales_rep) {
+      return res.status(400).json({ error: "Enable Sales rep on this partner before sending a sales portal link" });
+    }
+
+    const { rawToken } = await createPortalLoginToken(partner.id);
+    await sendSalesMagicLinkEmail({
+      toEmail: partner.email,
+      name: partner.display_name,
+      rawPortalToken: rawToken,
+    });
+
+    try {
+      await AdminActivityLog.create({
+        admin_user_id: req.adminId,
+        action: "sales_rep_send_login_link",
+        details: { partner_id: id },
+      });
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    res.json({ success: true, message: "Sales sign-in link sent." });
+  } catch (error) {
+    console.error("Send sales login link error:", error);
+    res.status(500).json({ error: "Failed to send email" });
   }
 });
 

@@ -219,6 +219,12 @@ function AdminDashboardPage() {
               >
                 Support Tickets
               </Link>
+              <Link
+                href="/admin/sales-reps"
+                className="px-6 py-3 bg-teal-600 text-white rounded-md hover:bg-teal-700 font-medium"
+              >
+                Sales reps
+              </Link>
             </div>
           </div>
         </main>

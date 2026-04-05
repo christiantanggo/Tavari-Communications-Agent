@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { AFFILIATE_REF_COOKIE, AFFILIATE_REF_MAX_AGE_SEC } from '@/lib/affiliateCookie';
+import {
+  AFFILIATE_REF_COOKIE,
+  affiliateRefCookieServerOptions,
+} from '@/lib/affiliateCookie';
 import { getServerBackendBaseUrl } from '@/lib/serverBackendBaseUrl';
 
 export const dynamic = 'force-dynamic';

@@ -1,7 +1,14 @@
 import './globals.css';
+import { Inter } from 'next/font/google';
 import { ToastProvider } from '@/components/ToastProvider';
 import AppChrome from '@/components/AppChrome';
 import Script from 'next/script';
+
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '600'],
+  display: 'swap',
+});
 
 const title = (process.env.NEXT_PUBLIC_APP_DISPLAY_NAME || 'Tavari Ai').trim();
 const description = (
@@ -26,7 +33,7 @@ export default function RootLayout({ children }) {
   ` : '';
 
   return (
-    <html lang="en">
+    <html lang="en" className={inter.className}>
       <body>
         {/* Google Analytics - only load if measurement ID is provided */}
         {gaMeasurementId && (

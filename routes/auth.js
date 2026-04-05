@@ -5,151 +5,75 @@ import { AIAgent } from '../models/AIAgent.js';
 import { hashPassword, comparePassword, generateToken } from '../utils/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { supabaseClient } from '../config/database.js';
+import { signupBusinessAndOwner } from '../services/customerSignupService.js';
+import { normalizeAffiliateCode } from '../services/affiliateProgram.js';
 
 const router = express.Router();
 
 // Signup
 router.post('/signup', async (req, res) => {
   try {
-    const { 
-      email, 
-      password, 
-      name, 
-      phone, 
-      public_phone_number,
-      address, 
-      first_name, 
-      last_name,
-      timezone,
-      business_hours,
-      contact_email,
-      terms_accepted
-    } = req.body;
-    
-    if (!email || !password || !name) {
-      return res.status(400).json({ error: 'Email, password, and business name are required' });
-    }
-    
-    // Require terms acceptance
-    if (!terms_accepted) {
-      return res.status(400).json({ 
-        error: 'You must agree to the Terms of Service and Privacy Policy to create an account',
-        code: 'TERMS_NOT_ACCEPTED'
-      });
-    }
-    
-    // Validate and format phone number to E.164
-    let formattedPhone = public_phone_number || phone;
-    if (formattedPhone) {
-      const { formatPhoneNumberE164, validatePhoneNumber } = await import('../utils/phoneFormatter.js');
-      const e164 = formatPhoneNumberE164(formattedPhone);
-      if (!e164 || !validatePhoneNumber(e164)) {
-        return res.status(400).json({ 
-          error: 'Invalid phone number format. Please include country code (e.g., +1 for US/Canada)' 
-        });
-      }
-      formattedPhone = e164;
-    }
-    
-    // Check if business email already exists
-    const existingBusiness = await Business.findByEmail(email);
-    let business;
-    
-    if (existingBusiness) {
-      // Check if there's already a user for this business
-      const existingUser = await User.findByEmail(email);
-      if (existingUser) {
-        // Account fully exists - redirect to login
-        return res.status(400).json({ 
-          error: 'An account with this email already exists. Please log in instead.',
-          code: 'ACCOUNT_EXISTS'
-        });
-      }
-      // Business exists but no user - incomplete signup, allow completion
-      console.log(`[Signup] Found incomplete signup for ${email}, completing signup...`);
-      // Update existing business with new data
-      business = await Business.update(existingBusiness.id, {
-        name,
-        email: contact_email || email,
-        phone: formattedPhone,
-        address: address || '',
-        timezone: timezone || 'America/New_York',
-        public_phone_number: formattedPhone,
-      });
-      business = await Business.findById(existingBusiness.id);
-    } else {
-      // Create new business
-      business = await Business.create({
-        name,
-        email: contact_email || email,
-        phone: formattedPhone,
-        address: address || '',
-        timezone: timezone || 'America/New_York',
-        public_phone_number: formattedPhone,
-      });
-    }
-    
-    // Mark demo email as signed up if this email was used for a demo
-    try {
-      const { data: demoEmail } = await supabaseClient
-        .from('demo_emails')
-        .select('id')
-        .eq('email', email)
-        .eq('signed_up', false)
-        .single();
-      
-      if (demoEmail) {
-        await supabaseClient
-          .from('demo_emails')
-          .update({
-            signed_up: true,
-            signed_up_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', demoEmail.id);
-        console.log(`[Signup] ✅ Marked demo email as signed up: ${email}`);
-      }
-    } catch (demoError) {
-      // Non-critical - just log it
-      console.log(`[Signup] Note: Could not check demo emails table (may not exist yet):`, demoError.message);
-    }
-    
-    // Hash password
-    const password_hash = await hashPassword(password);
-    
-    // Get client IP address for terms acceptance tracking
-    const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
-    // Extract first IP if x-forwarded-for contains multiple
-    const termsAcceptedIp = typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : 'unknown';
-    
-    // Current terms version (update this when Terms are updated)
-    const termsVersion = '2025-12-27';
-    const now = new Date().toISOString();
-    
-    // Create user with terms acceptance
-    const user = await User.create({
-      business_id: business.id,
+    const {
       email,
-      password_hash,
+      password,
+      name,
+      phone,
+      public_phone_number,
+      address,
       first_name,
       last_name,
-      role: 'owner',
-      terms_accepted_at: now,
-      privacy_accepted_at: now, // Privacy policy accepted at same time
-      terms_version: termsVersion,
-      terms_accepted_ip: termsAcceptedIp,
+      timezone,
+      contact_email,
+      terms_accepted,
+      affiliate_code,
+      referral_code,
+    } = req.body;
+
+    const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
+    const termsAcceptedIp = typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : 'unknown';
+
+    let referred_by_partner_id = null;
+    const codeNorm = normalizeAffiliateCode(affiliate_code || referral_code || '');
+    if (codeNorm) {
+      const { data: refPartner, error: refErr } = await supabaseClient
+        .from('affiliate_partners')
+        .select('id')
+        .eq('affiliate_code', codeNorm)
+        .eq('active', true)
+        .maybeSingle();
+      if (!refErr && refPartner?.id) {
+        referred_by_partner_id = refPartner.id;
+      }
+    }
+
+    const { user, business, token } = await signupBusinessAndOwner({
+      email,
+      password,
+      name,
+      phone,
+      public_phone_number,
+      address,
+      first_name,
+      last_name,
+      timezone,
+      contact_email,
+      terms_accepted,
+      termsAcceptedIp,
+      referred_by_partner_id,
     });
-    
-    // Note: AI agent and phone number assignment only happen when user activates phone agent module
-    // Users are redirected to the AI marketplace after signup to choose which modules to activate
-    
-    // Generate token
-    const token = generateToken({
-      userId: user.id,
-      businessId: business.id,
-      email: user.email,
-    });
-    
+
+    if (referred_by_partner_id) {
+      try {
+        await supabaseClient.from('affiliate_events').insert({
+          partner_id: referred_by_partner_id,
+          event_type: 'lead',
+          metadata: { source: 'customer_signup_affiliate_code', business_id: business.id },
+        });
+      } catch (evErr) {
+        console.warn('[Signup] affiliate_events lead:', evErr?.message);
+      }
+    }
+
     res.status(201).json({
       token,
       user: {
@@ -164,10 +88,28 @@ router.post('/signup', async (req, res) => {
         name: business.name,
         email: business.email,
         onboarding_complete: business.onboarding_complete,
-        vapi_phone_number: null, // Phone numbers are assigned when phone agent module is activated
+        vapi_phone_number: null,
       },
     });
   } catch (error) {
+    if (error.code === 'TERMS_NOT_ACCEPTED') {
+      return res.status(400).json({
+        error: error.message,
+        code: 'TERMS_NOT_ACCEPTED',
+      });
+    }
+    if (error.code === 'ACCOUNT_EXISTS') {
+      return res.status(400).json({
+        error: error.message,
+        code: 'ACCOUNT_EXISTS',
+      });
+    }
+    if (error.code === 'VALIDATION') {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.code === 'INVALID_PHONE') {
+      return res.status(400).json({ error: error.message });
+    }
     console.error('Signup error:', error);
     res.status(500).json({ error: 'Failed to create account' });
   }
@@ -578,97 +520,16 @@ router.post('/forgot-password', async (req, res) => {
 
     console.log('[Forgot Password] Request for email:', email);
 
-    // Find user by email (first try users table)
-    let user = await User.findByEmail(email);
-    
-    // If user not found, try finding by business email
-    if (!user) {
-      console.log('[Forgot Password] User not found in users table, checking businesses table...');
-      const business = await Business.findByEmail(email);
-      if (business) {
-        console.log('[Forgot Password] Business found, looking for associated users...');
-        // Find users associated with this business
-        const users = await User.findByBusinessId(business.id);
-        if (users && users.length > 0) {
-          // Use the first active user (preferably owner)
-          user = users.find(u => u.role === 'owner') || users[0];
-          console.log('[Forgot Password] Found user via business email:', user.id);
-        }
-      }
-    }
-    
-    // Always return success to prevent email enumeration
-    // But only send email if user exists
-    if (user) {
-      // Generate 6-digit random code
-      const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // Set expiration to 15 minutes from now
-      const resetExpires = new Date();
-      resetExpires.setMinutes(resetExpires.getMinutes() + 15);
-      
-      // Save code and expiration to user
-      await User.update(user.id, {
-        password_reset_token: resetCode,
-        password_reset_expires: resetExpires.toISOString(),
-      });
-      
-      // Get business to include name in email
-      const business = await Business.findById(user.business_id);
-      
-      // Send reset code email
-      const { sendEmail } = await import('../services/notifications.js');
-      const subject = 'Your Password Reset Code - Tavari';
-      const bodyText = `Hello,
-
-You requested to reset your password for your Tavari account${business ? ` (${business.name})` : ''}.
-
-Your password reset code is: ${resetCode}
-
-Enter this code on the password reset page to continue.
-
-This code will expire in 15 minutes.
-
-If you didn't request this, please ignore this email and your password will remain unchanged.
-
-Best regards,
-The Tavari Team`;
-      
-      const bodyHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563eb;">Password Reset Code</h2>
-          <p>Hello,</p>
-          <p>You requested to reset your password for your Tavari account${business ? ` (<strong>${business.name}</strong>)` : ''}.</p>
-          <div style="background-color: #f3f4f6; border: 2px solid #2563eb; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0;">
-            <p style="margin: 0; font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px;">Your Reset Code</p>
-            <p style="margin: 10px 0 0 0; font-size: 36px; font-weight: bold; color: #2563eb; letter-spacing: 8px;">${resetCode}</p>
-          </div>
-          <p>Enter this code on the password reset page to continue.</p>
-          <p style="color: #666; font-size: 14px;">This code will expire in 15 minutes.</p>
-          <p style="color: #666; font-size: 14px;">If you didn't request this, please ignore this email and your password will remain unchanged.</p>
-          <p>Best regards,<br>The Tavari Team</p>
-        </div>
-      `;
-      
-      try {
-        await sendEmail(email, subject, bodyText, bodyHtml, 'Tavari');
-        console.log('[Forgot Password] ✅ Reset code sent to:', email, 'Code:', resetCode);
-      } catch (emailError) {
-        console.error('[Forgot Password] ❌ Error sending reset code email:', emailError);
-        console.error('[Forgot Password] Error details:', {
-          message: emailError.message,
-          stack: emailError.stack,
-        });
-        // Still return success to prevent email enumeration
-        // But log the error so we can debug
-      }
+    const { issuePasswordResetCodeAndEmail } = await import('../services/passwordResetInvite.js');
+    const { sent } = await issuePasswordResetCodeAndEmail(email);
+    if (sent) {
+      console.log('[Forgot Password] ✅ Reset code sent to:', email);
     } else {
       console.log('[Forgot Password] User not found for email:', email);
     }
 
-    // Always return success (security best practice - don't reveal if email exists)
-    res.json({ 
-      message: 'If an account with that email exists, a password reset code has been sent.' 
+    res.json({
+      message: 'If an account with that email exists, a password reset code has been sent.',
     });
   } catch (error) {
     console.error('Forgot password error:', error);

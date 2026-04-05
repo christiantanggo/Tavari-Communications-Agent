@@ -141,7 +141,15 @@ router.put('/modules/:moduleKey', async (req, res) => {
     const updateData = {};
     if (health_status !== undefined) updateData.health_status = health_status;
     if (is_active !== undefined) updateData.is_active = is_active;
-    if (pricing !== undefined) updateData.pricing = pricing;
+    if (pricing !== undefined) {
+      const existing = await Module.findByKey(moduleKey);
+      if (!existing) {
+        return res.status(404).json({ error: 'Module not found' });
+      }
+      const metadata = { ...(existing.metadata || {}) };
+      metadata.pricing = { ...(metadata.pricing || {}), ...pricing };
+      updateData.metadata = metadata;
+    }
 
     // Module.update supports both key and ID lookups
     const updated = await Module.update(moduleKey, updateData);
@@ -201,8 +209,13 @@ router.put('/pricing/:moduleKey', async (req, res) => {
       return res.status(400).json({ error: 'Pricing object is required' });
     }
 
-    // Module.update supports key lookup directly
-    const updated = await Module.update(moduleKey, { pricing });
+    const existing = await Module.findByKey(moduleKey);
+    if (!existing) {
+      return res.status(404).json({ error: 'Module not found' });
+    }
+    const metadata = { ...(existing.metadata || {}) };
+    metadata.pricing = { ...(metadata.pricing || {}), ...pricing };
+    const updated = await Module.update(moduleKey, { metadata });
     
     if (!updated) {
       return res.status(404).json({ error: 'Module not found' });

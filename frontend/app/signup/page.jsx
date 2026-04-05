@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signup } from '@/lib/auth';
+import { resolveAffiliateCodeForSignup, syncAffiliateRefCookieFromUrl } from '@/lib/affiliateCookie';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -11,11 +12,22 @@ export default function SignupPage() {
     email: '',
     password: '',
     name: '', // Business name
+    affiliate_code: '',
     termsAccepted: false,
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [activationStatus, setActivationStatus] = useState(null);
+
+  useLayoutEffect(() => {
+    syncAffiliateRefCookieFromUrl();
+    const code = resolveAffiliateCodeForSignup();
+    if (!code) return;
+    setFormData((prev) => {
+      if (String(prev.affiliate_code || '').trim()) return prev;
+      return { ...prev, affiliate_code: code };
+    });
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -71,6 +83,7 @@ export default function SignupPage() {
         },
         contact_email: formData.email,
         terms_accepted: true, // User has accepted terms (validated above)
+        affiliate_code: formData.affiliate_code?.trim() || undefined,
       });
 
       // Check if signup succeeded (we got a token)
@@ -187,6 +200,27 @@ export default function SignupPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
               placeholder="Your Business Name"
             />
+          </div>
+
+          <div>
+            <label htmlFor="affiliate_code" className="block text-sm font-medium text-gray-700 mb-1">
+              Sales or partner code (optional)
+            </label>
+            <input
+              type="text"
+              id="affiliate_code"
+              name="affiliate_code"
+              value={formData.affiliate_code}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white uppercase"
+              placeholder="Code from your rep"
+              autoComplete="off"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              If someone referred you, enter their code so they get credit on your subscription. We also pre-fill from a
+              partner link (<span className="font-mono">?partner=</span>, etc.) or your{' '}
+              <span className="font-mono">tavari_affiliate_ref</span> cookie when present.
+            </p>
           </div>
 
           {/* Terms Acceptance */}

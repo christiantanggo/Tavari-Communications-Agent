@@ -109,6 +109,7 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
       explainAffiliateCommissionSelectionForLog,
       AFFILIATE_MODULE_PHONE,
       AFFILIATE_MODULE_DELIVERY,
+      AFFILIATE_MODULE_REVIEWS,
     } = await import("../services/affiliateCommissionSettings.js");
 
     await promoteAccruingAffiliateEarnings();
@@ -157,15 +158,16 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
     if (gErr) throw gErr;
     const grossSalesCents = (grossRows || []).reduce((s, r) => s + (Number(r.gross_amount_cents) || 0), 0);
 
-    const [programPhone, programDelivery] = await Promise.all([
+    const [programPhone, programDelivery, programReviews] = await Promise.all([
       resolveCommissionRules(AFFILIATE_MODULE_PHONE),
       resolveCommissionRules(AFFILIATE_MODULE_DELIVERY),
+      resolveCommissionRules(AFFILIATE_MODULE_REVIEWS),
     ]);
 
     const { data: moduleRowsForLog, error: moduleRowsLogErr } = await supabaseClient
       .from("affiliate_module_settings")
       .select("*")
-      .in("module_key", [AFFILIATE_MODULE_PHONE, AFFILIATE_MODULE_DELIVERY]);
+      .in("module_key", [AFFILIATE_MODULE_PHONE, AFFILIATE_MODULE_DELIVERY, AFFILIATE_MODULE_REVIEWS]);
 
     if (moduleRowsLogErr) {
       console.warn("[affiliate-portal] /me commission log: could not load affiliate_module_settings:", moduleRowsLogErr.message);
@@ -186,6 +188,11 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
           programDelivery,
           globalSettings,
         ),
+        explainAffiliateCommissionSelectionForLog(
+          moduleRowOrStub(AFFILIATE_MODULE_REVIEWS),
+          programReviews,
+          globalSettings,
+        ),
       ],
     };
     // console.log so it always appears in typical local `node server.js` terminals (some setups hide console.info).
@@ -199,7 +206,9 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
       const rows = await listPartnerEarnings(partner.id, { limit: 50 });
       purchases = (rows || []).map((r) => ({
         id: r.id,
-        created_at: r.created_at || r.payment_received_at,
+        business_id: r.business_id || null,
+        created_at: r.payment_received_at || r.created_at || r.eligible_at || null,
+        payment_received_at: r.payment_received_at || null,
         amount_cents: r.gross_amount_cents,
         commission_cents: r.commission_cents,
         currency: r.currency,
@@ -247,7 +256,7 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
         commission_paid_cents: earningsSummary.paid,
       },
       commission_policy: {
-        payout_minimum_cents: Number(globalSettings.payout_minimum_cents),
+        payout_minimum_cents: Number(globalSettings.payout_minimum_cents) || 0,
         refund_hold_days_default: Number(globalSettings.refund_hold_days),
         delivery_paid_checkouts_attributed: partner.delivery_attributed_paid_count || 0,
         /** Per-module first / renewal % (affiliate_module_settings only; NULL column → 0%). */
@@ -276,12 +285,25 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
             recurring_limit_months: programDelivery.recurring_limit_months,
             recurring_limit_transactions: programDelivery.recurring_limit_transactions,
           },
+          {
+            module_key: AFFILIATE_MODULE_REVIEWS,
+            first_sale_commission_percent: programReviews.first_sale_commission_percent,
+            recurring_commission_percent: programReviews.recurring_commission_percent,
+            recurring_enabled: programReviews.recurring_enabled,
+            payout_minimum_cents: programReviews.payout_minimum_cents,
+            refund_hold_days: programReviews.refund_hold_days,
+            recurring_limit_mode: programReviews.recurring_limit_mode,
+            recurring_limit_months: programReviews.recurring_limit_months,
+            recurring_limit_transactions: programReviews.recurring_limit_transactions,
+          },
         ],
       },
       tracking_link: `${base}/affiliate/go/${partner.affiliate_code}`,
       landing_page_url: `${base}/r/${partner.affiliate_code}`,
       join_urls: {
         phone_agent: `${base}/join/phone-agent/${partner.affiliate_code}`,
+        review_reply: `${base}/join/reviews/${partner.affiliate_code}`,
+        delivery_dispatch: `${base}/deliverydispatch?partner=${encodeURIComponent(partner.affiliate_code)}`,
       },
       purchases,
       linked_businesses,
@@ -293,6 +315,78 @@ router.get("/me", authenticateAffiliatePortal, async (req, res) => {
   } catch (e) {
     console.error("[affiliate-portal] me:", e);
     res.status(500).json({ error: "Failed to load dashboard" });
+  }
+});
+
+/**
+ * PATCH /api/affiliate/me
+ * Partner self-service: update display name and/or email (affiliate_code is not editable).
+ */
+router.patch("/me", authenticateAffiliatePortal, async (req, res) => {
+  try {
+    const partnerId = req.affiliatePartnerId;
+    const body = req.body || {};
+    const patch = {};
+
+    if (body.display_name !== undefined) {
+      const dn = String(body.display_name).trim();
+      if (!dn || dn.length > 200) {
+        return res.status(400).json({ error: "Display name must be between 1 and 200 characters." });
+      }
+      patch.display_name = dn;
+    }
+
+    if (body.email !== undefined) {
+      const em = String(body.email).trim().toLowerCase();
+      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
+      if (!emailOk || em.length > 320) {
+        return res.status(400).json({ error: "Please enter a valid email address." });
+      }
+
+      const { data: taken, error: dupErr } = await supabaseClient
+        .from("affiliate_partners")
+        .select("id")
+        .eq("email", em)
+        .neq("id", partnerId)
+        .maybeSingle();
+
+      if (dupErr) throw dupErr;
+      if (taken) {
+        return res.status(400).json({ error: "That email is already used by another partner account." });
+      }
+
+      patch.email = em;
+    }
+
+    const meaningfulKeys = Object.keys(patch);
+    if (meaningfulKeys.length === 0) {
+      return res.status(400).json({ error: "No changes to save. Update your display name or email." });
+    }
+
+    patch.updated_at = new Date().toISOString();
+
+    const { data: partner, error } = await supabaseClient
+      .from("affiliate_partners")
+      .update(patch)
+      .eq("id", partnerId)
+      .eq("active", true)
+      .select("id, affiliate_code, display_name, email, active, created_at, delivery_attributed_paid_count")
+      .single();
+
+    if (error) {
+      if (error.code === "23505") {
+        return res.status(400).json({ error: "That email is already in use." });
+      }
+      throw error;
+    }
+    if (!partner) {
+      return res.status(403).json({ error: "Account inactive or not found." });
+    }
+
+    res.json({ success: true, partner });
+  } catch (e) {
+    console.error("[affiliate-portal] patch me:", e);
+    res.status(500).json({ error: "Could not update your profile" });
   }
 });
 

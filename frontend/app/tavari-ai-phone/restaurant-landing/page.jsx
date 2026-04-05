@@ -6,6 +6,7 @@ import Image from 'next/image';
 import DemoModal from '@/components/DemoModal';
 import PricingModal from '@/components/PricingModal';
 import { trackButtonClick, trackLinkClick, trackPageView, trackScrollDepth, trackTimeOnPage, trackSectionView, trackExitIntent } from '@/lib/analytics';
+import { syncAffiliateRefCookieFromUrl } from '@/lib/affiliateCookie';
 
 export default function RestaurantLandingPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -16,6 +17,10 @@ export default function RestaurantLandingPage() {
   const sectionsTracked = useRef(new Set());
   const exitIntentTracked = useRef(false);
   const pageStartTime = useRef(Date.now());
+
+  useEffect(() => {
+    syncAffiliateRefCookieFromUrl();
+  }, []);
 
   // Track page view on mount
   useEffect(() => {

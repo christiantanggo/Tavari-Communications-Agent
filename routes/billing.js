@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/auth.js';
 import { Business } from '../models/Business.js';
 import { PricingPackage } from '../models/PricingPackage.js';
 import { normalizeAffiliateCode } from '../services/affiliateProgram.js';
+import { buildStripeCheckoutReturnUrls } from '../services/billingCheckoutReturnUrls.js';
 
 const router = express.Router();
 
@@ -48,10 +49,15 @@ router.get('/packages', async (req, res) => {
     
     // Show all active packages (both public and private) for billing
     // This ensures all live/active plans are available for purchase
+    const excludeClickbank =
+      String(req.query.exclude_clickbank || '').toLowerCase() === 'true' ||
+      req.query.exclude_clickbank === '1';
+
     const packages = await PricingPackage.findAll({
       includeInactive: false, // Only show active packages
       includePrivate: true, // Include all packages (public and private) - show all live plans
       moduleKey: module_key || null, // Filter by module if provided
+      excludeClickbank: !!excludeClickbank,
     });
     
     console.log('[Billing] Found packages:', packages.length);
@@ -101,6 +107,12 @@ router.post('/checkout', authenticate, async (req, res) => {
     const pkg = await PricingPackage.findById(packageId);
     if (!pkg) {
       return res.status(404).json({ error: 'Package not found' });
+    }
+
+    if (pkg.is_clickbank_package) {
+      return res.status(400).json({
+        error: 'This plan is sold through ClickBank, not Stripe. Use the ClickBank pay link from the marketing page.',
+      });
     }
     
     // Check if sale is available (active and not sold out)
@@ -165,17 +177,20 @@ router.post('/checkout', authenticate, async (req, res) => {
     
     const feOrigin = String(req.headers.origin || process.env.FRONTEND_URL || '').replace(/\/$/, '');
     const joinFunnel = req.body?.join_funnel;
-    const joinCodeNorm =
+    const joinCodePhone =
       joinFunnel === 'phone-agent' ? normalizeAffiliateCode(req.body?.join_code) : null;
+    const joinCodeReviews =
+      joinFunnel === 'reviews' ? normalizeAffiliateCode(req.body?.join_code) : null;
     const pkgModule = String(pkg.module_key || '').trim() || 'phone-agent';
 
-    let successUrl = `${feOrigin}/dashboard/billing/success?package_id=${encodeURIComponent(packageId)}&from_setup=true&session_id={CHECKOUT_SESSION_ID}`;
-    let cancelUrl = `${feOrigin}/dashboard/setup`;
+    const joinFunnelResolved =
+      joinFunnel === 'phone-agent' || joinFunnel === 'reviews' ? joinFunnel : null;
+    const joinCodeResolved = joinFunnel === 'phone-agent' ? joinCodePhone : joinCodeReviews;
 
-    if (joinCodeNorm && joinFunnel === 'phone-agent' && pkgModule === 'phone-agent') {
-      successUrl = `${feOrigin}/join/phone-agent/${joinCodeNorm}?checkout=success&package_id=${encodeURIComponent(packageId)}&session_id={CHECKOUT_SESSION_ID}`;
-      cancelUrl = `${feOrigin}/join/phone-agent/${joinCodeNorm}`;
-    }
+    const { successUrl, cancelUrl } = buildStripeCheckoutReturnUrls(feOrigin, packageId, pkgModule, {
+      joinFunnel: joinFunnelResolved,
+      joinCode: joinCodeResolved,
+    });
 
     // Create Stripe checkout session with the correct price (sale or regular)
     console.log('[Billing] Creating Stripe checkout session for package:', packageId);
@@ -183,7 +198,8 @@ router.post('/checkout', authenticate, async (req, res) => {
     const affiliateFromBody =
       typeof req.body?.affiliate_code === "string" ? req.body.affiliate_code.trim() : "";
     const joinCodeForAffiliate =
-      req.body?.join_funnel === "phone-agent" && typeof req.body?.join_code === "string"
+      (req.body?.join_funnel === "phone-agent" || req.body?.join_funnel === "reviews") &&
+      typeof req.body?.join_code === "string"
         ? req.body.join_code.trim()
         : "";
     const affiliateCode = affiliateFromBody || joinCodeForAffiliate || null;

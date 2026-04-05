@@ -24,6 +24,42 @@ function hashToken(raw) {
   return crypto.createHash("sha256").update(raw, "utf8").digest("hex");
 }
 
+export async function createPartnerRecordAdmin({ email: emailRaw, display_name: displayRaw, is_sales_rep = false, active = true }) {
+  const email = String(emailRaw || "")
+    .trim()
+    .toLowerCase();
+  const display_name = String(displayRaw || "").trim() || "Partner";
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const err = new Error("Valid email is required");
+    err.code = "INVALID_EMAIL";
+    throw err;
+  }
+
+  const { data: dup } = await supabaseClient.from("affiliate_partners").select("id").eq("email", email).maybeSingle();
+  if (dup?.id) {
+    const err = new Error("A partner with this email already exists");
+    err.code = "DUPLICATE_EMAIL";
+    throw err;
+  }
+
+  const code = await allocateAffiliateCode();
+  const { data: inserted, error } = await supabaseClient
+    .from("affiliate_partners")
+    .insert({
+      application_id: null,
+      affiliate_code: code,
+      email,
+      display_name,
+      active: !!active,
+      is_sales_rep: !!is_sales_rep,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return inserted;
+}
+
 async function allocateAffiliateCode() {
   for (let i = 0; i < 24; i++) {
     let code = "";
@@ -58,6 +94,12 @@ export function issueAffiliateSessionJwt(partnerId) {
   });
 }
 
+export function issueSalesSessionJwt(partnerId) {
+  return jwt.sign({ scope: "sales", salesPartnerId: partnerId }, JWT_SECRET, {
+    expiresIn: AFFILIATE_JWT_EXPIRES,
+  });
+}
+
 /**
  * Validate one-time token, mark used, return partner id.
  */
@@ -87,12 +129,55 @@ export async function consumePortalLoginToken(rawToken) {
   return { ok: true, partnerId: row.partner_id };
 }
 
+/**
+ * Like consumePortalLoginToken, but only succeeds if partner is an active sales rep.
+ * Does not mark the token used if the partner is not a sales rep (so they can still use the affiliate portal link).
+ */
+export async function consumePortalLoginTokenForSalesRep(rawToken) {
+  const tokenHash = hashToken(rawToken);
+  const { data: row, error } = await supabaseClient
+    .from("affiliate_portal_tokens")
+    .select("id, partner_id, expires_at, used_at")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!row) return { ok: false, reason: "invalid_or_used" };
+  if (new Date(row.expires_at) < new Date()) return { ok: false, reason: "expired" };
+
+  const { data: partner, error: pErr } = await supabaseClient
+    .from("affiliate_partners")
+    .select("id, active, is_sales_rep")
+    .eq("id", row.partner_id)
+    .maybeSingle();
+
+  if (pErr) throw pErr;
+  if (!partner?.active || !partner.is_sales_rep) {
+    return { ok: false, reason: "not_sales_rep" };
+  }
+
+  if (row.used_at) {
+    const usedMs = new Date(row.used_at).getTime();
+    const replayWindowMs = 5 * 60 * 1000;
+    if (Date.now() - usedMs < replayWindowMs) {
+      return { ok: true, partnerId: row.partner_id };
+    }
+    return { ok: false, reason: "invalid_or_used" };
+  }
+
+  await supabaseClient.from("affiliate_portal_tokens").update({ used_at: new Date().toISOString() }).eq("id", row.id);
+
+  return { ok: true, partnerId: row.partner_id };
+}
+
 export async function sendPartnerApprovalEmail({ toEmail, name, rawPortalToken, affiliateCode }) {
   const base = getFrontendPublicBaseUrl();
   const portalUrl = `${base}/affiliate/portal?t=${encodeURIComponent(rawPortalToken)}`;
   const trackingBase = `${base}/affiliate/go/${encodeURIComponent(affiliateCode)}`;
   const landingBase = `${base}/r/${encodeURIComponent(affiliateCode)}`;
   const joinPhoneBase = `${base}/join/phone-agent/${encodeURIComponent(affiliateCode)}`;
+  const joinReviewsBase = `${base}/join/reviews/${encodeURIComponent(affiliateCode)}`;
+  const joinDeliveryBase = `${base}/deliverydispatch?partner=${encodeURIComponent(affiliateCode)}`;
   const safeName = escapeHtml(name);
 
   const html = `
@@ -108,6 +193,12 @@ export async function sendPartnerApprovalEmail({ toEmail, name, rawPortalToken, 
       <p style="font-size: 13px; word-break: break-all; background:#f9fafb;padding:12px;border-radius:8px;"><a href="${escapeHtml(trackingBase)}">${escapeHtml(trackingBase)}</a></p>
       <p style="font-size: 14px; color: #374151; margin-top: 16px;"><strong>Your partner landing page</strong> (share this too—same attribution; product buttons include your code automatically):</p>
       <p style="font-size: 13px; word-break: break-all; background:#f9fafb;padding:12px;border-radius:8px;"><a href="${escapeHtml(landingBase)}">${escapeHtml(landingBase)}</a></p>
+      <p style="font-size: 14px; color: #374151; margin-top: 20px;"><strong>Product signup links</strong> (full funnels; your code is embedded):</p>
+      <ul style="font-size: 13px; color: #374151; padding-left: 20px; margin: 8px 0 0 0;">
+        <li style="margin-bottom: 8px;"><strong>AI Phone Agent:</strong><br/><a href="${escapeHtml(joinPhoneBase)}">${escapeHtml(joinPhoneBase)}</a></li>
+        <li style="margin-bottom: 8px;"><strong>Review Reply:</strong><br/><a href="${escapeHtml(joinReviewsBase)}">${escapeHtml(joinReviewsBase)}</a></li>
+        <li><strong>Delivery Dispatch:</strong><br/><a href="${escapeHtml(joinDeliveryBase)}">${escapeHtml(joinDeliveryBase)}</a></li>
+      </ul>
       <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">If the button does not work, paste this URL into your browser:<br/>${escapeHtml(portalUrl)}</p>
     </div>
   `;
@@ -127,7 +218,13 @@ ${trackingBase}
 AI Phone full page (demo + signup + pay on one page):
 ${joinPhoneBase}
 
-Short hub (/r/…):
+Review Reply (signup + plan + pay):
+${joinReviewsBase}
+
+Delivery Dispatch (customer landing with your partner code):
+${joinDeliveryBase}
+
+Short hub (/r/…, links to all products):
 ${landingBase}
 
 `;
@@ -320,6 +417,62 @@ export async function requestPartnerMagicLink(emailRaw) {
   return { ok: true };
 }
 
+export async function sendSalesMagicLinkEmail({ toEmail, name, rawPortalToken }) {
+  const base = getFrontendPublicBaseUrl();
+  const portalUrl = `${base}/sales/portal?t=${encodeURIComponent(rawPortalToken)}`;
+  const safeName = escapeHtml(name || "there");
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+      <h2 style="color: #0f766e;">Your Tavari sales team sign-in link</h2>
+      <p>Hi ${safeName},</p>
+      <p>Click below to open the sales portal. This link expires in 14 days and can only be used once.</p>
+      <p style="margin: 24px 0;">
+        <a href="${escapeHtml(portalUrl)}" style="background: #0d9488; color: #fff; padding: 12px 20px; text-decoration: none; border-radius: 8px; display: inline-block;">Open sales portal</a>
+      </p>
+      <p style="color: #6b7280; font-size: 13px;">${escapeHtml(portalUrl)}</p>
+    </div>
+  `;
+
+  const text = `Hi ${name || "there"},
+
+Sign in to the Tavari sales portal:
+${portalUrl}
+`;
+
+  await sendEmail(toEmail, "Sales portal sign-in link", text, html, "Tavari Sales", null);
+}
+
+/**
+ * Magic link for affiliate_partners where is_sales_rep is true (same token table as affiliates).
+ */
+export async function requestSalesMagicLink(emailRaw) {
+  const email = String(emailRaw || "").trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, reason: "invalid_email" };
+  }
+
+  const { data: partner, error } = await supabaseClient
+    .from("affiliate_partners")
+    .select("id, email, display_name, active, is_sales_rep")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!partner || !partner.active || !partner.is_sales_rep) {
+    return { ok: true, silent: true };
+  }
+
+  const { rawToken } = await createPortalLoginToken(partner.id);
+  await sendSalesMagicLinkEmail({
+    toEmail: partner.email,
+    name: partner.display_name,
+    rawPortalToken: rawToken,
+  });
+
+  return { ok: true };
+}
+
 const AFFILIATE_CODE_RE = /^[A-Z0-9]{4,16}$/;
 
 export function normalizeAffiliateCode(raw) {
@@ -332,10 +485,27 @@ export function normalizeAffiliateCode(raw) {
 
 /**
  * Resolve partner for phone-agent Stripe events.
- * Priority: affiliate_code on checkout session or embedded subscription metadata, then subscription metadata alone,
- * then businesses.referred_by_partner_id (admin-assigned).
+ * Priority: businesses.referred_by_partner_id (sales / admin assignment) wins over Stripe metadata affiliate_code
+ * so assigned accounts are not credited to a stale cookie or another partner's code on checkout.
+ * If there is no assignment, use affiliate_code on the checkout session, embedded subscription, or subscription only.
  */
 export async function resolveAffiliatePartnerForPhoneAgentStripe(businessId, { session = null, subscription = null } = {}) {
+  if (businessId) {
+    const { Business } = await import("../models/Business.js");
+    const business = await Business.findById(businessId);
+    const refId = business?.referred_by_partner_id;
+    if (refId) {
+      const { data: partner, error: pErr } = await supabaseClient
+        .from("affiliate_partners")
+        .select("id")
+        .eq("id", refId)
+        .eq("active", true)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      if (partner) return { partner, attributionSource: "business_referral_assignment" };
+    }
+  }
+
   let code = null;
   if (session) {
     code = normalizeAffiliateCode(session.metadata?.affiliate_code);
@@ -356,22 +526,6 @@ export async function resolveAffiliatePartnerForPhoneAgentStripe(businessId, { s
       .maybeSingle();
     if (pErr) throw pErr;
     if (partner) return { partner, attributionSource: "stripe_metadata" };
-  }
-
-  if (businessId) {
-    const { Business } = await import("../models/Business.js");
-    const business = await Business.findById(businessId);
-    const refId = business?.referred_by_partner_id;
-    if (refId) {
-      const { data: partner, error: pErr } = await supabaseClient
-        .from("affiliate_partners")
-        .select("id")
-        .eq("id", refId)
-        .eq("active", true)
-        .maybeSingle();
-      if (pErr) throw pErr;
-      if (partner) return { partner, attributionSource: "business_referral_assignment" };
-    }
   }
 
   return { partner: null, attributionSource: null };

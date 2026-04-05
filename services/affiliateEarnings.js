@@ -360,17 +360,25 @@ export async function reverseAffiliateEarningsForPaymentIntent(paymentIntentId) 
 }
 
 export async function listPartnerEarnings(partnerId, { limit = 100 } = {}) {
+  const cap = Math.min(Number(limit) || 100, 500);
+  const fetchCap = Math.min(500, Math.max(cap, cap * 4));
   const { data, error } = await supabaseClient
     .from("affiliate_earnings")
     .select(
-      "id, module_key, earning_type, gross_amount_cents, commission_cents, currency, status, payment_received_at, refund_hold_until, eligible_at, metadata, created_at, stripe_checkout_session_id, stripe_invoice_id",
+      "id, business_id, module_key, earning_type, gross_amount_cents, commission_cents, currency, status, payment_received_at, refund_hold_until, eligible_at, metadata, created_at, stripe_checkout_session_id, stripe_invoice_id",
     )
     .eq("partner_id", partnerId)
     .order("created_at", { ascending: false })
-    .limit(Math.min(Number(limit) || 100, 500));
+    .limit(fetchCap);
 
   if (error) throw error;
-  return data || [];
+  const rows = data || [];
+  rows.sort((a, b) => {
+    const ta = new Date(a.payment_received_at || a.created_at || 0).getTime();
+    const tb = new Date(b.payment_received_at || b.created_at || 0).getTime();
+    return tb - ta;
+  });
+  return rows.slice(0, cap);
 }
 
 export async function createManualAffiliateEarning(
@@ -520,15 +528,134 @@ async function getStripeOptional() {
   }
 }
 
+async function loadNonReversedEarningsForBusiness(businessId) {
+  const { data, error } = await supabaseClient
+    .from("affiliate_earnings")
+    .select("id, earning_type, partner_id, metadata, stripe_invoice_id, stripe_charge_id")
+    .eq("business_id", businessId)
+    .neq("status", "reversed");
+  if (error) throw error;
+  return data || [];
+}
+
+function hasEarningForLocalInvoiceId(existing, localInvoiceId) {
+  const lid = String(localInvoiceId || "");
+  return existing.some((e) => e.metadata && String(e.metadata.local_invoice_id || "") === lid);
+}
+
+function hasAnyFirstSaleEarning(existing) {
+  return existing.some((e) => e.earning_type === "first_sale");
+}
+
+/**
+ * Paid subscription invoices in DB with no Stripe invoice id (webhook omitted invoice) — create ledger rows
+ * only when no first_sale exists yet (avoids double commission when another partner holds checkout row).
+ */
+async function backfillPhoneAgentFromPaidInvoicesWithoutStripeId(businessId, partnerRow, moduleKey, rules, existing) {
+  const { data: rows, error } = await supabaseClient
+    .from("invoices")
+    .select("id, stripe_invoice_id, amount, currency, invoice_type, paid_at")
+    .eq("business_id", businessId)
+    .eq("status", "paid")
+    .in("invoice_type", ["subscription_setup", "subscription_recurring"])
+    .order("paid_at", { ascending: true });
+
+  if (error) throw error;
+
+  const invoices = (rows || []).filter((inv) => !inv.stripe_invoice_id || String(inv.stripe_invoice_id).trim() === "");
+
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const inv of invoices) {
+    if (hasEarningForLocalInvoiceId(existing, inv.id)) {
+      skipped += 1;
+      continue;
+    }
+
+    const isSetup = inv.invoice_type === "subscription_setup";
+    const isRecurring = inv.invoice_type === "subscription_recurring";
+
+    if (isSetup && hasAnyFirstSaleEarning(existing)) {
+      skipped += 1;
+      continue;
+    }
+    if (isRecurring && !rules.recurring_enabled) {
+      skipped += 1;
+      continue;
+    }
+
+    const earningType = isSetup ? "first_sale" : "recurring";
+    const pct = isSetup ? rules.first_sale_commission_percent : rules.recurring_commission_percent;
+    const grossCents = Math.round((Number(inv.amount) || 0) * 100);
+    const commission = Math.round((grossCents * pct) / 100);
+    const paidAt = inv.paid_at ? new Date(inv.paid_at).toISOString() : new Date().toISOString();
+    const holdUntil = addDays(paidAt, rules.refund_hold_days);
+    const currency = String(inv.currency || "cad").toUpperCase();
+
+    const { error: earnErr } = await supabaseClient.from("affiliate_earnings").insert({
+      partner_id: partnerRow.id,
+      module_key: moduleKey,
+      earning_type: earningType,
+      gross_amount_cents: grossCents,
+      commission_cents: commission,
+      currency,
+      status: "accruing",
+      payment_received_at: paidAt,
+      refund_hold_until: holdUntil,
+      volume_gate_required: false,
+      business_id: businessId,
+      metadata: {
+        source: "backfill_local_invoice",
+        attribution_source: "business_referral_assignment",
+        local_invoice_id: inv.id,
+      },
+    });
+
+    if (earnErr) {
+      console.error("[affiliateEarnings] backfill local invoice insert failed:", earnErr);
+      skipped += 1;
+      continue;
+    }
+
+    await supabaseClient.from("affiliate_events").insert({
+      partner_id: partnerRow.id,
+      event_type: "conversion",
+      amount_cents: grossCents,
+      currency,
+      metadata: {
+        business_id: businessId,
+        source: "backfill_local_invoice",
+        ledger: "affiliate_earnings",
+        attribution_source: "business_referral_assignment",
+        local_invoice_id: inv.id,
+      },
+    });
+
+    existing.push({
+      id: "new",
+      earning_type: earningType,
+      partner_id: partnerRow.id,
+      metadata: { local_invoice_id: inv.id },
+    });
+    inserted += 1;
+  }
+
+  return { inserted, skipped };
+}
+
 /**
  * Create affiliate_earnings from paid subscription invoices in DB (idempotent).
  * Skips rows already keyed by stripe_invoice_id or stripe_charge_id (e.g. prior checkout attribution).
+ * Also backfills paid invoices that have no stripe_invoice_id when safe (no existing first_sale row).
  * Use when a business is linked to a partner after payments already occurred.
  */
 export async function backfillPhoneAgentAffiliateEarningsFromInvoices(businessId, partnerRow) {
   const moduleKey = AFFILIATE_MODULE_PHONE;
   const rules = await resolveCommissionRules(moduleKey);
   const stripe = await getStripeOptional();
+
+  let existing = await loadNonReversedEarningsForBusiness(businessId);
 
   const { data: invoices, error: invErr } = await supabaseClient
     .from("invoices")
@@ -547,6 +674,11 @@ export async function backfillPhoneAgentAffiliateEarningsFromInvoices(businessId
   for (const inv of invoices || []) {
     const stripeInvoiceId = String(inv.stripe_invoice_id || "").trim();
     if (!stripeInvoiceId) {
+      skipped += 1;
+      continue;
+    }
+
+    if (hasEarningForLocalInvoiceId(existing, inv.id)) {
       skipped += 1;
       continue;
     }
@@ -647,9 +779,35 @@ export async function backfillPhoneAgentAffiliateEarningsFromInvoices(businessId
       console.error("[affiliateEarnings] backfill affiliate_events insert failed:", evErr);
     }
 
+    existing.push({
+      id: "new",
+      earning_type: earningType,
+      partner_id: partnerRow.id,
+      metadata: { local_invoice_id: inv.id },
+      stripe_invoice_id: stripeInvoiceId,
+      stripe_charge_id: chargeId,
+    });
     inserted += 1;
   }
 
+  const insertedFromStripe = inserted;
+
+  existing = await loadNonReversedEarningsForBusiness(businessId);
+  const localPart = await backfillPhoneAgentFromPaidInvoicesWithoutStripeId(
+    businessId,
+    partnerRow,
+    moduleKey,
+    rules,
+    existing,
+  );
+  inserted += localPart.inserted;
+  skipped += localPart.skipped;
+
   await promoteAccruingAffiliateEarnings();
-  return { inserted, skipped };
+  return {
+    inserted,
+    skipped,
+    inserted_from_stripe_invoice: insertedFromStripe,
+    inserted_from_local_invoice: localPart.inserted,
+  };
 }

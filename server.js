@@ -412,6 +412,7 @@ import vapiRoutes from "./routes/vapi.js";
 import adminRoutes from "./routes/admin.js";
 import supportRoutes from "./routes/support.js";
 import affiliatePortalRoutes from "./routes/affiliate-portal.js";
+import salesPortalRoutes from "./routes/sales-portal.js";
 import invoicesRoutes from "./routes/invoices.js";
 import accountRoutes from "./routes/account.js";
 import businessRoutes from "./routes/business.js";
@@ -439,6 +440,9 @@ app.use("/api/affiliate/exchange", contactLimiter);
 app.use("/api/affiliate/request-link", contactLimiter);
 app.use("/api/affiliate/track/click", contactLimiter);
 app.use("/api/affiliate/public-partner", contactLimiter);
+app.use("/api/sales/exchange", contactLimiter);
+app.use("/api/sales/request-link", contactLimiter);
+app.use("/api/sales/checkout-invite", contactLimiter);
 app.use("/api/kiosk", kioskLimiter); // More lenient rate limiting for kiosk (continuous polling)
 
 // Apply admin limiter to all admin routes EXCEPT login (which is handled above)
@@ -461,6 +465,7 @@ app.use("/api/vapi", vapiRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/affiliate", affiliatePortalRoutes);
+app.use("/api/sales", salesPortalRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/account", accountRoutes);
 app.use("/api/business", businessRoutes);
@@ -512,7 +517,9 @@ try {
   app.use("/api/v2/admin", v2AdminRoutes);
   app.use("/api/v2/notifications", v2NotificationsRoutes);
   
-  // Load reviews setup routes first (doesn't require openai)
+  // Reviews: two routers on /api/v2/reviews (Express stacks them).
+  // 1) reviews-setup.js — wizard + GET /usage (no OpenAI import).
+  // 2) reviews.js — generate, history, settings, feedback (imports services/reviews.js → OpenAI).
   try {
     const v2ReviewsSetupRoutes = (await import("./routes/v2/reviews-setup.js")).default;
     app.use("/api/v2/reviews", v2ReviewsSetupRoutes);
@@ -520,18 +527,15 @@ try {
   } catch (setupError) {
     console.warn('⚠️  Reviews setup routes not loaded:', setupError.message);
   }
-  
-  // Load reviews main routes separately (requires openai package)
+
   try {
     const reviewsModule = await import("./routes/v2/reviews.js");
     const v2ReviewsRoutes = reviewsModule?.default;
     if (!v2ReviewsRoutes) {
-      console.warn('⚠️  Reviews module routes file is empty or has no default export - skipping');
-      console.warn('⚠️  The reviews module will not be available until reviews.js is properly implemented.');
+      console.warn('⚠️  Reviews runtime routes missing default export — skipping');
     } else {
       app.use("/api/v2/reviews", v2ReviewsRoutes);
-      console.log('✅ Reviews module routes loaded');
-      console.log('✅ Reviews routes registered at /api/v2/reviews');
+      console.log('✅ Reviews runtime routes loaded (generate, settings, history, feedback)');
     }
   } catch (reviewsError) {
     // Only log as warning if it's a missing file, otherwise error

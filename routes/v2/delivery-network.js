@@ -18,7 +18,12 @@ import {
   getCarrierOptionsForRequest,
   rejectStagedOnDemandQuoteForRequest,
 } from '../../services/delivery-network/carrierChoice.js';
-import { getDeliveryConfig, getDeliveryConfigFull, invalidateDeliveryConfigCache } from '../../services/delivery-network/config.js';
+import {
+  getDeliveryConfig,
+  getDeliveryConfigFull,
+  invalidateDeliveryConfigCache,
+  updateDeliveryConfig,
+} from '../../services/delivery-network/config.js';
 import { getEmergencyConfig } from '../../services/emergency-network/config.js';
 import { getPhoneNumbersForBusiness } from '../../utils/businessPhoneNumbersForDropdown.js';
 import { createDeliveryNetworkAssistant } from '../../services/delivery-network/create-vapi-assistant.js';
@@ -1048,73 +1053,7 @@ router.post('/website-pages/upload-hero', uploadHero.single('file'), async (req,
  */
 router.put('/config', express.json(), async (req, res) => {
   try {
-    const { delivery_phone_numbers, delivery_vapi_assistant_id, max_dispatch_attempts, notification_email, notification_sms_number, email_enabled, sms_enabled, escalation_email_enabled, escalation_sms_enabled, customer_sms_enabled, customer_sms_message, customer_sms_legal, terms_of_service_url, intake_fields, opening_greeting, service_line_name, custom_instructions, customer_callback_message, billing } = req.body || {};
-    const updates = {};
-    if (Array.isArray(delivery_phone_numbers)) updates.delivery_phone_numbers = delivery_phone_numbers;
-    if (delivery_vapi_assistant_id !== undefined) updates.delivery_vapi_assistant_id = delivery_vapi_assistant_id || null;
-    if (typeof max_dispatch_attempts === 'number') updates.max_dispatch_attempts = max_dispatch_attempts;
-    if (notification_email !== undefined) updates.notification_email = notification_email ? String(notification_email).trim() || null : null;
-    if (notification_sms_number !== undefined) updates.notification_sms_number = notification_sms_number ? String(notification_sms_number).trim() || null : null;
-    if (email_enabled !== undefined) updates.email_enabled = !!email_enabled;
-    if (sms_enabled !== undefined) updates.sms_enabled = !!sms_enabled;
-    if (escalation_email_enabled !== undefined) updates.escalation_email_enabled = !!escalation_email_enabled;
-    if (escalation_sms_enabled !== undefined) updates.escalation_sms_enabled = !!escalation_sms_enabled;
-    if (customer_sms_enabled !== undefined) updates.customer_sms_enabled = !!customer_sms_enabled;
-    if (customer_sms_message !== undefined) updates.customer_sms_message = customer_sms_message ? String(customer_sms_message).trim() || null : null;
-    if (customer_sms_legal !== undefined) updates.customer_sms_legal = customer_sms_legal ? String(customer_sms_legal).trim() || null : null;
-    if (terms_of_service_url !== undefined) updates.terms_of_service_url = terms_of_service_url ? String(terms_of_service_url).trim() || null : null;
-    if (opening_greeting !== undefined) updates.opening_greeting = opening_greeting ? String(opening_greeting).trim() || null : null;
-    if (service_line_name !== undefined) updates.service_line_name = service_line_name ? String(service_line_name).trim() || null : null;
-    if (custom_instructions !== undefined) updates.custom_instructions = custom_instructions ? String(custom_instructions).trim() || null : null;
-    if (customer_callback_message !== undefined) updates.customer_callback_message = customer_callback_message ? String(customer_callback_message).trim() || null : null;
-    if (billing !== undefined && billing !== null && typeof billing === 'object') {
-      updates.billing = {
-        price_basic_cents: typeof billing.price_basic_cents === 'number' ? billing.price_basic_cents : undefined,
-        price_priority_cents: typeof billing.price_priority_cents === 'number' ? billing.price_priority_cents : undefined,
-        price_premium_cents: typeof billing.price_premium_cents === 'number' ? billing.price_premium_cents : undefined,
-        sms_fee_cents: typeof billing.sms_fee_cents === 'number' ? billing.sms_fee_cents : undefined,
-      };
-      Object.keys(updates.billing).forEach((k) => { if (updates.billing[k] === undefined) delete updates.billing[k]; });
-    }
-    if (intake_fields !== undefined && Array.isArray(intake_fields)) {
-      updates.intake_fields = intake_fields.map((f) => ({
-        key: String(f.key || '').trim() || undefined,
-        label: String(f.label || '').trim() || undefined,
-        required: !!f.required,
-        enabled: f.enabled !== false,
-      })).filter((f) => f.key);
-    }
-
-    const { data: row, error } = await supabaseClient
-      .from('delivery_network_config')
-      .select('value')
-      .eq('key', 'settings')
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      return res.status(500).json({ error: error.message });
-    }
-
-    const current = (row?.value || {}) instanceof Object ? row.value : {};
-    const newValue = { ...current, ...updates };
-    if (updates.billing) {
-      newValue.billing = { ...(current.billing || {}), ...updates.billing };
-    }
-
-    const { error: upsertErr } = await supabaseClient
-      .from('delivery_network_config')
-      .upsert({ key: 'settings', value: newValue, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-
-    if (upsertErr) {
-      const msg = upsertErr.message || 'Database error';
-      const isMissingTable = msg.includes('relation') && msg.includes('does not exist') || upsertErr.code === '42P01';
-      return res.status(500).json({
-        error: isMissingTable
-          ? 'Delivery config table missing. Run migration: migrations/add_delivery_network.sql'
-          : msg,
-      });
-    }
-    invalidateDeliveryConfigCache();
+    await updateDeliveryConfig(req.body || {});
     const finalConfig = await getDeliveryConfig();
     const assistantId = finalConfig.delivery_vapi_assistant_id || null;
     const numbers = finalConfig.delivery_phone_numbers || [];

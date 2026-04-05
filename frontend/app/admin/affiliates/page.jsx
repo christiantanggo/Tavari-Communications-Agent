@@ -45,6 +45,11 @@ export default function AdminAffiliatesPage() {
   const pathname = usePathname();
   const router = useRouter();
   const [sectionTab, setSectionTab] = useState('applications');
+  const [partners, setPartners] = useState([]);
+  const [partnersLoading, setPartnersLoading] = useState(false);
+  const [partnersError, setPartnersError] = useState('');
+  const [newPartner, setNewPartner] = useState({ email: '', display_name: '', is_sales_rep: true });
+  const [partnerBusy, setPartnerBusy] = useState(false);
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -90,14 +95,93 @@ export default function AdminAffiliatesPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const q = new URLSearchParams(window.location.search);
-    if (q.get('tab') === 'commission') setSectionTab('commission');
+    const tab = q.get('tab');
+    if (tab === 'commission') setSectionTab('commission');
+    if (tab === 'partners') setSectionTab('partners');
   }, []);
 
   const goSection = (tab) => {
     setSectionTab(tab);
     const path = pathname || '/admin/affiliates';
-    const next = tab === 'commission' ? `${path}?tab=commission` : path;
+    let next = path;
+    if (tab === 'commission') next = `${path}?tab=commission`;
+    else if (tab === 'partners') next = `${path}?tab=partners`;
     router.replace(next, { scroll: false });
+  };
+
+  const loadPartners = useCallback(async () => {
+    setPartnersLoading(true);
+    setPartnersError('');
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`${API_URL}/api/admin/affiliate-partners`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setPartners(data.partners || []);
+    } catch (e) {
+      setPartners([]);
+      setPartnersError(e.message || 'Failed to load partners');
+    } finally {
+      setPartnersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (sectionTab === 'partners') loadPartners();
+  }, [sectionTab, loadPartners]);
+
+  const patchPartner = async (id, body) => {
+    setPartnerBusy(true);
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`${API_URL}/api/admin/affiliate-partners/${id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await loadPartners();
+    } catch (e) {
+      alert(e.message || 'Update failed');
+    } finally {
+      setPartnerBusy(false);
+    }
+  };
+
+  const createPartner = async (e) => {
+    e.preventDefault();
+    setPartnerBusy(true);
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`${API_URL}/api/admin/affiliate-partners`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: newPartner.email.trim(),
+          display_name: newPartner.display_name.trim() || newPartner.email.trim(),
+          is_sales_rep: newPartner.is_sales_rep,
+          active: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setNewPartner({ email: '', display_name: '', is_sales_rep: true });
+      await loadPartners();
+      alert('Partner created. Send them a magic link from Sales sign-in or create a portal token from support tooling.');
+    } catch (err) {
+      alert(err.message || 'Create failed');
+    } finally {
+      setPartnerBusy(false);
+    }
   };
 
   const setStatus = async (id, status) => {
@@ -287,11 +371,130 @@ export default function AdminAffiliatesPage() {
               >
                 Commission &amp; payout rules
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sectionTab === 'partners'}
+                onClick={() => goSection('partners')}
+                className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded-t-md ${
+                  sectionTab === 'partners'
+                    ? 'border-blue-600 text-blue-700 bg-gray-50/80'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 hover:bg-gray-50'
+                }`}
+              >
+                Partners &amp; sales reps
+              </button>
             </nav>
           </div>
         </div>
 
         {sectionTab === 'commission' && <AffiliateCommissionSettingsPanel variant="embedded" />}
+
+        {sectionTab === 'partners' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold text-gray-900">Create partner or sales rep</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Creates an <code className="text-xs bg-gray-100 px-1 rounded">affiliate_partners</code> row with a unique
+                code. Enable <strong>Sales rep</strong> for the sales portal (magic link from{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">/sales/login</code>). Run migration{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">add_sales_rep_portal.sql</code> first.
+              </p>
+              <form onSubmit={createPartner} className="mt-4 grid sm:grid-cols-2 gap-3 max-w-2xl">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700">Email *</label>
+                  <input
+                    required
+                    type="email"
+                    value={newPartner.email}
+                    onChange={(e) => setNewPartner({ ...newPartner, email: e.target.value })}
+                    className="mt-0.5 w-full border rounded-md px-3 py-2 text-sm text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700">Display name</label>
+                  <input
+                    value={newPartner.display_name}
+                    onChange={(e) => setNewPartner({ ...newPartner, display_name: e.target.value })}
+                    className="mt-0.5 w-full border rounded-md px-3 py-2 text-sm text-gray-900"
+                    placeholder="Optional"
+                  />
+                </div>
+                <label className="sm:col-span-2 flex items-center gap-2 text-sm text-gray-800">
+                  <input
+                    type="checkbox"
+                    checked={newPartner.is_sales_rep}
+                    onChange={(e) => setNewPartner({ ...newPartner, is_sales_rep: e.target.checked })}
+                  />
+                  Sales rep (can use sales portal)
+                </label>
+                <button
+                  type="submit"
+                  disabled={partnerBusy}
+                  className="sm:col-span-2 w-fit bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {partnerBusy ? 'Creating…' : 'Create'}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                <h2 className="text-lg font-semibold text-gray-900">All partners</h2>
+                <button
+                  type="button"
+                  onClick={loadPartners}
+                  className="text-sm text-blue-600 hover:underline"
+                  disabled={partnersLoading}
+                >
+                  Refresh
+                </button>
+              </div>
+              {partnersError && <p className="px-4 py-2 text-sm text-red-700">{partnersError}</p>}
+              {partnersLoading && <p className="px-4 py-6 text-sm text-gray-600">Loading…</p>}
+              {!partnersLoading && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase">
+                      <tr>
+                        <th className="px-4 py-2">Code</th>
+                        <th className="px-4 py-2">Email</th>
+                        <th className="px-4 py-2">Name</th>
+                        <th className="px-4 py-2">Sales</th>
+                        <th className="px-4 py-2">Active</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {partners.map((p) => (
+                        <tr key={p.id}>
+                          <td className="px-4 py-2 font-mono text-xs">{p.affiliate_code}</td>
+                          <td className="px-4 py-2">{p.email}</td>
+                          <td className="px-4 py-2">{p.display_name}</td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              checked={!!p.is_sales_rep}
+                              onChange={(e) => patchPartner(p.id, { is_sales_rep: e.target.checked })}
+                              disabled={partnerBusy}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              checked={!!p.active}
+                              onChange={(e) => patchPartner(p.id, { active: e.target.checked })}
+                              disabled={partnerBusy}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {sectionTab === 'applications' && loading && applications.length === 0 && !error && (
           <div className="flex items-center justify-center min-h-[40vh] rounded-lg border border-gray-100 bg-white">

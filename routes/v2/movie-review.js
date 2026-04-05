@@ -48,21 +48,21 @@ async function getProject(projectId, businessId) {
     .single();
   if (error || !data) return null;
   const project = data;
-  // Fallback: if project has no render_url but a completed render exists, use its output_url
-  // (handles race where user opens upload before renderer updated the project row)
-  if (project && !(project.render_url && project.render_url.trim())) {
-    const { data: latestRender } = await supabaseClient
-      .from('movie_review_renders')
-      .select('output_url')
-      .eq('project_id', project.id)
-      .eq('status', 'DONE')
-      .not('output_url', 'is', null)
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (latestRender?.output_url) {
-      project.render_url = latestRender.output_url.trim();
-    }
+  // Always prefer the latest completed render file for uploads (source of truth).
+  // The project row's render_url can lag or drift after re-renders; without this,
+  // YouTube uploads may silently use an older MP4 while the UI shows no error.
+  const { data: latestDone } = await supabaseClient
+    .from('movie_review_renders')
+    .select('output_url')
+    .eq('project_id', project.id)
+    .eq('status', 'DONE')
+    .not('output_url', 'is', null)
+    .order('completed_at', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestDone?.output_url?.trim()) {
+    project.render_url = latestDone.output_url.trim();
   }
   return project;
 }
@@ -1407,7 +1407,7 @@ router.post('/projects/:id/upload', async (req, res) => {
   const projectId = req.params.id;
   const businessId = req.active_business_id;
   try {
-    const project = await getProject(projectId, businessId);
+    let project = await getProject(projectId, businessId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (!project.render_url) return res.status(400).json({ error: 'Render the video first' });
 
@@ -1416,15 +1416,28 @@ router.post('/projects/:id/upload', async (req, res) => {
       .update({ status: 'UPLOADING', upload_error: null, updated_at: new Date().toISOString() })
       .eq('id', project.id);
 
+    // Re-load so render_url matches the newest DONE render (avoids stale URL after re-render).
+    project = await getProject(projectId, businessId);
+    if (!project?.render_url) {
+      return res.status(400).json({ error: 'Render the video first' });
+    }
+
     const { publishMovieReview } = await import('../../services/movie-review/publisher.js');
     await publishMovieReview(project, businessId);
 
     const updated = await getProject(projectId, businessId);
-    res.json({ project: updated });
+    return res.json({ project: updated });
   } catch (err) {
+    console.error('[MovieReview Upload] Failed:', err?.message || err);
     const updated = await getProject(projectId, businessId).catch(() => null);
-    if (updated) res.json({ project: updated });
-    else res.status(500).json({ error: err.message });
+    const message =
+      String(err?.message || '').trim() ||
+      (updated?.upload_error ? String(updated.upload_error).trim() : '') ||
+      'Upload failed';
+    return res.status(500).json({
+      error: message,
+      ...(updated ? { project: updated } : {}),
+    });
   }
 });
 

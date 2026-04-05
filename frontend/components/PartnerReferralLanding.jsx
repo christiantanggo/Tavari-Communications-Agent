@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { APP_DISPLAY_NAME } from '@/lib/appBrand';
-import { AFFILIATE_REF_COOKIE, AFFILIATE_REF_MAX_AGE_SEC } from '@/lib/affiliateCookie';
+import { buildAffiliateRefClientCookie } from '@/lib/affiliateCookie';
 import { getApiBaseUrl } from '@/lib/api';
 
 const PRODUCT_CARDS = [
@@ -13,6 +13,13 @@ const PRODUCT_CARDS = [
     blurb:
       'Never miss a call—an AI answers in your voice, books appointments, and hands off to you when it matters. Built for busy shops and service businesses.',
     cta: 'See how it works',
+  },
+  {
+    module_key: 'reviews',
+    title: 'Review Reply AI',
+    blurb:
+      'Turn Google reviews into on-brand replies in seconds—multiple tone options, ready to paste. Card checkout (Stripe) on the next page.',
+    cta: 'Start Review Reply',
   },
   {
     module_key: 'delivery-dispatch',
@@ -107,12 +114,14 @@ export default function PartnerReferralLanding({ code, initial, nextPath }) {
 
           <section className="mt-12 border-t border-slate-100 pt-10">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Popular with businesses</h2>
-            <div className="mt-6 grid gap-6 sm:grid-cols-2">
+            <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {PRODUCT_CARDS.map((p) => {
                 const href =
                   p.module_key === 'phone-agent'
                     ? `/join/phone-agent/${encodeURIComponent(code)}`
-                    : `${p.path}?${q}`;
+                    : p.module_key === 'reviews'
+                      ? `/join/reviews/${encodeURIComponent(code)}`
+                      : `${p.path}?${q}`;
                 return (
                   <div
                     key={p.module_key}
@@ -138,6 +147,11 @@ export default function PartnerReferralLanding({ code, initial, nextPath }) {
             Checkout asks for a code?
           </summary>
           <p className="mt-3 border-t border-slate-100 pt-3 leading-relaxed">
+            AI Phone and Review Reply here use <strong className="font-medium text-slate-800">Stripe</strong> (card).
+            If you opened a <strong className="font-medium text-slate-800">ClickBank</strong> pay link elsewhere,
+            finish that checkout there—it is a separate retailer flow for the same products when we offer it.
+          </p>
+          <p className="mt-3 leading-relaxed">
             Rarely, a payment screen may ask for a reference. Use this code:{' '}
             <span className="font-mono text-slate-800">{code}</span>
             <button

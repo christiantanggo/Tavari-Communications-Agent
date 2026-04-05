@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import Link from 'next/link';
+import { billingSuccessClientRedirectPath } from '@/lib/billingModuleRedirects';
 
 function BillingSuccessContent() {
   const searchParams = useSearchParams();
@@ -13,13 +14,15 @@ function BillingSuccessContent() {
   const sessionId = searchParams.get('session_id');
   const packageId = searchParams.get('package_id');
   const fromSetup = searchParams.get('from_setup') === 'true';
+  const moduleKey = searchParams.get('module_key');
+  const redirectTarget = billingSuccessClientRedirectPath(moduleKey, { fromSetup });
 
   useEffect(() => {
     const verifySession = async () => {
       // If coming from setup wizard without session_id, just redirect to step 6
       if (fromSetup && packageId && !sessionId) {
         const timer = setTimeout(() => {
-          router.push('/dashboard/setup?step=6&payment_completed=true');
+          router.push(redirectTarget);
         }, 2000);
         setLoading(false);
         return () => clearTimeout(timer);
@@ -34,19 +37,9 @@ function BillingSuccessContent() {
           if (response.data.success) {
             console.log('[Billing Success] Session verified:', response.data);
             
-            // If coming from setup wizard, redirect back to setup at step 6
-            if (fromSetup) {
-              const timer = setTimeout(() => {
-                router.push('/dashboard/setup?step=6&payment_completed=true');
-              }, 2000);
-              setLoading(false);
-              return () => clearTimeout(timer);
-            }
-            
-            // Otherwise redirect to billing page
             const timer = setTimeout(() => {
-              router.push('/dashboard/billing');
-            }, 3000);
+              router.push(redirectTarget);
+            }, fromSetup ? 2000 : 3000);
             setLoading(false);
             return () => clearTimeout(timer);
           } else {
@@ -57,11 +50,7 @@ function BillingSuccessContent() {
           console.error('[Billing Success] Error verifying session:', err);
           // Still redirect after delay even if verification fails (webhook may have processed it)
           const timer = setTimeout(() => {
-            if (fromSetup) {
-              router.push('/dashboard/setup?step=6&payment_completed=true');
-            } else {
-              router.push('/dashboard/billing');
-            }
+            router.push(redirectTarget);
           }, 3000);
           setLoading(false);
           return () => clearTimeout(timer);
@@ -74,7 +63,7 @@ function BillingSuccessContent() {
     };
 
     verifySession();
-  }, [sessionId, packageId, fromSetup, router]);
+  }, [sessionId, packageId, fromSetup, moduleKey, redirectTarget, router]);
 
   if (loading) {
     return (
@@ -117,14 +106,14 @@ function BillingSuccessContent() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h1>
             <p className="text-gray-600">
-              Your subscription has been activated. You'll be redirected to your billing page shortly.
+              Your subscription has been activated. You&apos;ll be redirected to your dashboard shortly.
             </p>
           </div>
           <Link
-            href="/dashboard/billing"
+            href={redirectTarget}
             className="block w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
           >
-            Go to Billing Dashboard
+            Continue
           </Link>
         </div>
       </div>

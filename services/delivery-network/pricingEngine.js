@@ -41,7 +41,7 @@ export async function getDeliveryPricingConfig(businessId = null) {
     minimum_delivery_price_cad: DEFAULT_MINIMUM_DELIVERY_PRICE_CAD,
     minimum_enabled: true,
     bypass_minimum: false,
-    exchange_rate_source: 'manual',
+    exchange_rate_source: 'automatic',
     manual_exchange_rate_cad_per_usd: DEFAULT_MANUAL_EXCHANGE_RATE,
   };
   try {
@@ -58,8 +58,9 @@ export async function getDeliveryPricingConfig(businessId = null) {
           : empty.minimum_delivery_price_cad,
       minimum_enabled: billing.minimum_enabled !== false,
       bypass_minimum: false,
+      /** Explicit `manual` only; missing or any other value defaults to automatic (env DELIVERY_USD_TO_CAD_RATE, else fallback rate below). */
       exchange_rate_source:
-        billing.exchange_rate_source === 'automatic' ? 'automatic' : 'manual',
+        billing.exchange_rate_source === 'manual' ? 'manual' : 'automatic',
       manual_exchange_rate_cad_per_usd:
         typeof billing.manual_exchange_rate_cad_per_usd === 'number' && billing.manual_exchange_rate_cad_per_usd > 0
           ? billing.manual_exchange_rate_cad_per_usd

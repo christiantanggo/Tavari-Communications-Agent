@@ -2,6 +2,8 @@ import { supabaseClient } from "../config/database.js";
 
 export const AFFILIATE_MODULE_PHONE = "phone-agent";
 export const AFFILIATE_MODULE_DELIVERY = "delivery-dispatch";
+/** Review Reply AI (v2 module key `reviews`). */
+export const AFFILIATE_MODULE_REVIEWS = "reviews";
 
 /** Non–commission defaults only. Commission % are never global — only affiliate_module_settings. */
 const GLOBAL_FALLBACK = {

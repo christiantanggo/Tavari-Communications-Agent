@@ -38,5 +38,10 @@ export function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    /*
+     * Skip API and Next internals so we never attach cookies to static chunks, HMR, or RSC data fetches.
+     */
+    '/((?!api|_next/static|_next/image|_next/webpack-hmr|_next/data|favicon.ico).*)',
+  ],
 };

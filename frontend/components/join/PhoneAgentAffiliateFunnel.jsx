@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import DemoModal from '@/components/DemoModal';
 import { APP_DISPLAY_NAME } from '@/lib/appBrand';
-import { AFFILIATE_REF_COOKIE, AFFILIATE_REF_MAX_AGE_SEC } from '@/lib/affiliateCookie';
+import { buildAffiliateRefClientCookie, resolveAffiliateCodeForSignup } from '@/lib/affiliateCookie';
 import { billingAPI } from '@/lib/api';
 import { getToken, signup } from '@/lib/auth';
 
@@ -134,6 +134,7 @@ export default function PhoneAgentAffiliateFunnel({ affiliateCode }) {
     }
     setSignupLoading(true);
     try {
+      const ref = resolveAffiliateCodeForSignup({ explicit: affiliateCode });
       const response = await signup({
         email: form.email,
         password: form.password,
@@ -155,6 +156,7 @@ export default function PhoneAgentAffiliateFunnel({ affiliateCode }) {
         },
         contact_email: form.email,
         terms_accepted: true,
+        ...(ref ? { affiliate_code: ref } : {}),
       });
       if (response?.token) {
         setLoggedIn(true);

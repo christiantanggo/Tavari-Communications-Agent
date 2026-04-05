@@ -246,11 +246,21 @@ export default function MovieReviewUploadPage() {
         method: 'POST',
         headers: apiHeaders(),
       });
-      const data = await res.json();
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Upload failed (${res.status}). Check that the API server is running.`);
+      }
       if (data.project) {
         setProject(data.project);
       }
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      if (!res.ok) {
+        throw new Error(data.error || data.project?.upload_error || 'Upload failed');
+      }
+      if (data.project?.status === 'FAILED') {
+        throw new Error(data.error || data.project?.upload_error || 'Upload failed');
+      }
     } catch (err) {
       setError(err.message);
     } finally {

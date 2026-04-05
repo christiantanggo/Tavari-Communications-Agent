@@ -13,6 +13,7 @@ const MAIN_NAV = [
   { href: '/admin/support', label: 'Support Tickets' },
   { href: '/admin/affiliates', label: 'Affiliates' },
   { href: '/admin/affiliates?tab=commission', label: 'Affiliate commission' },
+  { href: '/admin/sales-reps', label: 'Sales reps' },
 ];
 
 const ALL_ADMIN_MODULE_LINKS = [

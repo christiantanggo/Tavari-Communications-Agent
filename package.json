@@ -42,6 +42,7 @@
     "test:toll-free": "node scripts/test-toll-free-verification.js",
     "test:payment": "node scripts/test-payment-flow.js",
     "test:payment:auto": "node scripts/test-payment-flow-automated.js",
+    "test:sales-stripe:e2e": "node scripts/test-sales-module-stripe-e2e.js",
     "check:payment": "node scripts/check-payment-status.js",
     "verify:webhook": "node scripts/verify-webhook-received.js",
     "list:sessions": "node scripts/list-recent-checkout-sessions.js",

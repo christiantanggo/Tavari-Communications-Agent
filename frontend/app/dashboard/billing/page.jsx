@@ -215,6 +215,15 @@ function BillingPage() {
                     {loadingPortal ? 'Loading...' : 'Manage Billing'}
                   </button>
                 </div>
+                <p className="text-sm text-gray-600 mb-4 rounded-md bg-gray-50 border border-gray-100 px-3 py-2">
+                  If you use more than one Tavari product on this account (for example AI Phone and Review Reply), this
+                  section reflects the <span className="font-medium text-gray-800">primary</span> Stripe subscription
+                  stored on your business profile. Other products may show an active plan under{' '}
+                  <Link href="/dashboard/v2" className="text-blue-600 hover:text-blue-800 font-medium">
+                    Dashboard
+                  </Link>{' '}
+                  or your product-specific app.
+                </p>
                 
                 {billing?.subscription ? (
                   <div className="space-y-4">
@@ -470,7 +479,8 @@ function BillingPage() {
                             date = new Date(dateStr + 'Z');
                           }
                           return date.toLocaleDateString('en-US');
-                        })()} • {invoice.invoice_type.replace('_', ' ')}
+                        })()}{' '}
+                        • {moduleKeyInvoiceLabel(invoice.module_key)} • {invoice.invoice_type.replace('_', ' ')}
                       </p>
                     </div>
                     <div className="text-right">

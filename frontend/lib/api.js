@@ -64,6 +64,37 @@ const retryRequest = async (config, retries = 2) => {
 let lastNetworkErrorLog = 0;
 const NETWORK_ERROR_LOG_INTERVAL_MS = 30000;
 
+function isLocalApiHost(baseUrl) {
+  try {
+    const u = new URL(baseUrl);
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+/** User-facing hint when the browser cannot reach the API (no HTTP response). */
+function connectFailureMessage(baseUrl, error) {
+  const code = error?.code;
+  const msg = String(error?.message || '');
+  const reset =
+    code === 'ECONNRESET' ||
+    msg.includes('ERR_CONNECTION_RESET') ||
+    /connection reset/i.test(msg);
+  const refused = code === 'ECONNREFUSED' || msg.includes('ECONNREFUSED');
+
+  if (isLocalApiHost(baseUrl)) {
+    if (reset) {
+      return `Unable to reach API at ${baseUrl} (connection reset). The server may have crashed mid-request, or another process is on that port. From the repo root run the backend (e.g. npm run dev or node server.js), watch that terminal for errors, and open ${baseUrl}/health in the browser (port comes from config/dev-ports.json).`;
+    }
+    if (refused) {
+      return `Unable to reach API at ${baseUrl} (connection refused). Start the backend from the repo root so it listens on the port in config/dev-ports.json (default backend 5005).`;
+    }
+    return `Unable to reach API at ${baseUrl}. Start the backend from the repo root (npm run dev or node server.js) and ensure NEXT_PUBLIC_API_URL matches config/dev-ports.json.`;
+  }
+  return `Unable to connect to server. In production, set NEXT_PUBLIC_API_URL to your backend URL and redeploy. Current: ${baseUrl}`;
+}
+
 // Handle auth errors and rate limiting
 api.interceptors.response.use(
   (response) => response,
@@ -73,10 +104,11 @@ api.interceptors.response.use(
       const now = Date.now();
       if (now - lastNetworkErrorLog >= NETWORK_ERROR_LOG_INTERVAL_MS) {
         lastNetworkErrorLog = now;
-        console.error('[API] Network error: backend unreachable at', getApiBaseUrl(), '-', error.message);
+        const url = getApiBaseUrl();
+        console.error('[API] Network error: backend unreachable at', url, '-', error.message, error.code ? `(code ${error.code})` : '');
       }
       const url = getApiBaseUrl();
-      return Promise.reject(new Error(`Unable to connect to server. FIX: In Vercel set NEXT_PUBLIC_API_URL to your backend URL (e.g. your Railway URL), then redeploy. Current: ${url}`));
+      return Promise.reject(new Error(connectFailureMessage(url, error)));
     }
     
     if (error.response?.status === 401) {
@@ -181,8 +213,10 @@ export const setupAPI = {
 export const billingAPI = {
   getStatus: () => api.get('/billing/status'),
   getPortal: () => api.get('/billing/portal'),
-  getPackages: (moduleKey = null) => {
-    const params = moduleKey ? { module_key: moduleKey } : {};
+  getPackages: (moduleKey = null, opts = {}) => {
+    const params = {};
+    if (moduleKey) params.module_key = moduleKey;
+    if (opts.excludeClickbank) params.exclude_clickbank = 'true';
     return api.get('/billing/packages', { params });
   },
   createCheckout: (packageId, opts = {}) => {
@@ -190,12 +224,25 @@ export const billingAPI = {
     let joinCode = opts.joinCode;
     if (typeof window !== 'undefined' && (!joinFunnel || !joinCode)) {
       try {
-        const m = window.location.pathname.match(/^\/join\/phone-agent\/([A-Za-z0-9]{4,16})\/?$/);
-        if (m) {
-          const c = m[1].trim().toUpperCase();
+        const path = (window.location.pathname || '/').replace(/\/$/, '') || '/';
+        const mPhone = path.match(/^\/join\/phone-agent\/([A-Za-z0-9]{4,16})$/);
+        if (mPhone) {
+          const c = mPhone[1].trim().toUpperCase();
           if (/^[A-Z0-9]{4,16}$/.test(c)) {
             joinFunnel = 'phone-agent';
             joinCode = c;
+          }
+        } else if (path === '/join/reviews') {
+          joinFunnel = 'reviews';
+          joinCode = '';
+        } else {
+          const mRev = path.match(/^\/join\/reviews\/([A-Za-z0-9]{4,16})$/);
+          if (mRev) {
+            const c = mRev[1].trim().toUpperCase();
+            if (/^[A-Z0-9]{4,16}$/.test(c)) {
+              joinFunnel = 'reviews';
+              joinCode = c;
+            }
           }
         }
       } catch {
@@ -234,6 +281,9 @@ export const billingAPI = {
     if (joinFunnel === 'phone-agent' && joinCode) {
       body.join_funnel = 'phone-agent';
       body.join_code = String(joinCode).trim();
+    } else if (joinFunnel === 'reviews') {
+      body.join_funnel = 'reviews';
+      if (joinCode) body.join_code = String(joinCode).trim();
     }
     return api.post('/billing/checkout', body);
   },
@@ -441,7 +491,11 @@ export const constructionAPI = {
   getModules: () => api.get('/v2/construction/modules'),
 };
 
-// Reviews API (v2)
+/**
+ * Review Reply AI — all paths are under /api/v2/reviews.
+ * - Setup + usage: reviews-setup.js (`/setup/*`, GET `/usage`).
+ * - Product: reviews.js (`/generate`, `/history`, `/settings`, `/feedback`).
+ */
 export const reviewsAPI = {
   generate: (data) => api.post('/v2/reviews/generate', data),
   getHistory: (params) => api.get('/v2/reviews/history', { params }),

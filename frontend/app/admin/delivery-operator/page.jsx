@@ -143,6 +143,7 @@ function AdminDeliveryOperatorPage() {
     billing: {
       price_basic_cents: '',
       price_priority_cents: '',
+      price_premium_cents: '',
       sms_fee_cents: '',
       quote_margin_cents: '',
       margin_multiplier: 1.4,
@@ -240,12 +241,13 @@ function AdminDeliveryOperatorPage() {
         billing: {
           price_basic_cents: configData.billing?.price_basic_cents ?? '',
           price_priority_cents: configData.billing?.price_priority_cents ?? '',
+          price_premium_cents: configData.billing?.price_premium_cents ?? '',
           sms_fee_cents: configData.billing?.sms_fee_cents ?? '',
           quote_margin_cents: configData.billing?.quote_margin_cents ?? '',
           margin_multiplier: configData.billing?.margin_multiplier ?? 1.4,
           minimum_delivery_price_cad: configData.billing?.minimum_delivery_price_cad ?? 15,
           minimum_enabled: configData.billing?.minimum_enabled !== false,
-          exchange_rate_source: configData.billing?.exchange_rate_source === 'automatic' ? 'automatic' : 'manual',
+          exchange_rate_source: configData.billing?.exchange_rate_source === 'manual' ? 'manual' : 'automatic',
           manual_exchange_rate_cad_per_usd: configData.billing?.manual_exchange_rate_cad_per_usd ?? 1.35,
         },
         brokers: configData.brokers && typeof configData.brokers === 'object' ? configData.brokers : {},
@@ -284,6 +286,7 @@ function AdminDeliveryOperatorPage() {
         billing: {
           price_basic_cents: typeof configForm.billing.price_basic_cents === 'number' ? configForm.billing.price_basic_cents : (configForm.billing.price_basic_cents === '' ? undefined : Math.round(Number(configForm.billing.price_basic_cents))),
           price_priority_cents: typeof configForm.billing.price_priority_cents === 'number' ? configForm.billing.price_priority_cents : (configForm.billing.price_priority_cents === '' ? undefined : Math.round(Number(configForm.billing.price_priority_cents))),
+          price_premium_cents: typeof configForm.billing.price_premium_cents === 'number' ? configForm.billing.price_premium_cents : (configForm.billing.price_premium_cents === '' ? undefined : Math.round(Number(configForm.billing.price_premium_cents))),
           sms_fee_cents: typeof configForm.billing.sms_fee_cents === 'number' ? configForm.billing.sms_fee_cents : (configForm.billing.sms_fee_cents === '' ? undefined : Math.round(Number(configForm.billing.sms_fee_cents))),
           quote_margin_cents: typeof configForm.billing.quote_margin_cents === 'number' ? configForm.billing.quote_margin_cents : (configForm.billing.quote_margin_cents === '' ? undefined : Math.round(Number(configForm.billing.quote_margin_cents))),
           margin_multiplier: typeof configForm.billing.margin_multiplier === 'number' ? configForm.billing.margin_multiplier : (configForm.billing.margin_multiplier === '' ? undefined : Number(configForm.billing.margin_multiplier)),
@@ -1315,6 +1318,10 @@ function AdminDeliveryOperatorPage() {
                         <input type="number" value={configForm.billing.price_priority_cents} onChange={(e) => setConfigForm(f => ({ ...f, billing: { ...f.billing, price_priority_cents: e.target.value } }))} placeholder="e.g. 2200" className="w-full px-3 py-2 border border-slate-300 rounded text-sm" />
                       </div>
                       <div>
+                        <label className="block text-sm text-slate-700 mb-1">Premium price (cents)</label>
+                        <input type="number" value={configForm.billing.price_premium_cents} onChange={(e) => setConfigForm(f => ({ ...f, billing: { ...f.billing, price_premium_cents: e.target.value } }))} placeholder="e.g. 2800" className="w-full px-3 py-2 border border-slate-300 rounded text-sm" />
+                      </div>
+                      <div>
                         <label className="block text-sm text-slate-700 mb-1">SMS fee (cents)</label>
                         <input type="number" value={configForm.billing.sms_fee_cents} onChange={(e) => setConfigForm(f => ({ ...f, billing: { ...f.billing, sms_fee_cents: e.target.value } }))} placeholder="e.g. 2" className="w-full px-3 py-2 border border-slate-300 rounded text-sm" />
                       </div>
@@ -1345,14 +1352,14 @@ function AdminDeliveryOperatorPage() {
                         <div>
                           <label className="block text-sm text-slate-700 mb-1">Exchange rate source</label>
                           <select value={configForm.billing.exchange_rate_source} onChange={(e) => setConfigForm(f => ({ ...f, billing: { ...f.billing, exchange_rate_source: e.target.value } }))} className="w-full px-3 py-2 border border-slate-300 rounded text-sm">
-                            <option value="manual">Manual (set below)</option>
-                            <option value="automatic">Automatic (env DELIVERY_USD_TO_CAD_RATE or fallback to manual)</option>
+                            <option value="automatic">Automatic (env DELIVERY_USD_TO_CAD_RATE, else fallback rate below)</option>
+                            <option value="manual">Manual (use fallback rate below only)</option>
                           </select>
                         </div>
                         <div>
-                          <label className="block text-sm text-slate-700 mb-1">Manual exchange rate (CAD per 1 USD)</label>
+                          <label className="block text-sm text-slate-700 mb-1">Fallback rate (CAD per 1 USD)</label>
                           <input type="number" step="0.01" min="0.01" value={configForm.billing.manual_exchange_rate_cad_per_usd} onChange={(e) => setConfigForm(f => ({ ...f, billing: { ...f.billing, manual_exchange_rate_cad_per_usd: e.target.value } }))} placeholder="1.35" className="w-full px-3 py-2 border border-slate-300 rounded text-sm" />
-                          <p className="text-xs text-slate-500 mt-0.5">Used when source is Manual or when Automatic has no env rate</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Used when source is Manual, or when Automatic has no DELIVERY_USD_TO_CAD_RATE env set</p>
                         </div>
                       </div>
                     </div>
