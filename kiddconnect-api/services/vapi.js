@@ -1355,66 +1355,62 @@ export async function rebuildAssistant(businessId) {
     console.log(`[VAPI Rebuild] ================================================`);
     
     // CRITICAL: Normalize holiday hours dates to ensure they're in YYYY-MM-DD format
-    // This prevents timezone issues when dates are stored/retrieved from the database
-    let holidayHours = agentRecord?.holiday_hours || [];
-    
+    // Coerce to array first: jsonb can be {} or other non-array truthy values; `|| []` does not fix that
+    // and holidayHours.map() before Array.isArray threw TypeError → 500 on POST /api/agents/rebuild.
+    let holidayHours = agentRecord?.holiday_hours;
+    if (!Array.isArray(holidayHours)) {
+      if (holidayHours != null && holidayHours !== "") {
+        console.warn(
+          `[VAPI Rebuild] holiday_hours is not an array (type ${typeof holidayHours}), using []`
+        );
+      }
+      holidayHours = [];
+    }
+
     console.log(`[VAPI Rebuild] ========== HOLIDAY HOURS FROM DATABASE ==========`);
-    console.log(`[VAPI Rebuild] Raw holiday hours before normalization:`, JSON.stringify(holidayHours.map(h => ({ 
-      name: h?.name, 
-      date: h?.date, 
+    console.log(`[VAPI Rebuild] Raw holiday hours before normalization:`, JSON.stringify(holidayHours.map(h => ({
+      name: h?.name,
+      date: h?.date,
       dateType: typeof h?.date,
       dateValue: String(h?.date),
       dateLength: String(h?.date).length
     })), null, 2));
-    if (Array.isArray(holidayHours)) {
-      holidayHours = holidayHours.map(h => {
-        if (!h || !h.date) return h;
-        
-        // Ensure date is in YYYY-MM-DD format (timezone-agnostic)
-        let dateStr = h.date;
-        
-        // If it's a Date object, extract the date parts in local timezone
-        if (dateStr instanceof Date) {
-          const year = dateStr.getFullYear();
-          const month = String(dateStr.getMonth() + 1).padStart(2, '0');
-          const day = String(dateStr.getDate()).padStart(2, '0');
-          dateStr = `${year}-${month}-${day}`;
-        } 
-        // If it's an ISO string with time, extract just the date part
-        else if (typeof dateStr === 'string' && dateStr.includes('T')) {
-          dateStr = dateStr.split('T')[0];
-        }
-        // If it's already in YYYY-MM-DD format, use it as-is (most common case)
-        else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-          // Already in correct format - this is what we want! No conversion needed.
-          console.log(`[VAPI Rebuild] ✅ Date "${dateStr}" for ${h.name} is already in YYYY-MM-DD format, using as-is`);
-          return { ...h, date: dateStr }; // Return early to avoid unnecessary processing
-        }
-        // If it's in a different format, try to parse it
-        else if (typeof dateStr === 'string') {
-          // Try to extract YYYY-MM-DD from various formats
-          const dateMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
-          if (dateMatch) {
-            dateStr = dateMatch[0]; // Use the matched YYYY-MM-DD
-          } else {
-            console.warn(`[VAPI Rebuild] Could not parse holiday date: ${dateStr}, using as-is`);
-          }
-        }
-        
+
+    holidayHours = holidayHours.map(h => {
+      if (!h || !h.date) return h;
+
+      let dateStr = h.date;
+
+      if (dateStr instanceof Date) {
+        const year = dateStr.getFullYear();
+        const month = String(dateStr.getMonth() + 1).padStart(2, "0");
+        const day = String(dateStr.getDate()).padStart(2, "0");
+        dateStr = `${year}-${month}-${day}`;
+      } else if (typeof dateStr === "string" && dateStr.includes("T")) {
+        dateStr = dateStr.split("T")[0];
+      } else if (typeof dateStr === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        console.log(`[VAPI Rebuild] ✅ Date "${dateStr}" for ${h.name} is already in YYYY-MM-DD format, using as-is`);
         return { ...h, date: dateStr };
-      });
-      
-      console.log(`[VAPI Rebuild] Normalized holiday hours after processing:`, JSON.stringify(holidayHours.map(h => ({ 
-        name: h?.name, 
-        date: h?.date, 
-        dateType: typeof h?.date 
-      })), null, 2));
-      console.log(`[VAPI Rebuild] ================================================`);
-    } else {
-      console.log(`[VAPI Rebuild] Holiday hours is not an array:`, typeof holidayHours, holidayHours);
-    }
-    
-    const faqs = agentRecord?.faqs || [];
+      } else if (typeof dateStr === "string") {
+        const dateMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (dateMatch) {
+          dateStr = dateMatch[0];
+        } else {
+          console.warn(`[VAPI Rebuild] Could not parse holiday date: ${dateStr}, using as-is`);
+        }
+      }
+
+      return { ...h, date: dateStr };
+    });
+
+    console.log(`[VAPI Rebuild] Normalized holiday hours after processing:`, JSON.stringify(holidayHours.map(h => ({
+      name: h?.name,
+      date: h?.date,
+      dateType: typeof h?.date
+    })), null, 2));
+    console.log(`[VAPI Rebuild] ================================================`);
+
+    const faqs = Array.isArray(agentRecord?.faqs) ? agentRecord.faqs : [];
     const openingGreeting = agentRecord?.opening_greeting || `Hello! Thanks for calling ${businessName}. How can I help you today?`;
     const endingGreeting = agentRecord?.ending_greeting || null;
     const personality = agentRecord?.personality || 'professional';

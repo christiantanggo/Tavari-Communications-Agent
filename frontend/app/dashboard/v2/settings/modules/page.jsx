@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import V2AppShell from '@/components/V2AppShell';
 import { ArrowLeft, CheckCircle2, Lock, Settings, ExternalLink, Loader, Phone } from 'lucide-react';
+import { excludeConstructionModulesFromList } from '@/lib/construction-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -97,7 +98,7 @@ export default function ModuleSettingsPage() {
 
       if (modulesRes.ok) {
         const data = await modulesRes.json();
-        setModules(data.modules || []);
+        setModules(excludeConstructionModulesFromList(data.modules || []));
       } else {
         const errorData = await modulesRes.json().catch(() => ({ error: 'Failed to load modules' }));
         setError(errorData.error || 'Failed to load modules');

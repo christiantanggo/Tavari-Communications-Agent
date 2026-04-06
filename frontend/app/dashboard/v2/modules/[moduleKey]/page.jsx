@@ -12,6 +12,7 @@ import { ArrowLeft, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { modulesAPI } from '@/lib/api';
 import { getModulePostActivatePath } from '@/lib/moduleRoutes';
 import { isRetiredModuleKey } from '@/lib/retired-module-keys';
+import { isConstructionModuleKey } from '@/lib/construction-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -31,6 +32,10 @@ export default function ModuleDetailPage() {
   useEffect(() => {
     if (moduleKey && isRetiredModuleKey(moduleKey)) {
       router.replace('/dashboard');
+      return;
+    }
+    if (moduleKey && isConstructionModuleKey(moduleKey)) {
+      router.replace('/dashboard/v2/construction');
       return;
     }
     if (moduleKey) {

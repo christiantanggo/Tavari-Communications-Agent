@@ -83,12 +83,12 @@ export async function generateAssistantPrompt(businessData) {
 
   const intent2Routing = allow_call_transfer
     ? `INTENT 2: SPEAK TO A HUMAN / TRANSFER OR MESSAGE
-- Keywords/phrases: "speak to", "talk to", "manager", "owner", "connect", "transfer", "put me through", "real person", "human"
-- If they ask to speak to someone at the business, a manager, the owner, or to be connected/transferred:
+- Keywords/phrases: "speak to", "talk to", "manager", "owner", "connect", "transfer", "put me through", "real person", "human", "the facility", "facility", "front desk", "staff", "someone there", "office"
+- If they ask to speak to someone at the business, the facility, front desk, staff, a manager, the owner, or to be connected/transferred:
 - → IMMEDIATELY ROUTE TO: Flow 2 - Human / Message Flow (try transfer first when appropriate, then message if needed)`
     : `INTENT 2: MESSAGE TAKING
-- Keywords/phrases: "speak to", "talk to", "manager", "owner", "connect", "transfer", "put me through"
-- If they ask to: speak to someone, speak to a manager, speak to the owner, or be connected/transferred
+- Keywords/phrases: "speak to", "talk to", "manager", "owner", "connect", "transfer", "put me through", "the facility", "facility", "front desk", "staff"
+- If they ask to: speak to someone, the facility, front desk, staff, speak to a manager, speak to the owner, or be connected/transferred
 - → IMMEDIATELY ROUTE TO: Flow 2 - Message Taking Flow`;
 
   const flow2Block = allow_call_transfer
@@ -96,17 +96,17 @@ export async function generateAssistantPrompt(businessData) {
 FLOW 2: HUMAN / MESSAGE FLOW (ALWAYS AVAILABLE)
 ═══════════════════════════════════════════════════════════════
 
-This flow handles: When callers want to speak to someone, a manager, the owner, or be connected/transferred.
+This flow handles: When callers want to speak to someone, the facility, front desk, staff, a manager, the owner, or be connected/transferred.
 
 STEPS:
-1. When the caller wants a human, manager, owner, or transfer to the business:
+1. When the caller wants a human, the facility, front desk, staff, manager, owner, or transfer to the business:
    - Give a very brief acknowledgment (one short sentence) that you will try to connect them to the business line.
    - Immediately invoke transfer_to_facility. Use explicit_human_request true ONLY if they clearly asked again after a prior failed transfer this call; otherwise false or omit.
    - Obey the tool result: if it says to stay quiet after one brief line, do that—the call may be bridging.
 2. If the tool indicates transfer failed, the maximum attempts were used, or you must take a message:
    - Apologize briefly. Do NOT offer another transfer unless the caller clearly asks again (then you may call transfer_to_facility with explicit_human_request true if attempts remain).
    - Continue with message taking:
-${messageTakingSubstepsAfterTransfer}
+${messageTakingSubsteps}
 
 ⚠️ CRITICAL: This flow does NOT require ending greeting until Section 6.`
     : `═══════════════════════════════════════════════════════════════

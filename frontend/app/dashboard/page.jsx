@@ -8,6 +8,7 @@ import V2DashboardHeader from '@/components/V2DashboardHeader';
 import V2Sidebar from '@/components/V2Sidebar';
 import { ArrowRight, CheckCircle2, Lock } from 'lucide-react';
 import { isRetiredModuleKey } from '@/lib/retired-module-keys';
+import { excludeConstructionModulesFromList } from '@/lib/construction-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -42,7 +43,9 @@ export default function ModulesMarketplacePage() {
       
       if (res.ok) {
         const data = await res.json();
-        const list = (data.modules || []).filter((m) => m?.key && !isRetiredModuleKey(m.key));
+        const list = excludeConstructionModulesFromList(
+          (data.modules || []).filter((m) => m?.key && !isRetiredModuleKey(m.key)),
+        );
         setModules(list);
       } else if (res.status === 429) {
         const errorData = await res.json().catch(() => ({ error: 'Too many requests' }));

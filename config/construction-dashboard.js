@@ -3,7 +3,7 @@
  * normal marketplace / sidebar lists until released. Listed only on Construction Dashboard after PIN unlock.
  *
  * Set CONSTRUCTION_MODULE_KEYS=comma,separated,module_keys (extra keys beyond built-ins)
- * Built-in construction-only: movie-review, orbix-network, emergency-dispatch, emergency-network
+ * Built-in construction-only: last-mile delivery (delivery-dispatch), movie-review, orbix-network, emergency-dispatch, emergency-network
  * Optional per-row: modules.metadata.construction_only === true (JSONB)
  *
  * PIN: CONSTRUCTION_DASHBOARD_PIN (default 9874 for dev; set in production)
@@ -65,6 +65,7 @@ export function hasValidConstructionUnlock(req) {
 
 /** Always excluded from marketplace / sidebar; shown only on Construction dashboard after PIN. */
 const BUILTIN_CONSTRUCTION_MODULE_KEYS = new Set([
+  'delivery-dispatch',
   'movie-review',
   'orbix-network',
   'emergency-dispatch',

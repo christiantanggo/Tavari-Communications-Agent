@@ -1468,6 +1468,48 @@ router.get('/projects/:id/render-status', async (req, res) => {
   }
 });
 
+router.post('/projects/:id/render/cancel', async (req, res) => {
+  try {
+    const businessId = req.active_business_id;
+    const project = await getProject(req.params.id, businessId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const { data: latest, error } = await supabaseClient
+      .from('movie_review_renders')
+      .select('*')
+      .eq('project_id', project.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!latest || (latest.status !== 'PENDING' && latest.status !== 'RENDERING')) {
+      return res.status(400).json({ error: 'No render is in progress.' });
+    }
+
+    const msg = 'Stopped by you. You can start a new render when ready.';
+    await supabaseClient
+      .from('movie_review_renders')
+      .update({
+        status: 'FAILED',
+        error_message: msg,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', latest.id);
+    await supabaseClient
+      .from('movie_review_projects')
+      .update({ status: 'FAILED', updated_at: new Date().toISOString() })
+      .eq('id', project.id);
+
+    console.log(`[MovieReview] User cancelled renderId=${latest.id} projectId=${project.id}`);
+    res.json({
+      project_status: 'FAILED',
+      render: { ...latest, status: 'FAILED', error_message: msg },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── YouTube Upload ───────────────────────────────────────────────────────────
 
 router.post('/projects/:id/upload', async (req, res) => {

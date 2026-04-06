@@ -199,10 +199,14 @@ router.post('/rebuild', authenticate, async (req, res) => {
     
     res.json({ success: true, message: 'AI agent rebuilt successfully' });
   } catch (error) {
-    console.error('[Agent Rebuild] Error:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to rebuild agent' 
+    const vapiBody = error.response?.data;
+    console.error('[Agent Rebuild] Error:', error.message, vapiBody ?? '');
+    const fromVapi =
+      (vapiBody && typeof vapiBody === 'object' && (vapiBody.message || vapiBody.error)) ||
+      (typeof vapiBody === 'string' ? vapiBody : null);
+    res.status(500).json({
+      success: false,
+      error: fromVapi || error.message || 'Failed to rebuild agent',
     });
   }
 });

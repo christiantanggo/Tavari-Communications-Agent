@@ -6,6 +6,7 @@ import AuthGuard from '@/components/AuthGuard';
 import V2DashboardHeader from '@/components/V2DashboardHeader';
 import V2Sidebar from '@/components/V2Sidebar';
 import { ArrowLeft } from 'lucide-react';
+import { excludeConstructionModulesFromList } from '@/lib/construction-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -74,10 +75,11 @@ export default function BillingSettingsPage() {
       const modulesRes = await fetch(`${API_URL}/api/v2/modules`, { headers });
       if (modulesRes.ok) {
         const modulesData = await modulesRes.json();
-        setModules(modulesData.modules || []);
-        
-        // Extract subscriptions from modules
-        const subs = modulesData.modules
+        const visible = excludeConstructionModulesFromList(modulesData.modules || []);
+        setModules(visible);
+
+        // Extract subscriptions from modules (construction modules: manage under Construction dashboard)
+        const subs = visible
           .filter(m => m.subscribed && m.subscription)
           .map(m => ({
             ...m.subscription,

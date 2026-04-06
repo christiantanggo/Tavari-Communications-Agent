@@ -7,6 +7,7 @@ import AuthGuard from '@/components/AuthGuard';
 import V2AppShell from '@/components/V2AppShell';
 import { ArrowRight, AlertTriangle } from 'lucide-react';
 import { isRetiredModuleKey } from '@/lib/retired-module-keys';
+import { excludeConstructionModulesFromList } from '@/lib/construction-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -110,7 +111,9 @@ export default function V2DashboardPage() {
         });
         if (modulesRes.ok) {
           const modulesData = await modulesRes.json();
-          const list = (modulesData.modules || []).filter((m) => m?.key && !isRetiredModuleKey(m.key));
+          const list = excludeConstructionModulesFromList(
+            (modulesData.modules || []).filter((m) => m?.key && !isRetiredModuleKey(m.key)),
+          );
           setModules(list);
         }
       }

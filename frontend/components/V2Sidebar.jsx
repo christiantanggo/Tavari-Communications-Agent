@@ -7,10 +7,11 @@ import ConstructionUnlockModal from '@/components/ConstructionUnlockModal';
 import { LEGACY_DASHBOARD_LABEL } from '@/lib/appBrand';
 import { CheckCircle2, Lock, AlertTriangle, Layout } from 'lucide-react';
 import { isRetiredModuleKey } from '@/lib/retired-module-keys';
+import { excludeConstructionModulesFromList } from '@/lib/construction-module-keys';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 const DEPLOYMENT_FOOTER =
-  process.env.NEXT_PUBLIC_DEPLOYMENT_FOOTER || 'Deployed March 25 2026 V2';
+  process.env.NEXT_PUBLIC_DEPLOYMENT_FOOTER || 'Deployed April 6 2026 V1';
 
 export default function V2Sidebar({ mobileOpen = false, onClose }) {
   const pathname = usePathname();
@@ -66,7 +67,9 @@ export default function V2Sidebar({ mobileOpen = false, onClose }) {
       if (res.ok) {
         const data = await res.json();
         const raw = data.modules || [];
-        setModules(raw.filter((m) => m?.key && !isRetiredModuleKey(m.key)));
+        setModules(
+          excludeConstructionModulesFromList(raw.filter((m) => m?.key && !isRetiredModuleKey(m.key))),
+        );
         setLoading(false);
         rateLimitedRef.current = false;
         console.log('[V2Sidebar] Modules loaded successfully');

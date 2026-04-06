@@ -27,17 +27,24 @@ const WIDTH  = 1080;
 const HEIGHT = 1920;
 const FPS    = 30;
 
+/** Thrown when the user cancelled or the row is no longer PENDING/RENDERING (do not overwrite in catch). */
+const RENDER_CANCELLED = 'RENDER_CANCELLED';
+
 // ─── Progress helper ──────────────────────────────────────────────────────────
 
 async function setProgress(renderId, progress, status) {
-  try {
-    await supabaseClient
-      .from('movie_review_renders')
-      .update({ progress, ...(status ? { status } : {}), updated_at: new Date().toISOString() })
-      .eq('id', renderId);
-  } catch (e) {
-    console.warn('[MovieReview Renderer] setProgress failed:', e.message);
-  }
+  const { data, error } = await supabaseClient
+    .from('movie_review_renders')
+    .update({
+      progress,
+      ...(status ? { status } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', renderId)
+    .in('status', ['PENDING', 'RENDERING'])
+    .select('id');
+  if (error) throw error;
+  if (!data?.length) throw new Error(RENDER_CANCELLED);
 }
 
 // ─── Duration via ffprobe ─────────────────────────────────────────────────────
@@ -325,8 +332,8 @@ export async function renderMovieReviewShort(renderId, projectId, businessId) {
 
     const { data: { publicUrl } } = supabaseClient.storage.from(RENDER_BUCKET).getPublicUrl(storagePath);
 
-    // ── Update records ────────────────────────────────────────────────────────
-    await supabaseClient
+    // ── Update records (only if still active — user may have cancelled) ────────
+    const { data: doneRows, error: doneErr } = await supabaseClient
       .from('movie_review_renders')
       .update({
         status: 'DONE',
@@ -335,7 +342,11 @@ export async function renderMovieReviewShort(renderId, projectId, businessId) {
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', renderId);
+      .eq('id', renderId)
+      .in('status', ['PENDING', 'RENDERING'])
+      .select('id');
+    if (doneErr) throw doneErr;
+    if (!doneRows?.length) throw new Error(RENDER_CANCELLED);
 
     await supabaseClient
       .from('movie_review_projects')
@@ -350,6 +361,10 @@ export async function renderMovieReviewShort(renderId, projectId, businessId) {
     return publicUrl;
 
   } catch (err) {
+    if (err.message === RENDER_CANCELLED) {
+      console.log(`[MovieReview Renderer] Exited renderId=${renderId} (cancelled or no longer active)`);
+      return;
+    }
     console.error(`[MovieReview Renderer] FAILED renderId=${renderId}:`, err.message);
     await supabaseClient
       .from('movie_review_renders')

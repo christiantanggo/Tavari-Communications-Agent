@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
 import V2AppShell from '@/components/V2AppShell';
-import { ChevronLeft, Loader2, CheckCircle, XCircle, Play, Upload } from 'lucide-react';
+import { ChevronLeft, Loader2, CheckCircle, XCircle, Upload, Square } from 'lucide-react';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 
@@ -62,6 +62,7 @@ export default function MovieReviewRenderPage() {
   const [project, setProject] = useState(null);
   const [render, setRender] = useState(null);
   const [rendering, setRendering] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const pollRef = useRef(null);
@@ -74,7 +75,7 @@ export default function MovieReviewRenderPage() {
       const data = await res.json();
       setProject(data.project_status ? { ...data, id: projectId, status: data.project_status } : null);
       setRender(data.render);
-      if (data.render?.status === 'RENDERING') {
+      if (data.render?.status === 'RENDERING' || data.render?.status === 'PENDING') {
         startPolling();
       }
     } catch (err) {
@@ -188,7 +189,28 @@ export default function MovieReviewRenderPage() {
                 <div className="w-full rounded-full mb-2 overflow-hidden" style={{ height: 10, background: 'var(--color-background)' }}>
                   <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#e11d48,#9333ea)' }} />
                 </div>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{progress}% complete — this takes about 30–60 seconds</p>
+                <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>{progress}% complete — this takes about 30–60 seconds</p>
+                <button
+                  type="button"
+                  onClick={cancelRender}
+                  disabled={cancelling}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
+                  style={{
+                    border: '2px solid var(--color-border)',
+                    color: 'var(--color-text-main)',
+                    opacity: cancelling ? 0.6 : 1,
+                  }}
+                >
+                  {cancelling ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Square className="w-4 h-4" />
+                  )}
+                  Stop render
+                </button>
+                <p className="text-xs mt-3" style={{ color: 'var(--color-text-muted)' }}>
+                  Stops this job in the app right away. FFmpeg may finish its current step on the server, but the result will not be saved.
+                </p>
               </>
             ) : (
               <>
