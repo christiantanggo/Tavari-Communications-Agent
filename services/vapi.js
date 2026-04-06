@@ -43,6 +43,25 @@ export function getVapiClient() {
 /** Phone agent LLM model (OpenAI). Override with PHONE_AGENT_MODEL env. gpt-4.1-nano is cheaper than gpt-4o-mini (~33% lower cost). */
 export const PHONE_AGENT_MODEL = process.env.PHONE_AGENT_MODEL || 'gpt-4.1-nano';
 
+/** Max human handoff attempts to the business line per inbound AI call (server-enforced). */
+export const MAX_FACILITY_TRANSFERS_PER_CALL = 3;
+
+const TRANSFER_TO_FACILITY_TOOL = {
+  name: "transfer_to_facility",
+  description:
+    "Connect the caller to this business's main phone line (public business number). Call only when they want a live person at the business (human, manager, owner, transfer, connect me). After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
+  parameters: {
+    type: "object",
+    properties: {
+      explicit_human_request: {
+        type: "boolean",
+        description:
+          "True only if the caller clearly asked again to speak to a person, human, manager, or to be transferred after a failed transfer this call. Otherwise false or omit.",
+      },
+    },
+  },
+};
+
 /**
  * Create a VAPI assistant for a business
  * @param {Object} businessData - Business information
@@ -163,10 +182,10 @@ export async function createAssistant(businessData) {
       },
     };
     
-    // Add takeout orders function only if feature is enabled
+    // Add takeout and/or facility transfer tools
+    assistantConfig.functions = [];
     if (businessData.takeout_orders_enabled) {
-      assistantConfig.functions = [
-        {
+      assistantConfig.functions.push({
           type: "serverless",
           name: "submit_takeout_order",
           description: "🚨🚨🚨 CRITICAL MANDATORY FUNCTION - YOU ABSOLUTELY MUST CALL THIS FUNCTION OR THE ORDER WILL FAIL: This function MUST be invoked (called/executed) to submit EVERY takeout order. Simply saying words like 'I will submit' or 'I'm submitting' is NOT enough - you MUST actually invoke/call/execute this function using your function calling capability. If you do NOT call this function, the order will NOT be placed, will NOT appear in the kiosk, will NOT be fulfilled, and the customer will receive NOTHING. This is a CRITICAL FAILURE if you do not call this function. You MUST call this function immediately after announcing the total and pickup time - DO NOT proceed to phone confirmation until AFTER you have called this function. This function is in your available tools/functions list - you MUST actively invoke it. To call it, use your function calling mechanism - do NOT just say you will call it, actually CALL IT. Required fields: customer_name, customer_phone, items array (with name, quantity, price, item_number), subtotal, tax, total.",
@@ -238,8 +257,13 @@ export async function createAssistant(businessData) {
             },
             required: ["customer_phone", "items"],
           },
-        },
-      ];
+        });
+    }
+    if (businessData.allow_call_transfer ?? true) {
+      assistantConfig.functions.push({
+        type: "serverless",
+        ...TRANSFER_TO_FACILITY_TOOL,
+      });
     }
     
     // Add ending message if provided
@@ -1586,10 +1610,9 @@ export async function rebuildAssistant(businessId) {
       // These fields persist from the original assistant creation and don't need to be updated
     };
     
-    // Add takeout orders function only if feature is enabled
+    const patchFunctions = [];
     if (takeoutOrdersEnabled) {
-      updatePayload.functions = [
-        {
+      patchFunctions.push({
           name: "submit_takeout_order",
           description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
           parameters: {
@@ -1660,12 +1683,12 @@ export async function rebuildAssistant(businessId) {
             },
             required: ["customer_phone", "items"],
           },
-        },
-      ];
-    } else {
-      // Explicitly clear functions when takeout orders are disabled
-      updatePayload.functions = [];
+        });
     }
+    if (allowTransfer) {
+      patchFunctions.push({ ...TRANSFER_TO_FACILITY_TOOL });
+    }
+    updatePayload.functions = patchFunctions;
     
     if (endingGreeting) {
       updatePayload.endCallFunctionEnabled = true;

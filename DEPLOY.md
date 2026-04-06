@@ -69,3 +69,9 @@ Before you rely on production URLs, read **[docs/VERIFY_TAVARI_DEPLOYMENT.md](do
 - **Manual:** GitHub → Actions → "Deploy Frontend to Vercel" or "Deploy Backend to Railway" → Run workflow.
 
 After deploy, the frontend on Vercel will call the backend using `NEXT_PUBLIC_API_URL`. Set `BACKEND_URL` or `RAILWAY_PUBLIC_DOMAIN` on Railway so webhooks (e.g. VAPI) use the correct public URL.
+
+### Phone agent: facility human handoff (`transfer_to_facility`)
+
+1. **Database (Supabase):** In **SQL Editor**, run `migrations/add_call_sessions_facility_transfer.sql` (adds `facility_transfer_count` and `facility_transfer_suppress_until_explicit` on `call_sessions`). Safe to re-run (`IF NOT EXISTS`).
+2. **Backend:** Push to `main` so Railway picks up `routes/vapi.js`, `services/vapi.js`, `templates/vapi-assistant-template.js`, `models/CallSession.js`.
+3. **VAPI assistants:** After deploy, each business needs an assistant **rebuild** so the `transfer_to_facility` tool and updated system prompt are applied (e.g. save **Agent** / **Business** phone settings in the dashboard, or use admin flows that call `rebuildAssistant`). **New** assistants created after deploy get transfer-related `serverMessages` at creation time; very old assistants may still lack those webhook types until recreated—core transfer still works via the server tool and Telnyx forward.

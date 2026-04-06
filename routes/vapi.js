@@ -6,7 +6,7 @@ import express from "express";
 import { CallSession } from "../models/CallSession.js";
 import { Business } from "../models/Business.js";
 import { Message } from "../models/Message.js";
-import { getCallSummary, forwardCallToBusiness, getVapiClient } from "../services/vapi.js";
+import { getCallSummary, forwardCallToBusiness, getVapiClient, MAX_FACILITY_TRANSFERS_PER_CALL } from "../services/vapi.js";
 import { checkMinutesAvailable, recordCallUsage } from "../services/usage.js";
 import { sendCallSummaryEmail, sendSMSNotification, sendMissedCallEmail, sendEmergencyIntakeEmail, sendEmergencyIntakeSMS, sendEmergencyCustomerConfirmationSMS } from "../services/notifications.js";
 import { isBusinessOpenAtTime } from "../utils/businessHours.js";
@@ -2117,7 +2117,7 @@ async function handleCallEnd(event) {
  * Handle transfer-started event
  */
 async function handleTransferStarted(event) {
-  const call = event.call || event;
+  const call = event.call || event.message?.call || event;
   const callId = call.id || call.callId;
 
   const callSession = await CallSession.findByVapiCallId(callId);
@@ -2133,13 +2133,14 @@ async function handleTransferStarted(event) {
  * Handle transfer-failed event
  */
 async function handleTransferFailed(event) {
-  const call = event.call || event;
+  const call = event.call || event.message?.call || event;
   const callId = call.id || call.callId;
 
   const callSession = await CallSession.findByVapiCallId(callId);
   if (callSession) {
     await CallSession.update(callSession.id, {
       transfer_successful: false,
+      facility_transfer_suppress_until_explicit: true,
     });
   }
 }
@@ -2148,13 +2149,17 @@ async function handleTransferFailed(event) {
  * Handle call-returned event (call returned after transfer failure)
  */
 async function handleCallReturned(event) {
-  const call = event.call || event;
+  const call = event.call || event.message?.call || event;
   const callId = call.id || call.callId;
 
-  // Call returned after transfer failure
-  // AI should NOT attempt another transfer
-  // This is handled in the assistant template logic
   console.log(`[VAPI Webhook] Call ${callId} returned after transfer failure`);
+  const callSession = await CallSession.findByVapiCallId(callId);
+  if (callSession) {
+    await CallSession.update(callSession.id, {
+      facility_transfer_suppress_until_explicit: true,
+      transfer_successful: false,
+    });
+  }
 }
 
 /**
@@ -2262,6 +2267,13 @@ async function handleFunctionCall(event) {
         return { results: [{ toolCallId, result: (typeof out === 'object' && out?.result != null) ? out.result : "The text could not be sent. You can ask me to repeat the details." }] };
       }
       return out;
+    }
+    if (functionName === "transfer_to_facility") {
+      resultContent = await handleTransferToFacilityRequest(event, functionArguments);
+      if (toolCallId) {
+        return { results: [{ toolCallId, result: resultContent }] };
+      }
+      return { result: resultContent };
     }
     console.log(`[VAPI Webhook] ⚠️ Unhandled function: ${functionName}`);
     // Always return a result when we have toolCallId so VAPI does not show "No result returned"

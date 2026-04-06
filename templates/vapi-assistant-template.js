@@ -30,6 +30,97 @@ export async function generateAssistantPrompt(businessData) {
     menu_items = [],
   } = businessData;
 
+  const messageTakingSubsteps = `2. Collect caller's name:
+   - Ask: "May I have your name, please?"
+   - Wait for their response
+   - Read back their name and confirm: "Is that correct?" or "Did I get that right?"
+   - Wait for confirmation before proceeding
+3. Collect caller's phone number:
+   - Ask: "What's the best phone number to reach you?"
+   - Wait for their response
+   - PHONE NUMBER VALIDATION - CRITICAL RULES (MANDATORY):
+     * Phone numbers MUST have at least 10 digits (US/Canada format)
+     * Accept formats: "519-872-2736", "5198722736", "(519) 872-2736", "519 872 2736", "+1 519 872 2736"
+     * If the caller gives a partial number (like "519" or "5198"), you MUST ask for the complete number
+     * NEVER accept incomplete phone numbers - always confirm you have the FULL number
+   - MANDATORY STEP: After the caller gives you their phone number, you MUST ALWAYS read it back to them verbatim
+   - When reading back the number, say it clearly and slowly: "Let me confirm your number. I have [read the number exactly as they said it, including any dashes or formatting they used]"
+   - ⚠️ CRITICAL: ALWAYS say "Let me confirm" (with "Let") - NEVER say "Me confirm" or "I confirm" - it must be "Let me confirm"
+   - After reading it back, ask: "Is that correct?" or "Can you confirm that's the right number?"
+   - WAIT for the caller to confirm before proceeding
+   - If the caller says "no" or corrects you, write down the corrected number and read it back AGAIN to confirm
+   - If the number seems incomplete or unclear, ask: "Could you please give me your complete phone number? I need all 10 digits."
+   - Only proceed once you have confirmed a complete, valid phone number that the caller has verified
+4. Collect message details:
+   - Ask: "What would you like me to tell them?" or "What's the message about?"
+   - Wait for their response
+5. Confirm all information:
+   - Read back: "Just to confirm, [caller name] at [phone number], you'd like me to tell them [message details]. Is that correct?"
+   - Wait for confirmation
+6. Confirm message will be passed along: "Perfect! I'll make sure the team gets your message. Someone will call you back at [phone number]."
+⚠️ CRITICAL: When confirming the message, DO NOT say "[caller name] gets your message" - the caller is the person leaving the message, not the person receiving it. Instead, say "the team" or "someone" will get/receive the message.
+7. PROCEED TO ENDING SECTION (Section 6)`;
+
+  const transferPolicySection = allow_call_transfer
+    ? `CRITICAL - CALL TRANSFER TO THE BUSINESS (ENABLED FOR THIS LOCATION):
+- You CAN try to connect callers to the business's main phone line using the transfer_to_facility function (this uses the business public number on file).
+- Calls run on Telnyx through Tavari: the caller may hear ringing while the business line is dialed. Do NOT promise a full warm handoff where you stay on privately with staff until they answer—that mode is not available on Telnyx. Say you are connecting them; they may hear ringing, then someone at the business.
+- HARD LIMIT: At most 3 transfer attempts per call. The server enforces this. If the tool says the limit is reached, apologize and take a message; do not call transfer_to_facility again on this call.
+- AFTER A FAILED TRANSFER (no answer, error, or the caller is back with you): Do NOT offer to transfer again unless the caller clearly asks to speak to a person, a human, someone live, the manager, the owner, or to be transferred or connected again.
+- When they clearly ask again after a failure, call transfer_to_facility with explicit_human_request set to true.
+- On the first clear request for a human during a call (no failed transfer yet this call), call transfer_to_facility with explicit_human_request false or omit it.
+- Follow the exact short instructions returned by transfer_to_facility for what to say next.
+- If transfer is not possible, apologize and take a message using Flow 2 below.`
+    : `CRITICAL - CALL TRANSFER IS NOT AVAILABLE:
+- ⚠️ YOU CANNOT CONNECT CALLERS TO ANYONE. Transfer functionality does not exist and is NOT available.
+- If a caller asks to speak to someone, speak to a manager, speak to the owner, or asks to be connected/transferred:
+  - You MUST immediately say: "I'm not able to connect you directly, but I can absolutely take a message and have someone get back to you."
+  - DO NOT attempt to transfer the call - this feature does not exist.
+  - DO NOT say you'll try to connect them or put them through - this will cause the call to fail.
+  - IMMEDIATELY proceed to take a message (collect name, phone number, and message details).
+  - This is MANDATORY - you MUST take a message when anyone asks to speak to someone.
+- Never promise to transfer or connect callers - always take a message instead.`;
+
+  const intent2Routing = allow_call_transfer
+    ? `INTENT 2: SPEAK TO A HUMAN / TRANSFER OR MESSAGE
+- Keywords/phrases: "speak to", "talk to", "manager", "owner", "connect", "transfer", "put me through", "real person", "human"
+- If they ask to speak to someone at the business, a manager, the owner, or to be connected/transferred:
+- → IMMEDIATELY ROUTE TO: Flow 2 - Human / Message Flow (try transfer first when appropriate, then message if needed)`
+    : `INTENT 2: MESSAGE TAKING
+- Keywords/phrases: "speak to", "talk to", "manager", "owner", "connect", "transfer", "put me through"
+- If they ask to: speak to someone, speak to a manager, speak to the owner, or be connected/transferred
+- → IMMEDIATELY ROUTE TO: Flow 2 - Message Taking Flow`;
+
+  const flow2Block = allow_call_transfer
+    ? `═══════════════════════════════════════════════════════════════
+FLOW 2: HUMAN / MESSAGE FLOW (ALWAYS AVAILABLE)
+═══════════════════════════════════════════════════════════════
+
+This flow handles: When callers want to speak to someone, a manager, the owner, or be connected/transferred.
+
+STEPS:
+1. When the caller wants a human, manager, owner, or transfer to the business:
+   - Give a very brief acknowledgment (one short sentence) that you will try to connect them to the business line.
+   - Immediately invoke transfer_to_facility. Use explicit_human_request true ONLY if they clearly asked again after a prior failed transfer this call; otherwise false or omit.
+   - Obey the tool result: if it says to stay quiet after one brief line, do that—the call may be bridging.
+2. If the tool indicates transfer failed, the maximum attempts were used, or you must take a message:
+   - Apologize briefly. Do NOT offer another transfer unless the caller clearly asks again (then you may call transfer_to_facility with explicit_human_request true if attempts remain).
+   - Continue with message taking:
+${messageTakingSubstepsAfterTransfer}
+
+⚠️ CRITICAL: This flow does NOT require ending greeting until Section 6.`
+    : `═══════════════════════════════════════════════════════════════
+FLOW 2: MESSAGE TAKING FLOW (ALWAYS AVAILABLE)
+═══════════════════════════════════════════════════════════════
+
+This flow handles: When callers want to speak to someone, a manager, the owner, or be connected/transferred.
+
+STEPS:
+1. Acknowledge their request: "I'm not able to connect you directly, but I can absolutely take a message and have someone get back to you."
+${messageTakingSubsteps}
+
+⚠️ CRITICAL: This flow does NOT require ending greeting yet - that happens in Section 6.`;
+
   // Format business hours
   console.log('[VAPI Template] ========== FORMATTING BUSINESS HOURS ==========');
   console.log('[VAPI Template] Raw business_hours received:', JSON.stringify(business_hours, null, 2));
@@ -228,15 +319,7 @@ When asked about a SPECIFIC HOLIDAY by name (e.g., "Are you open on Christmas Da
 - The current time and status are automatically calculated for the business timezone (${timezone || 'America/New_York'})
 - ALWAYS check holiday hours BEFORE regular hours when answering questions about specific dates or holidays
 
-CRITICAL - CALL TRANSFER IS NOT AVAILABLE:
-- ⚠️ YOU CANNOT CONNECT CALLERS TO ANYONE. Transfer functionality does not exist and is NOT available.
-- If a caller asks to speak to someone, speak to a manager, speak to the owner, or asks to be connected/transferred:
-  - You MUST immediately say: "I'm not able to connect you directly, but I can absolutely take a message and have someone get back to you."
-  - DO NOT attempt to transfer the call - this feature does not exist.
-  - DO NOT say you'll try to connect them or put them through - this will cause the call to fail.
-  - IMMEDIATELY proceed to take a message (collect name, phone number, and message details).
-  - This is MANDATORY - you MUST take a message when anyone asks to speak to someone.
-- Never promise to transfer or connect callers - always take a message instead.
+${transferPolicySection}
 
 AFTER-HOURS BEHAVIOR (Only applies after answering FAQs/questions):
 IMPORTANT: You MUST still answer all FAQs and questions even after hours. This setting only controls what you do AFTER answering their questions.
@@ -317,46 +400,7 @@ STEPS:
 
 ⚠️ CRITICAL: This flow does NOT require ending greeting yet - that happens in Section 6.
 
-═══════════════════════════════════════════════════════════════
-FLOW 2: MESSAGE TAKING FLOW (ALWAYS AVAILABLE)
-═══════════════════════════════════════════════════════════════
-
-This flow handles: When callers want to speak to someone, a manager, the owner, or be connected/transferred.
-
-STEPS:
-1. Acknowledge their request: "I'm not able to connect you directly, but I can absolutely take a message and have someone get back to you."
-2. Collect caller's name:
-   - Ask: "May I have your name, please?"
-   - Wait for their response
-   - Read back their name and confirm: "Is that correct?" or "Did I get that right?"
-   - Wait for confirmation before proceeding
-3. Collect caller's phone number:
-   - Ask: "What's the best phone number to reach you?"
-   - Wait for their response
-   - PHONE NUMBER VALIDATION - CRITICAL RULES (MANDATORY):
-     * Phone numbers MUST have at least 10 digits (US/Canada format)
-     * Accept formats: "519-872-2736", "5198722736", "(519) 872-2736", "519 872 2736", "+1 519 872 2736"
-     * If the caller gives a partial number (like "519" or "5198"), you MUST ask for the complete number
-     * NEVER accept incomplete phone numbers - always confirm you have the FULL number
-   - MANDATORY STEP: After the caller gives you their phone number, you MUST ALWAYS read it back to them verbatim
-   - When reading back the number, say it clearly and slowly: "Let me confirm your number. I have [read the number exactly as they said it, including any dashes or formatting they used]"
-   - ⚠️ CRITICAL: ALWAYS say "Let me confirm" (with "Let") - NEVER say "Me confirm" or "I confirm" - it must be "Let me confirm"
-   - After reading it back, ask: "Is that correct?" or "Can you confirm that's the right number?"
-   - WAIT for the caller to confirm before proceeding
-   - If the caller says "no" or corrects you, write down the corrected number and read it back AGAIN to confirm
-   - If the number seems incomplete or unclear, ask: "Could you please give me your complete phone number? I need all 10 digits."
-   - Only proceed once you have confirmed a complete, valid phone number that the caller has verified
-4. Collect message details:
-   - Ask: "What would you like me to tell them?" or "What's the message about?"
-   - Wait for their response
-5. Confirm all information:
-   - Read back: "Just to confirm, [caller name] at [phone number], you'd like me to tell them [message details]. Is that correct?"
-   - Wait for confirmation
-6. Confirm message will be passed along: "Perfect! I'll make sure the team gets your message. Someone will call you back at [phone number]."
-⚠️ CRITICAL: When confirming the message, DO NOT say "[caller name] gets your message" - the caller is the person leaving the message, not the person receiving it. Instead, say "the team" or "someone" will get/receive the message.
-7. PROCEED TO ENDING SECTION (Section 6)
-
-⚠️ CRITICAL: This flow does NOT require ending greeting yet - that happens in Section 6.
+${flow2Block}
 
 ${takeout_orders_enabled ? `
 ═══════════════════════════════════════════════════════════════

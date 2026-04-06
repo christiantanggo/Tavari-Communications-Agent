@@ -149,6 +149,8 @@ export class CallSession {
       delete cleanData.transfer_attempted;
       delete cleanData.transfer_successful;
       delete cleanData.transfer_timestamp;
+      delete cleanData.facility_transfer_count;
+      delete cleanData.facility_transfer_suppress_until_explicit;
       
       const { data: session2, error: error2 } = await supabaseClient
         .from('call_sessions')
