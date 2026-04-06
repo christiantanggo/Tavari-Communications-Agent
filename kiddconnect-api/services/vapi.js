@@ -43,6 +43,22 @@ export function getVapiClient() {
 /** Phone agent LLM model (OpenAI). Override with PHONE_AGENT_MODEL env. gpt-4.1-nano is cheaper than gpt-4o-mini (~33% lower cost). */
 export const PHONE_AGENT_MODEL = process.env.PHONE_AGENT_MODEL || 'gpt-4.1-nano';
 
+const TRANSFER_TO_FACILITY_TOOL = {
+  name: "transfer_to_facility",
+  description:
+    "Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
+  parameters: {
+    type: "object",
+    properties: {
+      explicit_human_request: {
+        type: "boolean",
+        description:
+          "True only if the caller clearly asked again to speak to a person, human, manager, or to be transferred after a failed transfer this call. Otherwise false or omit.",
+      },
+    },
+  },
+};
+
 /**
  * Create a VAPI assistant for a business
  * @param {Object} businessData - Business information
@@ -165,85 +181,90 @@ export async function createAssistant(businessData) {
       },
     };
     
-    // Add takeout orders function only if feature is enabled
+    // Add takeout and/or facility transfer tools
+    assistantConfig.functions = [];
     if (businessData.takeout_orders_enabled) {
-      assistantConfig.functions = [
-        {
-          type: "serverless",
-          name: "submit_takeout_order",
-          description: "🚨🚨🚨 CRITICAL MANDATORY FUNCTION - YOU ABSOLUTELY MUST CALL THIS FUNCTION OR THE ORDER WILL FAIL: This function MUST be invoked (called/executed) to submit EVERY takeout order. Simply saying words like 'I will submit' or 'I'm submitting' is NOT enough - you MUST actually invoke/call/execute this function using your function calling capability. If you do NOT call this function, the order will NOT be placed, will NOT appear in the kiosk, will NOT be fulfilled, and the customer will receive NOTHING. This is a CRITICAL FAILURE if you do not call this function. You MUST call this function immediately after announcing the total and pickup time - DO NOT proceed to phone confirmation until AFTER you have called this function. This function is in your available tools/functions list - you MUST actively invoke it. To call it, use your function calling mechanism - do NOT just say you will call it, actually CALL IT. Required fields: customer_name, customer_phone, items array (with name, quantity, price, item_number), subtotal, tax, total.",
-          parameters: {
-            type: "object",
-            properties: {
-              customer_name: {
-                type: "string",
-                description: "The customer's name",
-              },
-              customer_phone: {
-                type: "string",
-                description: "The customer's phone number (required)",
-              },
-              customer_email: {
-                type: "string",
-                description: "The customer's email address (optional)",
-              },
+      assistantConfig.functions.push({
+        type: "serverless",
+        name: "submit_takeout_order",
+        description: "🚨🚨🚨 CRITICAL MANDATORY FUNCTION - YOU ABSOLUTELY MUST CALL THIS FUNCTION OR THE ORDER WILL FAIL: This function MUST be invoked (called/executed) to submit EVERY takeout order. Simply saying words like 'I will submit' or 'I'm submitting' is NOT enough - you MUST actually invoke/call/execute this function using your function calling capability. If you do NOT call this function, the order will NOT be placed, will NOT appear in the kiosk, will NOT be fulfilled, and the customer will receive NOTHING. This is a CRITICAL FAILURE if you do not call this function. You MUST call this function immediately after announcing the total and pickup time - DO NOT proceed to phone confirmation until AFTER you have called this function. This function is in your available tools/functions list - you MUST actively invoke it. To call it, use your function calling mechanism - do NOT just say you will call it, actually CALL IT. Required fields: customer_name, customer_phone, items array (with name, quantity, price, item_number), subtotal, tax, total.",
+        parameters: {
+          type: "object",
+          properties: {
+            customer_name: {
+              type: "string",
+              description: "The customer's name",
+            },
+            customer_phone: {
+              type: "string",
+              description: "The customer's phone number (required)",
+            },
+            customer_email: {
+              type: "string",
+              description: "The customer's email address (optional)",
+            },
+            items: {
+              type: "array",
+              description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
               items: {
-                type: "array",
-                description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: {
-                      type: "string",
-                      description: "Item name (required)",
-                    },
-                    quantity: {
-                      type: "integer",
-                      description: "Quantity ordered (required)",
-                    },
-                    price: {
-                      type: "number",
-                      description: "Price per item (required)",
-                    },
-                    item_number: {
-                      type: "integer",
-                      description: "Menu item number (e.g., 1, 2, 3) if available",
-                    },
-                    modifications: {
-                      type: "string",
-                      description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
-                    },
-                    special_instructions: {
-                      type: "string",
-                      description: "Special instructions for this item",
-                    },
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Item name (required)",
                   },
-                  required: ["name", "quantity", "price"],
+                  quantity: {
+                    type: "integer",
+                    description: "Quantity ordered (required)",
+                  },
+                  price: {
+                    type: "number",
+                    description: "Price per item (required)",
+                  },
+                  item_number: {
+                    type: "integer",
+                    description: "Menu item number (e.g., 1, 2, 3) if available",
+                  },
+                  modifications: {
+                    type: "string",
+                    description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
+                  },
+                  special_instructions: {
+                    type: "string",
+                    description: "Special instructions for this item",
+                  },
                 },
-              },
-              subtotal: {
-                type: "number",
-                description: "Order subtotal before tax",
-              },
-              tax: {
-                type: "number",
-                description: "Tax amount",
-              },
-              total: {
-                type: "number",
-                description: "Total order amount including tax",
-              },
-              special_instructions: {
-                type: "string",
-                description: "Special instructions for the entire order",
+                required: ["name", "quantity", "price"],
               },
             },
-            required: ["customer_phone", "items"],
+            subtotal: {
+              type: "number",
+              description: "Order subtotal before tax",
+            },
+            tax: {
+              type: "number",
+              description: "Tax amount",
+            },
+            total: {
+              type: "number",
+              description: "Total order amount including tax",
+            },
+            special_instructions: {
+              type: "string",
+              description: "Special instructions for the entire order",
+            },
           },
+          required: ["customer_phone", "items"],
         },
-      ];
+      });
     }
-    
+    if (businessData.allow_call_transfer ?? true) {
+      assistantConfig.functions.push({
+        type: "serverless",
+        ...TRANSFER_TO_FACILITY_TOOL,
+      });
+    }
+
     // Add ending message if provided
     if (endingGreeting) {
       assistantConfig.endCallFunctionEnabled = true;
@@ -1315,6 +1336,12 @@ export async function rebuildAssistant(businessId) {
     const businessPhone = businessRecord.public_phone_number || "";
     const businessTimezone = businessRecord.timezone || "America/New_York";
     const allowTransfer = businessRecord.allow_call_transfer ?? true;
+    console.log(
+      `[VAPI Rebuild] allow_call_transfer from DB:`,
+      businessRecord.allow_call_transfer,
+      `(type ${typeof businessRecord.allow_call_transfer}) → effective allowTransfer:`,
+      allowTransfer
+    );
     const afterHoursBehavior = businessRecord.after_hours_behavior || "take_message";
     const aiEnabled = businessRecord.ai_enabled ?? true; // Default to true if not set
     const takeoutOrdersEnabled = businessRecord.takeout_orders_enabled ?? false;
@@ -1554,87 +1581,90 @@ export async function rebuildAssistant(businessId) {
       // These fields persist from the original assistant creation and don't need to be updated
     };
     
-    // Add takeout orders function only if feature is enabled
+    const patchFunctions = [];
     if (takeoutOrdersEnabled) {
-      updatePayload.functions = [
-        {
-          name: "submit_takeout_order",
-          description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
-          parameters: {
-            type: "object",
-            properties: {
-              customer_name: {
-                type: "string",
-                description: "The customer's name",
-              },
-              customer_phone: {
-                type: "string",
-                description: "The customer's phone number (required)",
-              },
-              customer_email: {
-                type: "string",
-                description: "The customer's email address (optional)",
-              },
+      patchFunctions.push({
+        name: "submit_takeout_order",
+        description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
+        parameters: {
+          type: "object",
+          properties: {
+            customer_name: {
+              type: "string",
+              description: "The customer's name",
+            },
+            customer_phone: {
+              type: "string",
+              description: "The customer's phone number (required)",
+            },
+            customer_email: {
+              type: "string",
+              description: "The customer's email address (optional)",
+            },
+            items: {
+              type: "array",
+              description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
               items: {
-                type: "array",
-                description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: {
-                      type: "string",
-                      description: "Item name (required)",
-                    },
-                    quantity: {
-                      type: "integer",
-                      description: "Quantity ordered (required)",
-                    },
-                    price: {
-                      type: "number",
-                      description: "Price per item (required)",
-                    },
-                    item_number: {
-                      type: "integer",
-                      description: "Menu item number (e.g., 1, 2, 3) if available",
-                    },
-                    modifications: {
-                      type: "string",
-                      description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
-                    },
-                    special_instructions: {
-                      type: "string",
-                      description: "Special instructions for this item",
-                    },
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Item name (required)",
                   },
-                  required: ["name", "quantity", "price"],
+                  quantity: {
+                    type: "integer",
+                    description: "Quantity ordered (required)",
+                  },
+                  price: {
+                    type: "number",
+                    description: "Price per item (required)",
+                  },
+                  item_number: {
+                    type: "integer",
+                    description: "Menu item number (e.g., 1, 2, 3) if available",
+                  },
+                  modifications: {
+                    type: "string",
+                    description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
+                  },
+                  special_instructions: {
+                    type: "string",
+                    description: "Special instructions for this item",
+                  },
                 },
-              },
-              subtotal: {
-                type: "number",
-                description: "Order subtotal before tax",
-              },
-              tax: {
-                type: "number",
-                description: "Tax amount",
-              },
-              total: {
-                type: "number",
-                description: "Total order amount including tax",
-              },
-              special_instructions: {
-                type: "string",
-                description: "Special instructions for the entire order",
+                required: ["name", "quantity", "price"],
               },
             },
-            required: ["customer_phone", "items"],
+            subtotal: {
+              type: "number",
+              description: "Order subtotal before tax",
+            },
+            tax: {
+              type: "number",
+              description: "Tax amount",
+            },
+            total: {
+              type: "number",
+              description: "Total order amount including tax",
+            },
+            special_instructions: {
+              type: "string",
+              description: "Special instructions for the entire order",
+            },
           },
+          required: ["customer_phone", "items"],
         },
-      ];
-    } else {
-      // Explicitly clear functions when takeout orders are disabled
-      updatePayload.functions = [];
+      });
     }
-    
+    if (allowTransfer) {
+      patchFunctions.push({ ...TRANSFER_TO_FACILITY_TOOL });
+    }
+    updatePayload.functions = patchFunctions;
+    console.log(
+      `[VAPI Rebuild] Vapi tools in PATCH:`,
+      patchFunctions.map((f) => f.name).join(", ") || "(none)"
+    );
+
     if (endingGreeting) {
       updatePayload.endCallFunctionEnabled = true;
     } else {

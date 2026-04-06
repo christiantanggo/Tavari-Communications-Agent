@@ -1367,6 +1367,12 @@ export async function rebuildAssistant(businessId) {
     const businessPhone = businessRecord.public_phone_number || "";
     const businessTimezone = businessRecord.timezone || "America/New_York";
     const allowTransfer = businessRecord.allow_call_transfer ?? true;
+    console.log(
+      `[VAPI Rebuild] allow_call_transfer from DB:`,
+      businessRecord.allow_call_transfer,
+      `(type ${typeof businessRecord.allow_call_transfer}) → effective allowTransfer:`,
+      allowTransfer
+    );
     const afterHoursBehavior = businessRecord.after_hours_behavior || "take_message";
     const aiEnabled = businessRecord.ai_enabled ?? true; // Default to true if not set
     const takeoutOrdersEnabled = businessRecord.takeout_orders_enabled ?? false;
@@ -1685,6 +1691,10 @@ export async function rebuildAssistant(businessId) {
       patchFunctions.push({ ...TRANSFER_TO_FACILITY_TOOL });
     }
     updatePayload.functions = patchFunctions;
+    console.log(
+      `[VAPI Rebuild] Vapi tools in PATCH:`,
+      patchFunctions.map((f) => f.name).join(", ") || "(none)"
+    );
     
     if (endingGreeting) {
       updatePayload.endCallFunctionEnabled = true;
