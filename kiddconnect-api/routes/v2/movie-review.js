@@ -12,8 +12,55 @@ import { google } from 'googleapis';
 import OpenAI from 'openai';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+/** Longest quiet stretch in renderer is the final encode (no DB heartbeat). Deploy/restart leaves rows stuck for hours. */
+const STALE_MOVIE_REVIEW_RENDER_MS = 35 * 60 * 1000;
+
+let movieReviewFfmpegOk = null;
+
+async function ensureFfmpegForMovieReview() {
+  if (movieReviewFfmpegOk === true) return;
+  if (movieReviewFfmpegOk === false) {
+    throw new Error(
+      'ffmpeg is not available on this server. Movie Review rendering requires ffmpeg (and ffprobe). Ensure nixpacks.toml includes ffmpeg in nixPkgs (or install ffmpeg on the host).',
+    );
+  }
+  try {
+    await execFileAsync('ffmpeg', ['-version'], { timeout: 8000, windowsHide: true });
+    movieReviewFfmpegOk = true;
+  } catch (e) {
+    movieReviewFfmpegOk = false;
+    console.error('[MovieReview] ffmpeg check failed:', e.message);
+    throw new Error(
+      'ffmpeg is not available on this server. Movie Review rendering requires ffmpeg (and ffprobe). Ensure nixpacks.toml includes ffmpeg in nixPkgs (or install ffmpeg on the host).',
+    );
+  }
+}
+
+async function failStaleMovieReviewRender(render, projectId) {
+  const msg =
+    'Render timed out or the server restarted before the video finished. Click Re-render to try again.';
+  await supabaseClient
+    .from('movie_review_renders')
+    .update({
+      status: 'FAILED',
+      error_message: msg,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', render.id);
+  await supabaseClient
+    .from('movie_review_projects')
+    .update({ status: 'FAILED', updated_at: new Date().toISOString() })
+    .eq('id', projectId);
+  console.warn(`[MovieReview] Stale render auto-failed renderId=${render.id} projectId=${projectId}`);
+  return { ...render, status: 'FAILED', error_message: msg };
+}
 
 const router = express.Router();
 const MODULE_KEY = 'movie-review';
@@ -1378,20 +1425,33 @@ router.post('/projects/:id/render', async (req, res) => {
 router.get('/projects/:id/render-status', async (req, res) => {
   try {
     const businessId = req.active_business_id;
-    const project = await getProject(req.params.id, businessId);
+    let project = await getProject(req.params.id, businessId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const { data: render } = await supabaseClient
+    const { data: render, error: renderErr } = await supabaseClient
       .from('movie_review_renders')
       .select('*')
       .eq('project_id', project.id)
       .order('created_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
+    if (renderErr) throw renderErr;
+
+    let latestRender = render;
+    if (
+      latestRender &&
+      (latestRender.status === 'PENDING' || latestRender.status === 'RENDERING')
+    ) {
+      const t = new Date(latestRender.updated_at || latestRender.started_at || latestRender.created_at).getTime();
+      if (Number.isFinite(t) && Date.now() - t > STALE_MOVIE_REVIEW_RENDER_MS) {
+        latestRender = await failStaleMovieReviewRender(latestRender, project.id);
+        project = await getProject(req.params.id, businessId);
+      }
+    }
 
     res.json({
       project_status: project.status,
-      render: render || null,
+      render: latestRender || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
