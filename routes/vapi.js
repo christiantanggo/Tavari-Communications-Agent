@@ -6,7 +6,7 @@ import express from "express";
 import { CallSession } from "../models/CallSession.js";
 import { Business } from "../models/Business.js";
 import { Message } from "../models/Message.js";
-import { getCallSummary, forwardCallToBusiness, getVapiClient, MAX_FACILITY_TRANSFERS_PER_CALL } from "../services/vapi.js";
+import { getCallSummary, forwardCallToBusiness, getCallData, getVapiClient, MAX_FACILITY_TRANSFERS_PER_CALL } from "../services/vapi.js";
 import { checkMinutesAvailable, recordCallUsage } from "../services/usage.js";
 import { sendCallSummaryEmail, sendSMSNotification, sendMissedCallEmail, sendEmergencyIntakeEmail, sendEmergencyIntakeSMS, sendEmergencyCustomerConfirmationSMS } from "../services/notifications.js";
 import { isBusinessOpenAtTime } from "../utils/businessHours.js";
@@ -1114,6 +1114,20 @@ async function handleCallStart(event) {
       }
     }
 
+    const returnedTransferContext = await CallSession.findRecentTransferContext({
+      businessId: business.id,
+      callerNumber,
+      businessPhoneNumber: business.public_phone_number,
+    });
+    if (returnedTransferContext?.session?.id) {
+      console.log(`[VAPI Webhook] Detected likely returned transfer context:`, {
+        previousSessionId: returnedTransferContext.session.id,
+        reason: returnedTransferContext.reason,
+        previousCallerNumber: returnedTransferContext.session.caller_number,
+        incomingCallerNumber: callerNumber,
+      });
+    }
+
   // Create call session record
   try {
     console.log(`[VAPI Webhook] Creating call session with data:`, {
@@ -1147,6 +1161,26 @@ async function handleCallStart(event) {
       status: createdSession.status,
       created_at: createdSession.created_at,
     });
+
+    if (returnedTransferContext?.session?.id) {
+      try {
+        await CallSession.update(createdSession.id, {
+          transfer_attempted: true,
+          transfer_successful: false,
+          facility_transfer_suppress_until_explicit: true,
+        });
+
+        await CallSession.update(returnedTransferContext.session.id, {
+          transfer_successful: false,
+          facility_transfer_suppress_until_explicit: true,
+        });
+
+        await injectReturnedTransferInstructions(call, callId, returnedTransferContext);
+        console.log(`[VAPI Webhook] ✅ Returned transfer context applied to new call session ${createdSession.id}`);
+      } catch (returnedTransferError) {
+        console.error(`[VAPI Webhook] ⚠️ Failed applying returned transfer context:`, returnedTransferError);
+      }
+    }
 
     // Create in-app notification for incoming call
     try {
@@ -1185,6 +1219,69 @@ async function handleCallStart(event) {
   }
   
   console.log(`[VAPI Webhook] ========== HANDLE CALL START END ==========`);
+}
+
+function sanitizeControlUrl(value) {
+  if (!value) return null;
+  return String(value).replace(/^<|>$/g, "").trim() || null;
+}
+
+async function getLiveControlUrlForCall(call, callId) {
+  const inlineControlUrl = sanitizeControlUrl(call?.monitor?.controlUrl);
+  if (inlineControlUrl) {
+    return inlineControlUrl;
+  }
+
+  if (!callId) {
+    return null;
+  }
+
+  try {
+    const liveCall = await getCallData(callId);
+    return sanitizeControlUrl(liveCall?.monitor?.controlUrl);
+  } catch (error) {
+    console.warn(`[VAPI Webhook] Unable to fetch controlUrl for call ${callId}:`, error.message);
+    return null;
+  }
+}
+
+async function injectReturnedTransferInstructions(call, callId, returnedTransferContext) {
+  const controlUrl = await getLiveControlUrlForCall(call, callId);
+  if (!controlUrl) {
+    console.warn(`[VAPI Webhook] No controlUrl available for returned transfer call ${callId}`);
+    return false;
+  }
+
+  const priorSession = returnedTransferContext?.session;
+  const priorCaller = priorSession?.caller_number || "the caller";
+  const reason = returnedTransferContext?.reason || "recent_transfer_match";
+  const instruction = [
+    "Important live-call context:",
+    `This inbound call appears to be the return leg of a failed business transfer (${reason}).`,
+    `The original caller was ${priorCaller}.`,
+    "Immediately apologize that the business line did not connect.",
+    "Do not offer another transfer unless the caller clearly asks again for a human.",
+    "Instead, offer to take a message with their name, callback number, and details.",
+  ].join(" ");
+
+  const axios = (await import("axios")).default;
+  await axios.post(
+    controlUrl,
+    {
+      type: "add-message",
+      message: {
+        role: "system",
+        content: instruction,
+      },
+      triggerResponseEnabled: true,
+    },
+    {
+      headers: { "Content-Type": "application/json" },
+      timeout: 20000,
+    }
+  );
+
+  return true;
 }
 
 /**

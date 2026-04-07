@@ -1,5 +1,19 @@
 import { supabaseClient } from '../config/database.js';
 
+function normalizePhoneForMatch(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getSessionActivityTime(session) {
+  const raw =
+    session?.transfer_timestamp ||
+    session?.updated_at ||
+    session?.started_at ||
+    session?.created_at;
+  const time = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(time) ? time : 0;
+}
+
 export class CallSession {
   static async create(data) {
     const {
@@ -121,6 +135,90 @@ export class CallSession {
     } catch (err) {
       if (err.message && (err.message.includes('column') || err.message.includes('does not exist'))) {
         console.warn('⚠️ vapi_call_id column missing. Run RUN_THIS_MIGRATION.sql');
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  static async findRecentTransferContext({
+    businessId,
+    callerNumber,
+    businessPhoneNumber,
+    recentWindowMinutes = 10,
+    ambiguousWindowMinutes = 2,
+    limit = 15,
+  }) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('call_sessions')
+        .select('*')
+        .eq('business_id', businessId)
+        .eq('transfer_attempted', true)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        if (error.message && (error.message.includes('column') || error.message.includes('does not exist'))) {
+          console.warn('⚠️ transfer_attempted column missing. Run RUN_THIS_MIGRATION.sql');
+          return null;
+        }
+        throw error;
+      }
+
+      const now = Date.now();
+      const recentCutoff = now - recentWindowMinutes * 60 * 1000;
+      const ambiguousCutoff = now - ambiguousWindowMinutes * 60 * 1000;
+      const normalizedIncoming = normalizePhoneForMatch(callerNumber);
+      const normalizedBusiness = normalizePhoneForMatch(businessPhoneNumber);
+
+      const recentTransfers = (data || []).filter((session) => {
+        const activityTime = getSessionActivityTime(session);
+        return activityTime >= recentCutoff;
+      });
+
+      if (recentTransfers.length === 0) {
+        return null;
+      }
+
+      const sameCallerMatch = normalizedIncoming
+        ? recentTransfers.find((session) => {
+            return normalizePhoneForMatch(session.caller_number) === normalizedIncoming;
+          })
+        : null;
+      if (sameCallerMatch) {
+        return {
+          session: sameCallerMatch,
+          reason: 'same_caller_number',
+        };
+      }
+
+      if (normalizedIncoming && normalizedBusiness && normalizedIncoming === normalizedBusiness) {
+        const businessLineReturn = recentTransfers.find((session) => {
+          return getSessionActivityTime(session) >= ambiguousCutoff;
+        });
+        if (businessLineReturn) {
+          return {
+            session: businessLineReturn,
+            reason: 'returned_from_business_line',
+          };
+        }
+      }
+
+      const veryRecentTransfers = recentTransfers.filter((session) => {
+        return getSessionActivityTime(session) >= ambiguousCutoff;
+      });
+      if (veryRecentTransfers.length === 1) {
+        return {
+          session: veryRecentTransfers[0],
+          reason: 'single_recent_transfer',
+        };
+      }
+
+      return null;
+    } catch (err) {
+      if (err.message && (err.message.includes('column') || err.message.includes('does not exist'))) {
+        console.warn('⚠️ transfer-related columns missing. Run RUN_THIS_MIGRATION.sql');
         return null;
       }
       throw err;
