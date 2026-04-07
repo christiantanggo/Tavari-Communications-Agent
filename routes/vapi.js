@@ -764,6 +764,10 @@ function buildReturnedTransferSystemInstruction(returnedTransferContext) {
   ].join(" ");
 }
 
+function buildReturnedTransferFirstMessage() {
+  return "I'm sorry, it looks like we didn't get you connected to the office. I can take a message and have someone call you back.";
+}
+
 function getReturnedTransferContextFromAssistantMetadata(event) {
   const metadata =
     event.call?.assistant?.metadata ||
@@ -800,8 +804,7 @@ async function applyReturnedTransferAssistantContext({ assistant, business, call
 
   const assistantClone = JSON.parse(JSON.stringify(assistant));
   const instruction = buildReturnedTransferSystemInstruction(returnedTransferContext);
-  const firstMessage =
-    "I'm sorry, it looks like we didn't get you connected to the office. I can take a message and have someone call you back.";
+  const firstMessage = buildReturnedTransferFirstMessage();
 
   if (!Array.isArray(assistantClone.model?.messages)) {
     assistantClone.model = {
@@ -1148,8 +1151,29 @@ async function handleCallStart(event) {
       return;
     }
 
-    // AI is enabled - check minutes availability to handle exhaustion
-    const minutesCheck = await checkMinutesAvailable(business.id, 0);
+    const assistantRequestContext = getReturnedTransferContextFromAssistantMetadata(event);
+    const returnedTransferContextPromise = assistantRequestContext
+      ? Promise.resolve(assistantRequestContext)
+      : CallSession.findRecentTransferContext({
+          businessId: business.id,
+          callerNumber,
+          businessPhoneNumber: business.public_phone_number,
+        });
+
+    // Start both checks at once so returned-transfer recovery is ready as early as possible.
+    const [minutesCheck, returnedTransferContext] = await Promise.all([
+      checkMinutesAvailable(business.id, 0),
+      returnedTransferContextPromise,
+    ]);
+
+    if (returnedTransferContext?.session?.id) {
+      console.log(`[VAPI Webhook] Detected likely returned transfer context:`, {
+        previousSessionId: returnedTransferContext.session.id,
+        reason: returnedTransferContext.reason,
+        previousCallerNumber: returnedTransferContext.session.caller_number,
+        incomingCallerNumber: callerNumber,
+      });
+    }
     
     if (!minutesCheck.available) {
       console.log(`[VAPI Webhook] Minutes exhausted for business ${business.id}, handling exhaustion`);
@@ -1232,20 +1256,14 @@ async function handleCallStart(event) {
       }
     }
 
-    const assistantRequestContext = getReturnedTransferContextFromAssistantMetadata(event);
-    const returnedTransferContext = assistantRequestContext || await CallSession.findRecentTransferContext({
-      businessId: business.id,
-      callerNumber,
-      businessPhoneNumber: business.public_phone_number,
-    });
-    if (returnedTransferContext?.session?.id) {
-      console.log(`[VAPI Webhook] Detected likely returned transfer context:`, {
-        previousSessionId: returnedTransferContext.session.id,
-        reason: returnedTransferContext.reason,
-        previousCallerNumber: returnedTransferContext.session.caller_number,
-        incomingCallerNumber: callerNumber,
-      });
+  let returnedTransferInjected = false;
+  if (returnedTransferContext?.session?.id && !returnedTransferContext.appliedViaAssistantRequest) {
+    try {
+      returnedTransferInjected = await injectReturnedTransferInstructions(call, callId, returnedTransferContext);
+    } catch (returnedTransferInjectError) {
+      console.error(`[VAPI Webhook] ⚠️ Early returned transfer recovery failed:`, returnedTransferInjectError);
     }
+  }
 
   // Create call session record
   try {
@@ -1294,7 +1312,7 @@ async function handleCallStart(event) {
           facility_transfer_suppress_until_explicit: true,
         });
 
-        if (!returnedTransferContext.appliedViaAssistantRequest) {
+        if (!returnedTransferContext.appliedViaAssistantRequest && !returnedTransferInjected) {
           await injectReturnedTransferInstructions(call, callId, returnedTransferContext);
         }
         console.log(`[VAPI Webhook] ✅ Returned transfer context applied to new call session ${createdSession.id}`);
@@ -1378,9 +1396,20 @@ async function injectReturnedTransferInstructions(call, callId, returnedTransfer
   }
 
   const instruction = buildReturnedTransferSystemInstruction(returnedTransferContext);
+  const firstMessage = buildReturnedTransferFirstMessage();
 
   const axios = (await import("axios")).default;
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await axios.post(
+    controlUrl,
+    {
+      type: "say",
+      message: firstMessage,
+    },
+    {
+      headers: { "Content-Type": "application/json" },
+      timeout: 20000,
+    }
+  );
   await axios.post(
     controlUrl,
     {
@@ -1389,7 +1418,7 @@ async function injectReturnedTransferInstructions(call, callId, returnedTransfer
         role: "system",
         content: instruction,
       },
-      triggerResponseEnabled: true,
+      triggerResponseEnabled: false,
     },
     {
       headers: { "Content-Type": "application/json" },
