@@ -1,7 +1,10 @@
 // middleware/errorHandler.js
 // Centralized error handling middleware
 
+import { applyCorsToResponse } from "./corsPolicy.js";
+
 export function errorHandler(err, req, res, next) {
+  applyCorsToResponse(req, res);
   console.error(`[Error] ${req.method} ${req.path}:`, err);
 
   // Don't leak error details in production

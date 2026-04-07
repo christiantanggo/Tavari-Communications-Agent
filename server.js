@@ -31,7 +31,13 @@ import cors from "cors";
 import helmet from "helmet";
 import fs from "fs";
 import path from "path";
-import { getDevBackendPort, getDevFrontendPort } from "./config/load-dev-ports.js";
+import { getDevBackendPort } from "./config/load-dev-ports.js";
+import {
+  readRequestOrigin,
+  isOriginAllowed,
+  canonicalOrigin,
+  applyCorsPreflightHeaders,
+} from "./middleware/corsPolicy.js";
 
 // Load environment variables FIRST (use .env only - old communications app DB)
 dotenv.config();
@@ -116,105 +122,7 @@ const LISTEN_PORT = __SERVER_PORT__;
 // Trust proxy for Railway/behind reverse proxy (fixes rate limiter warnings)
 app.set('trust proxy', true);
 
-// CORS configuration - allow requests from frontend (dev ports from config/dev-ports.json)
-const __DEV_FE__ = getDevFrontendPort();
-const extraOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((o) => String(o).trim())
-  .filter(Boolean);
-const allowedOrigins = [
-  'https://www.tavarios.com',
-  'https://tavarios.com',
-  `http://localhost:${__DEV_FE__}`,
-  `http://127.0.0.1:${__DEV_FE__}`,
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:3000',
-  process.env.FRONTEND_URL,
-  ...extraOrigins,
-].filter(Boolean); // Remove undefined values
-
-/** Normalize browser Origin header (trim, first value if array). */
-function readRequestOrigin(req) {
-  const raw = req.headers.origin;
-  if (raw == null) return '';
-  const s = Array.isArray(raw) ? raw[0] : raw;
-  return String(s).trim();
-}
-
-function parsedOriginOrigin(originStr) {
-  try {
-    return new URL(originStr).origin;
-  } catch {
-    return null;
-  }
-}
-
-function isTavariosHost(hostname) {
-  const h = String(hostname || '')
-    .replace(/\.$/, '')
-    .toLowerCase();
-  return h === 'tavarios.com' || h.endsWith('.tavarios.com');
-}
-
-function isTavariosProductionOrigin(originStr) {
-  try {
-    const u = new URL(originStr);
-    return isTavariosHost(u.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function isOriginAllowed(originRaw) {
-  const origin = originRaw == null ? '' : String(originRaw).trim();
-  if (!origin) return true;
-  if (process.env.FRONTEND_URL === '*') return true;
-  if (process.env.NODE_ENV !== 'production') return true;
-
-  if (allowedOrigins.includes(origin)) return true;
-  const reqOrigin = parsedOriginOrigin(origin);
-  if (reqOrigin && allowedOrigins.some((a) => parsedOriginOrigin(a) === reqOrigin)) return true;
-
-  if (isTavariosProductionOrigin(origin)) {
-    try {
-      const u = new URL(origin);
-      if (process.env.NODE_ENV === 'production' && u.protocol !== 'https:') return false;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return true;
-  return false;
-}
-
-/** Apply preflight headers; echo Access-Control-Request-Headers so custom client headers pass preflight. */
-function applyCorsPreflightHeaders(req, res) {
-  const origin = readRequestOrigin(req);
-  if (!origin || !isOriginAllowed(origin)) {
-    if (process.env.CORS_DEBUG_LOG === '1' && origin) {
-      console.warn('[CORS] preflight denied for Origin:', JSON.stringify(origin));
-    }
-    return false;
-  }
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-  const requested = req.headers['access-control-request-headers'];
-  if (requested) {
-    res.setHeader('Access-Control-Allow-Headers', requested);
-  } else {
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Active-Business-Id, Accept, Cookie'
-    );
-  }
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('Vary', 'Origin');
-  return true;
-}
+// CORS: allowlist + helpers live in middleware/corsPolicy.js (also used by errorHandler).
 
 // CRITICAL: handle OPTIONS for every path (Express route '*' does not match /api/... in all versions)
 app.use((req, res, next) => {
@@ -241,7 +149,8 @@ const corsOptions = {
     if (process.env.CORS_DEBUG_LOG === '1') {
       console.warn('[CORS] cors() denied Origin:', JSON.stringify(incoming));
     }
-    callback(new Error('Not allowed by CORS'));
+    // Do not next(err): that skips later middleware and error responses lack CORS headers.
+    callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -270,9 +179,9 @@ app.use(cors(corsOptions));
 app.use((req, res, next) => {
   const origin = readRequestOrigin(req);
   if (origin && isOriginAllowed(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Vary', 'Origin');
+    res.header("Access-Control-Allow-Origin", canonicalOrigin(origin));
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Vary", "Origin");
   }
   next();
 });
