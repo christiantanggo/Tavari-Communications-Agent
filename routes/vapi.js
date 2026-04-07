@@ -2124,7 +2124,7 @@ async function handleTransferStarted(event) {
   if (callSession) {
     await CallSession.update(callSession.id, {
       transfer_attempted: true,
-      transfer_timestamp: new Date(),
+      transfer_timestamp: new Date().toISOString(),
     });
   }
 }
@@ -2268,7 +2268,12 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
 
   if (callSession?.id) {
     const prevCount = Number(callSession.facility_transfer_count) || 0;
-    const patch = { facility_transfer_count: prevCount + 1 };
+    // Vapi may not emit transfer-started for server-initiated bridges; record attempt here so sessions are not stuck false.
+    const patch = {
+      facility_transfer_count: prevCount + 1,
+      transfer_attempted: true,
+      transfer_timestamp: new Date().toISOString(),
+    };
     if (!forwardResult.forwarded) {
       patch.facility_transfer_suppress_until_explicit = true;
       patch.transfer_successful = false;

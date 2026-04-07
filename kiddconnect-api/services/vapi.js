@@ -43,6 +43,9 @@ export function getVapiClient() {
 /** Phone agent LLM model (OpenAI). Override with PHONE_AGENT_MODEL env. Default gpt-4o-mini follows tool calls (transfer/submit) more reliably than gpt-4.1-nano; set PHONE_AGENT_MODEL=gpt-4.1-nano to reduce cost if you accept occasional missed tool calls. */
 export const PHONE_AGENT_MODEL = process.env.PHONE_AGENT_MODEL || 'gpt-4o-mini';
 
+/** Max human handoff attempts to the business line per inbound AI call (server-enforced). */
+export const MAX_FACILITY_TRANSFERS_PER_CALL = 3;
+
 const TRANSFER_TO_FACILITY_TOOL = {
   name: "transfer_to_facility",
   description:
@@ -58,6 +61,11 @@ const TRANSFER_TO_FACILITY_TOOL = {
     },
   },
 };
+
+function toAssistantPatchFunction(tool) {
+  const { type, ...patchTool } = tool;
+  return patchTool;
+}
 
 /**
  * Create a VAPI assistant for a business
@@ -1582,8 +1590,8 @@ export async function rebuildAssistant(businessId) {
     
     const patchFunctions = [];
     if (takeoutOrdersEnabled) {
-      patchFunctions.push({
-        type: "serverless",
+      // VAPI PATCH rejects `type` on function objects ("property type should not exist"); keep type only on POST create.
+      patchFunctions.push(toAssistantPatchFunction({
         name: "submit_takeout_order",
         description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
         parameters: {
@@ -1654,10 +1662,10 @@ export async function rebuildAssistant(businessId) {
           },
           required: ["customer_phone", "items"],
         },
-      });
+      }));
     }
     if (allowTransfer) {
-      patchFunctions.push({ type: "serverless", ...TRANSFER_TO_FACILITY_TOOL });
+      patchFunctions.push(toAssistantPatchFunction(TRANSFER_TO_FACILITY_TOOL));
     }
     updatePayload.functions = patchFunctions;
     console.log(
@@ -1674,7 +1682,6 @@ export async function rebuildAssistant(businessId) {
     console.log(`[VAPI Rebuild] Model being set: ${updatePayload.model.model}`);
     console.log(`[VAPI Rebuild] Voice provider being set: ${updatePayload.voice.provider}`);
     console.log(`[VAPI Rebuild] Voice ID being set: ${updatePayload.voice.voiceId}`);
-    console.log(`[VAPI Rebuild] Clean update payload (no read-only fields):`, JSON.stringify(updatePayload, null, 2));
     console.log(`[VAPI Rebuild] Payload keys:`, Object.keys(updatePayload));
     
     let response;

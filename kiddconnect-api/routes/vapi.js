@@ -6,7 +6,7 @@ import express from "express";
 import { CallSession } from "../models/CallSession.js";
 import { Business } from "../models/Business.js";
 import { Message } from "../models/Message.js";
-import { getCallSummary, forwardCallToBusiness, getVapiClient } from "../services/vapi.js";
+import { getCallSummary, forwardCallToBusiness, getVapiClient, MAX_FACILITY_TRANSFERS_PER_CALL } from "../services/vapi.js";
 import { checkMinutesAvailable, recordCallUsage } from "../services/usage.js";
 import { sendCallSummaryEmail, sendSMSNotification, sendMissedCallEmail, sendEmergencyIntakeEmail, sendEmergencyIntakeSMS, sendEmergencyCustomerConfirmationSMS } from "../services/notifications.js";
 import { isBusinessOpenAtTime } from "../utils/businessHours.js";
@@ -2110,14 +2110,14 @@ async function handleCallEnd(event) {
  * Handle transfer-started event
  */
 async function handleTransferStarted(event) {
-  const call = event.call || event;
+  const call = event.call || event.message?.call || event;
   const callId = call.id || call.callId;
 
   const callSession = await CallSession.findByVapiCallId(callId);
   if (callSession) {
     await CallSession.update(callSession.id, {
       transfer_attempted: true,
-      transfer_timestamp: new Date(),
+      transfer_timestamp: new Date().toISOString(),
     });
   }
 }
@@ -2126,13 +2126,14 @@ async function handleTransferStarted(event) {
  * Handle transfer-failed event
  */
 async function handleTransferFailed(event) {
-  const call = event.call || event;
+  const call = event.call || event.message?.call || event;
   const callId = call.id || call.callId;
 
   const callSession = await CallSession.findByVapiCallId(callId);
   if (callSession) {
     await CallSession.update(callSession.id, {
       transfer_successful: false,
+      facility_transfer_suppress_until_explicit: true,
     });
   }
 }
@@ -2141,13 +2142,121 @@ async function handleTransferFailed(event) {
  * Handle call-returned event (call returned after transfer failure)
  */
 async function handleCallReturned(event) {
-  const call = event.call || event;
+  const call = event.call || event.message?.call || event;
   const callId = call.id || call.callId;
 
-  // Call returned after transfer failure
-  // AI should NOT attempt another transfer
-  // This is handled in the assistant template logic
   console.log(`[VAPI Webhook] Call ${callId} returned after transfer failure`);
+  const callSession = await CallSession.findByVapiCallId(callId);
+  if (callSession) {
+    await CallSession.update(callSession.id, {
+      facility_transfer_suppress_until_explicit: true,
+      transfer_successful: false,
+    });
+  }
+}
+
+/**
+ * Telnyx transfer to the business public line. Returns a short instruction string for the assistant.
+ */
+async function handleTransferToFacilityRequest(event, functionArguments) {
+  const explicitHumanRequest = Boolean(functionArguments?.explicit_human_request);
+
+  const call =
+    event.call ||
+    event.message?.call ||
+    event.message?.artifact?.call ||
+    event.artifact?.call ||
+    {};
+  const callId = call.id || call.callId;
+
+  const assistantId =
+    event.call?.assistant?.id ||
+    event.message?.assistant?.id ||
+    call.assistant?.id ||
+    event.message?.call?.assistant?.id ||
+    event.message?.artifact?.assistant?.id ||
+    event.message?.artifact?.call?.assistant?.id;
+
+  if (!callId) {
+    console.warn("[VAPI Webhook] transfer_to_facility: missing callId");
+    return "Tell the caller you're unable to connect the line right now. Apologize briefly and take a message with their name, phone, and what they need.";
+  }
+
+  const { demoAssistants } = await import("./demo.js");
+  if (assistantId && demoAssistants.get(assistantId)) {
+    return "This demo line cannot transfer to a live business number. Apologize briefly and offer to take a message so someone can call them back.";
+  }
+
+  const { getEmergencyAssistantId } = await import("../services/emergency-network/config.js");
+  const emergencyAssistantId = await getEmergencyAssistantId();
+  if (assistantId && emergencyAssistantId && assistantId === emergencyAssistantId) {
+    return "Do not use transfer on this emergency call. Continue with the emergency script.";
+  }
+
+  if (!assistantId) {
+    console.warn("[VAPI Webhook] transfer_to_facility: missing assistantId");
+    return "Tell the caller you're unable to connect the line right now. Apologize briefly and take a message.";
+  }
+
+  const business = await Business.findByVapiAssistantId(assistantId);
+  if (!business) {
+    console.warn("[VAPI Webhook] transfer_to_facility: business not found for assistant", assistantId);
+    return "Tell the caller you're unable to connect the line right now. Apologize briefly and take a message.";
+  }
+
+  const allowTransfer = business.allow_call_transfer ?? true;
+  if (!allowTransfer) {
+    return "Transfer is disabled for this business. Say you cannot connect them directly and take a full message (name, phone, details). Do not call transfer_to_facility again.";
+  }
+
+  const targetNumber = business.public_phone_number;
+  if (!targetNumber || String(targetNumber).trim() === "") {
+    console.warn("[VAPI Webhook] transfer_to_facility: no public_phone_number for business", business.id);
+    return "No business line is on file. Apologize and take a message. Do not call transfer_to_facility again.";
+  }
+
+  const callSession = await CallSession.findByVapiCallId(callId);
+
+  if (callSession) {
+    const suppress = callSession.facility_transfer_suppress_until_explicit === true;
+    if (suppress && !explicitHumanRequest) {
+      return "Do not transfer yet: the last connection attempt did not complete. Briefly apologize and offer to take a message. Only if the caller clearly asks again to speak to a person or to be transferred, call transfer_to_facility again with explicit_human_request set to true.";
+    }
+
+    const count = Number(callSession.facility_transfer_count) || 0;
+    if (count >= MAX_FACILITY_TRANSFERS_PER_CALL) {
+      return "Maximum transfer attempts for this call have been used (3). Apologize and take a message. Do not call transfer_to_facility again on this call.";
+    }
+  } else {
+    console.warn("[VAPI Webhook] transfer_to_facility: no CallSession for call", callId, "— attempting transfer without attempt counter");
+  }
+
+  const forwardResult = await forwardCallToBusiness(callId, targetNumber);
+
+  if (callSession?.id) {
+    const prevCount = Number(callSession.facility_transfer_count) || 0;
+    const patch = {
+      facility_transfer_count: prevCount + 1,
+      transfer_attempted: true,
+      transfer_timestamp: new Date().toISOString(),
+    };
+    if (!forwardResult.forwarded) {
+      patch.facility_transfer_suppress_until_explicit = true;
+      patch.transfer_successful = false;
+    }
+    try {
+      await CallSession.update(callSession.id, patch);
+    } catch (e) {
+      console.error("[VAPI Webhook] transfer_to_facility: failed to update call session", e);
+    }
+  }
+
+  if (forwardResult.forwarded) {
+    return "Success: Say one brief sentence that you are connecting them now; they may hear ringing. Then stop speaking—the call is bridging.";
+  }
+
+  console.error("[VAPI Webhook] transfer_to_facility: forward failed", forwardResult.reason, forwardResult.error);
+  return "The connection did not go through. Apologize briefly. Do not offer another transfer unless the caller clearly asks to speak to someone again; if they do, you may call transfer_to_facility with explicit_human_request true if attempts remain. Otherwise take a message.";
 }
 
 /**
@@ -2255,6 +2364,13 @@ async function handleFunctionCall(event) {
         return { results: [{ toolCallId, result: (typeof out === 'object' && out?.result != null) ? out.result : "The text could not be sent. You can ask me to repeat the details." }] };
       }
       return out;
+    }
+    if (functionName === "transfer_to_facility") {
+      resultContent = await handleTransferToFacilityRequest(event, functionArguments);
+      if (toolCallId) {
+        return { results: [{ toolCallId, result: resultContent }] };
+      }
+      return { result: resultContent };
     }
     console.log(`[VAPI Webhook] ⚠️ Unhandled function: ${functionName}`);
     // Always return a result when we have toolCallId so VAPI does not show "No result returned"

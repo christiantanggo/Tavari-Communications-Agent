@@ -62,6 +62,11 @@ const TRANSFER_TO_FACILITY_TOOL = {
   },
 };
 
+function toAssistantPatchFunction(tool) {
+  const { type, ...patchTool } = tool;
+  return patchTool;
+}
+
 /**
  * Create a VAPI assistant for a business
  * @param {Object} businessData - Business information
@@ -1613,8 +1618,8 @@ export async function rebuildAssistant(businessId) {
     
     const patchFunctions = [];
     if (takeoutOrdersEnabled) {
-      patchFunctions.push({
-          type: "serverless",
+      // VAPI PATCH rejects `type` on function objects ("property type should not exist"); keep type only on POST create.
+      patchFunctions.push(toAssistantPatchFunction({
           name: "submit_takeout_order",
           description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
           parameters: {
@@ -1685,10 +1690,10 @@ export async function rebuildAssistant(businessId) {
             },
             required: ["customer_phone", "items"],
           },
-        });
+        }));
     }
     if (allowTransfer) {
-      patchFunctions.push({ type: "serverless", ...TRANSFER_TO_FACILITY_TOOL });
+      patchFunctions.push(toAssistantPatchFunction(TRANSFER_TO_FACILITY_TOOL));
     }
     updatePayload.functions = patchFunctions;
     console.log(
@@ -1705,7 +1710,7 @@ export async function rebuildAssistant(businessId) {
     console.log(`[VAPI Rebuild] Model being set: ${updatePayload.model.model}`);
     console.log(`[VAPI Rebuild] Voice provider being set: ${updatePayload.voice.provider}`);
     console.log(`[VAPI Rebuild] Voice ID being set: ${updatePayload.voice.voiceId}`);
-    console.log(`[VAPI Rebuild] Clean update payload (no read-only fields):`, JSON.stringify(updatePayload, null, 2));
+    // Avoid logging full payload: large JSON can hit log rate limits and offers little signal vs. keys + tool names.
     console.log(`[VAPI Rebuild] Payload keys:`, Object.keys(updatePayload));
     
     let response;
