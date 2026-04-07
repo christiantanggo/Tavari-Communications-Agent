@@ -147,6 +147,7 @@ export class CallSession {
     businessPhoneNumber,
     recentWindowMinutes = 10,
     ambiguousWindowMinutes = 2,
+    sameCallerWindowMinutes = 1,
     limit = 15,
   }) {
     try {
@@ -169,6 +170,7 @@ export class CallSession {
       const now = Date.now();
       const recentCutoff = now - recentWindowMinutes * 60 * 1000;
       const ambiguousCutoff = now - ambiguousWindowMinutes * 60 * 1000;
+      const sameCallerCutoff = now - sameCallerWindowMinutes * 60 * 1000;
       const normalizedIncoming = normalizePhoneForMatch(callerNumber);
       const normalizedBusiness = normalizePhoneForMatch(businessPhoneNumber);
 
@@ -181,8 +183,16 @@ export class CallSession {
         return null;
       }
 
+      const veryRecentTransfers = recentTransfers.filter((session) => {
+        return getSessionActivityTime(session) >= ambiguousCutoff;
+      });
+
+      const sameCallerTransfers = veryRecentTransfers.filter((session) => {
+        return getSessionActivityTime(session) >= sameCallerCutoff;
+      });
+
       const sameCallerMatch = normalizedIncoming
-        ? recentTransfers.find((session) => {
+        ? sameCallerTransfers.find((session) => {
             return normalizePhoneForMatch(session.caller_number) === normalizedIncoming;
           })
         : null;
@@ -205,9 +215,6 @@ export class CallSession {
         }
       }
 
-      const veryRecentTransfers = recentTransfers.filter((session) => {
-        return getSessionActivityTime(session) >= ambiguousCutoff;
-      });
       if (veryRecentTransfers.length === 1) {
         return {
           session: veryRecentTransfers[0],
