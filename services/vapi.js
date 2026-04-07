@@ -2045,6 +2045,44 @@ export async function forwardCallViaTelnyx(callLegId, targetNumber) {
  * @param {string} targetNumber - Business phone number (must be E.164 format)
  * @returns {Promise<Object>} Forward response (always returns object, never throws)
  */
+function supportsWarmTransfer(callData) {
+  const setting = String(process.env.VAPI_WARM_TRANSFER_ENABLED || "").trim().toLowerCase();
+  if (setting === "false") {
+    return false;
+  }
+  if (setting === "true") {
+    return true;
+  }
+
+  const providerHints = [
+    callData?.phoneCallProvider,
+    callData?.transport?.provider,
+    callData?.transport?.carrier,
+    callData?.transport?.gateway,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return providerHints.includes("twilio") || providerHints.includes("vapi");
+}
+
+function buildWarmTransferDestination(number) {
+  return {
+    type: "number",
+    number,
+    transferPlan: {
+      mode: "warm-transfer-experimental",
+      message: "Hello, I have a caller for the office line. Are you available to take the call?",
+      voicemailDetectionType: "transcript",
+      fallbackPlan: {
+        message: "I'm sorry, I couldn't reach the office. I'll help take a message for you instead.",
+        endCallEnabled: false,
+      },
+    },
+  };
+}
+
 export async function forwardCallToBusiness(callId, targetNumber) {
   try {
     // Ensure phone number is in E.164 format
@@ -2086,6 +2124,33 @@ export async function forwardCallToBusiness(callId, targetNumber) {
       const controlUrl = String(rawControlUrl).replace(/^<|>$/g, "").trim();
       try {
         const axios = (await import("axios")).default;
+        if (supportsWarmTransfer(callData)) {
+          console.log(`[VAPI Forward] Step 2a: Attempting warm transfer via Vapi Live Call Control...`);
+          try {
+            const warmResp = await axios.post(
+              controlUrl,
+              {
+                type: "transfer",
+                destination: buildWarmTransferDestination(e164Number),
+                content: "Connecting you now.",
+              },
+              {
+                headers: { "Content-Type": "application/json" },
+                timeout: 20000,
+              }
+            );
+            console.log(`[VAPI Forward] ✅ TRANSFER OK (vapi_live_warm_transfer)`);
+            return { forwarded: true, method: "vapi_live_warm_transfer", result: warmResp.data };
+          } catch (warmErr) {
+            console.error(
+              `[VAPI Forward] Warm transfer attempt failed; falling back to blind transfer:`,
+              warmErr.response?.data || warmErr.message
+            );
+          }
+        } else {
+          console.log(`[VAPI Forward] Warm transfer skipped for current provider; using blind transfer fallback`);
+        }
+
         console.log(`[VAPI Forward] Step 2: Transfer via Vapi Live Call Control...`);
         const resp = await axios.post(
           controlUrl,

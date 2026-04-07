@@ -702,8 +702,9 @@ async function handleAssistantRequest(body, res) {
   }
 
   let assistantId = existingAssistantId;
+  let business = null;
   if (!assistantId && phoneNumber) {
-    const business = await Business.findByPhoneNumber(phoneNumber);
+    business = await Business.findByPhoneNumber(phoneNumber);
     if (business?.vapi_assistant_id) {
       assistantId = business.vapi_assistant_id;
       console.log("[VAPI Webhook] assistant-request: resolved assistant from phone -> business", business.id, assistantId);
@@ -718,16 +719,123 @@ async function handleAssistantRequest(body, res) {
 
   const vapiClient = getVapiClient();
   const assistantResponse = await vapiClient.get(`/assistant/${assistantId}`);
-  const assistant = assistantResponse.data;
+  let assistant = assistantResponse.data;
   if (!assistant) {
     console.error("[VAPI Webhook] assistant-request: assistant not found in VAPI", assistantId);
     res.status(200).json({ received: true });
     return { sent: true };
   }
 
+  if (!business) {
+    const assistantBusinessId = assistant?.metadata?.businessId;
+    if (assistantBusinessId) {
+      business = await Business.findById(assistantBusinessId);
+    }
+    if (!business) {
+      business = await Business.findByVapiAssistantId(assistantId);
+    }
+  }
+
+  if (business && callerNumber) {
+    assistant = await applyReturnedTransferAssistantContext({
+      assistant,
+      business,
+      callerNumber,
+    });
+  }
+
   console.log("[VAPI Webhook] assistant-request: returning assistant config for", assistantId);
   res.status(200).json({ assistant });
   return { sent: true };
+}
+
+function buildReturnedTransferSystemInstruction(returnedTransferContext) {
+  const priorSession = returnedTransferContext?.session;
+  const priorCaller = priorSession?.caller_number || "the caller";
+  const reason = returnedTransferContext?.reason || "recent_transfer_match";
+  return [
+    "Important live-call context:",
+    `This inbound call appears to be the return leg of a failed business transfer (${reason}).`,
+    `The original caller was ${priorCaller}.`,
+    "Do not use the normal opening greeting for this call.",
+    "Start by apologizing that the business line did not connect.",
+    "Offer to take a message with their name, callback number, and details.",
+    "Do not offer another transfer unless the caller clearly asks again for a human.",
+  ].join(" ");
+}
+
+function getReturnedTransferContextFromAssistantMetadata(event) {
+  const metadata =
+    event.call?.assistant?.metadata ||
+    event.message?.assistant?.metadata ||
+    event.message?.call?.assistant?.metadata ||
+    event.message?.artifact?.assistant?.metadata ||
+    event.message?.artifact?.call?.assistant?.metadata ||
+    null;
+
+  if (!metadata?.returned_transfer_context_applied || !metadata?.returned_transfer_session_id) {
+    return null;
+  }
+
+  return {
+    session: {
+      id: metadata.returned_transfer_session_id,
+      caller_number: metadata.returned_transfer_previous_caller || null,
+    },
+    reason: metadata.returned_transfer_reason || "assistant_request_applied",
+    appliedViaAssistantRequest: true,
+  };
+}
+
+async function applyReturnedTransferAssistantContext({ assistant, business, callerNumber }) {
+  const returnedTransferContext = await CallSession.findRecentTransferContext({
+    businessId: business.id,
+    callerNumber,
+    businessPhoneNumber: business.public_phone_number,
+  });
+
+  if (!returnedTransferContext?.session?.id) {
+    return assistant;
+  }
+
+  const assistantClone = JSON.parse(JSON.stringify(assistant));
+  const instruction = buildReturnedTransferSystemInstruction(returnedTransferContext);
+  const firstMessage =
+    "I'm sorry, it looks like we didn't get you connected to the office. I can take a message and have someone call you back.";
+
+  if (!Array.isArray(assistantClone.model?.messages)) {
+    assistantClone.model = {
+      ...(assistantClone.model || {}),
+      messages: [],
+    };
+  }
+
+  const systemMessage = assistantClone.model.messages.find((message) => message.role === "system");
+  if (systemMessage && typeof systemMessage.content === "string") {
+    systemMessage.content += `\n\n[RETURNED TRANSFER CONTEXT]\n${instruction}`;
+  } else {
+    assistantClone.model.messages.unshift({
+      role: "system",
+      content: instruction,
+    });
+  }
+
+  assistantClone.firstMessage = firstMessage;
+  assistantClone.metadata = {
+    ...(assistantClone.metadata || {}),
+    returned_transfer_context_applied: true,
+    returned_transfer_session_id: returnedTransferContext.session.id,
+    returned_transfer_reason: returnedTransferContext.reason || "recent_transfer_match",
+    returned_transfer_previous_caller: returnedTransferContext.session.caller_number || null,
+  };
+
+  console.log(
+    "[VAPI Webhook] assistant-request: applied returned transfer context for business",
+    business.id,
+    returnedTransferContext.reason || "recent_transfer_match"
+  );
+
+  return assistantClone;
 }
 
 /**
@@ -1124,7 +1232,8 @@ async function handleCallStart(event) {
       }
     }
 
-    const returnedTransferContext = await CallSession.findRecentTransferContext({
+    const assistantRequestContext = getReturnedTransferContextFromAssistantMetadata(event);
+    const returnedTransferContext = assistantRequestContext || await CallSession.findRecentTransferContext({
       businessId: business.id,
       callerNumber,
       businessPhoneNumber: business.public_phone_number,
@@ -1185,7 +1294,9 @@ async function handleCallStart(event) {
           facility_transfer_suppress_until_explicit: true,
         });
 
-        await injectReturnedTransferInstructions(call, callId, returnedTransferContext);
+        if (!returnedTransferContext.appliedViaAssistantRequest) {
+          await injectReturnedTransferInstructions(call, callId, returnedTransferContext);
+        }
         console.log(`[VAPI Webhook] ✅ Returned transfer context applied to new call session ${createdSession.id}`);
       } catch (returnedTransferError) {
         console.error(`[VAPI Webhook] ⚠️ Failed applying returned transfer context:`, returnedTransferError);
@@ -1266,19 +1377,10 @@ async function injectReturnedTransferInstructions(call, callId, returnedTransfer
     return false;
   }
 
-  const priorSession = returnedTransferContext?.session;
-  const priorCaller = priorSession?.caller_number || "the caller";
-  const reason = returnedTransferContext?.reason || "recent_transfer_match";
-  const instruction = [
-    "Important live-call context:",
-    `This inbound call appears to be the return leg of a failed business transfer (${reason}).`,
-    `The original caller was ${priorCaller}.`,
-    "Immediately apologize that the business line did not connect.",
-    "Do not offer another transfer unless the caller clearly asks again for a human.",
-    "Instead, offer to take a message with their name, callback number, and details.",
-  ].join(" ");
+  const instruction = buildReturnedTransferSystemInstruction(returnedTransferContext);
 
   const axios = (await import("axios")).default;
+  await new Promise((resolve) => setTimeout(resolve, 1200));
   await axios.post(
     controlUrl,
     {
@@ -2418,7 +2520,7 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
   }
 
   if (forwardResult.forwarded) {
-    return "Success: Say one brief sentence that you are connecting them now; they may hear ringing. Then stop speaking—the call is bridging.";
+    return "Success: Say one brief sentence that you are connecting them now, then stop speaking while the connection attempt runs.";
   }
 
   console.error("[VAPI Webhook] transfer_to_facility: forward failed", forwardResult.reason, forwardResult.error);
