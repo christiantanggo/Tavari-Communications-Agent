@@ -40,13 +40,13 @@ export function getVapiClient() {
   return vapiClient;
 }
 
-/** Phone agent LLM model (OpenAI). Override with PHONE_AGENT_MODEL env. gpt-4.1-nano is cheaper than gpt-4o-mini (~33% lower cost). */
-export const PHONE_AGENT_MODEL = process.env.PHONE_AGENT_MODEL || 'gpt-4.1-nano';
+/** Phone agent LLM model (OpenAI). Override with PHONE_AGENT_MODEL env. Default gpt-4o-mini follows tool calls (transfer/submit) more reliably than gpt-4.1-nano; set PHONE_AGENT_MODEL=gpt-4.1-nano to reduce cost if you accept occasional missed tool calls. */
+export const PHONE_AGENT_MODEL = process.env.PHONE_AGENT_MODEL || 'gpt-4o-mini';
 
 const TRANSFER_TO_FACILITY_TOOL = {
   name: "transfer_to_facility",
   description:
-    "CRITICAL: You MUST invoke (execute) this function to transfer the call. Saying you will connect them, asking them to hold, or describing a transfer WITHOUT calling this function does nothing—no transfer happens. Same rule as submit_takeout_order: invocation is required. Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
+    "CRITICAL: You MUST invoke (execute) this function to transfer the call. On transfer/office/human intent, emit this tool call in the SAME assistant turn as your first response—do NOT say please hold, connecting, transferring, one moment, or business line BEFORE the tool runs; without an executed call the dial never starts. Saying you will connect them or asking them to hold WITHOUT calling this function does nothing. Same rule as submit_takeout_order: invocation is required. Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
   parameters: {
     type: "object",
     properties: {
@@ -1538,7 +1538,7 @@ export async function rebuildAssistant(businessId) {
     
     const updatePayload = {
       name: `${truncatedBusinessName}${suffix}`,
-      // Use PHONE_AGENT_MODEL (default gpt-4.1-nano for lower cost)
+      // Use PHONE_AGENT_MODEL (default gpt-4o-mini for reliable tool calls)
       model: {
         provider: "openai",
         model: PHONE_AGENT_MODEL,
@@ -1583,6 +1583,7 @@ export async function rebuildAssistant(businessId) {
     const patchFunctions = [];
     if (takeoutOrdersEnabled) {
       patchFunctions.push({
+        type: "serverless",
         name: "submit_takeout_order",
         description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
         parameters: {
@@ -1656,7 +1657,7 @@ export async function rebuildAssistant(businessId) {
       });
     }
     if (allowTransfer) {
-      patchFunctions.push({ ...TRANSFER_TO_FACILITY_TOOL });
+      patchFunctions.push({ type: "serverless", ...TRANSFER_TO_FACILITY_TOOL });
     }
     updatePayload.functions = patchFunctions;
     console.log(
