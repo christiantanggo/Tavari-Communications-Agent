@@ -822,8 +822,8 @@ router.post("/webhook", async (req, res) => {
       switch (eventTypeFromEvent) {
         case "call-start":
         case "status-update":
-          // status-update with status "ringing" or "started" is equivalent to call-start
-          if (eventTypeFromEvent === "status-update" && (event.message?.status === "ringing" || event.message?.status === "started")) {
+          // Only treat true start-like statuses as new inbound calls.
+          if (eventTypeFromEvent === "status-update" && isCallStartStatus(event.message?.status)) {
             console.log(`[VAPI Webhook ${webhookId}] 🟢 Processing status-update (call-start) event`);
             await handleCallStart(event); // Pass full event, not just message
           } else if (eventTypeFromEvent === "status-update" && event.message?.status === "ended") {
@@ -831,6 +831,10 @@ router.post("/webhook", async (req, res) => {
             // We'll wait for the end-of-call-report event which has the full summary
             // This prevents duplicate emails (one with no summary, one with summary)
             console.log(`[VAPI Webhook ${webhookId}] ⚠️ Skipping status-update (ended) - waiting for end-of-call-report event`);
+          } else if (eventTypeFromEvent === "status-update") {
+            console.log(
+              `[VAPI Webhook ${webhookId}] ⚠️ Skipping non-start status-update (${event.message?.status || "unknown"})`
+            );
           } else {
             console.log(`[VAPI Webhook ${webhookId}] 🟢 Processing call-start/status-update event`);
             await handleCallStart(event); // Pass full event, not just message
@@ -963,6 +967,12 @@ async function handleCallStart(event) {
       name: business.name,
       ai_enabled: business.ai_enabled,
     });
+
+    const existingSession = callId ? await CallSession.findByVapiCallId(callId) : null;
+    if (existingSession?.id) {
+      console.log(`[VAPI Webhook] Call session already exists for call ${callId}, skipping duplicate call-start processing`);
+      return;
+    }
 
     // If AI is disabled, forward the call to the business
     if (!business.ai_enabled) {
@@ -1219,6 +1229,10 @@ async function handleCallStart(event) {
   }
   
   console.log(`[VAPI Webhook] ========== HANDLE CALL START END ==========`);
+}
+
+function isCallStartStatus(status) {
+  return ["queued", "ringing", "started", "in-progress"].includes(String(status || "").toLowerCase());
 }
 
 function sanitizeControlUrl(value) {
@@ -2310,6 +2324,11 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
     event.message?.call?.assistant?.id ||
     event.message?.artifact?.assistant?.id ||
     event.message?.artifact?.call?.assistant?.id;
+  const callerNumber =
+    call.customer?.number ||
+    event.message?.customer?.number ||
+    event.message?.artifact?.customer?.number ||
+    null;
 
   if (!callId) {
     console.warn("[VAPI Webhook] transfer_to_facility: missing callId");
@@ -2349,7 +2368,7 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
     return "No business line is on file. Apologize and take a message. Do not call transfer_to_facility again.";
   }
 
-  const callSession = await CallSession.findByVapiCallId(callId);
+  let callSession = await CallSession.findByVapiCallId(callId);
 
   if (callSession) {
     const suppress = callSession.facility_transfer_suppress_until_explicit === true;
@@ -2362,7 +2381,19 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
       return "Maximum transfer attempts for this call have been used (3). Apologize and take a message. Do not call transfer_to_facility again on this call.";
     }
   } else {
-    console.warn("[VAPI Webhook] transfer_to_facility: no CallSession for call", callId, "— attempting transfer without attempt counter");
+    console.warn("[VAPI Webhook] transfer_to_facility: no CallSession for call", callId, "— creating fallback session");
+    try {
+      callSession = await CallSession.create({
+        business_id: business.id,
+        vapi_call_id: callId,
+        caller_number: callerNumber,
+        status: "active",
+        started_at: new Date(),
+        transfer_attempted: false,
+      });
+    } catch (sessionError) {
+      console.error("[VAPI Webhook] transfer_to_facility: failed to create fallback CallSession", sessionError);
+    }
   }
 
   const forwardResult = await forwardCallToBusiness(callId, targetNumber);
