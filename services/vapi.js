@@ -87,8 +87,6 @@ function getAssistantWebhookUrl() {
 function toVapiModelTool(tool, webhookUrl) {
   return {
     type: "function",
-    async: false,
-    strict: true,
     function: {
       name: tool.name,
       description: tool.description,
