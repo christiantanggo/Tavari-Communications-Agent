@@ -265,11 +265,10 @@ export async function createAssistant(businessData) {
       });
     }
 
-    // Add ending message if provided
-    if (endingGreeting) {
-      assistantConfig.endCallFunctionEnabled = true;
-      // Note: VAPI may handle ending messages differently - check their API docs
-    }
+    // Do NOT enable Vapi's end-call tool: when enabled, the model can hang up early
+    // (assistant-ended-call) during normal conversation—e.g. before transfer_to_facility.
+    // Emergency Network assistants omit this flag for the same reason. Callers end the call naturally.
+    assistantConfig.endCallFunctionEnabled = false;
 
     console.log("[VAPI] Creating assistant with config:", {
       name: assistantConfig.name,
@@ -1665,11 +1664,8 @@ export async function rebuildAssistant(businessId) {
       patchFunctions.map((f) => f.name).join(", ") || "(none)"
     );
 
-    if (endingGreeting) {
-      updatePayload.endCallFunctionEnabled = true;
-    } else {
-      updatePayload.endCallFunctionEnabled = false;
-    }
+    // Keep disabled so the model cannot programmatically hang up before transfers/messages complete.
+    updatePayload.endCallFunctionEnabled = false;
     
     // Make API call - Use PATCH (VAPI standard for updates)
     console.log(`[VAPI Rebuild] ========== UPDATING ASSISTANT ==========`);

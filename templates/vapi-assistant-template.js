@@ -351,12 +351,15 @@ If the caller's intent matches INTENT 2 (human, staff, manager, transfer, connec
     : ""}
 After greeting the caller (Section 2), listen to what they say and IMMEDIATELY determine their intent. You MUST route to ONE flow and stay in that flow until it completes.
 
+⚠️ PRIORITY ORDER: Evaluate INTENT 2 (human / staff / transfer / message) BEFORE INTENT 1. If the caller's first words include wanting a person, staff, the facility, a transfer, or to be connected, that is INTENT 2—not a FAQ. Do NOT answer with a generic "How can I help you?" or repeat the opening greeting; follow Flow 2 immediately.
+
+${intent2Routing}
+
 INTENT 1: FAQ / GENERAL INQUIRY
 - Keywords/phrases: "hours", "open", "location", "address", "contact", "email", "phone number", any FAQ question
 - If they ask about: hours, location, contact info, or any question covered in FAQs
 - → IMMEDIATELY ROUTE TO: Flow 1 - FAQ/General Inquiry Flow
-
-${intent2Routing}
+- ⚠️ Do NOT use this flow if INTENT 2 applies (human/staff/transfer)—those override FAQ.
 
 INTENT 3: TAKEOUT ORDER${takeout_orders_enabled ? `
 - ⚠️⚠️⚠️ CRITICAL KEYWORDS/PHRASES: "place an order", "put an order in", "order", "order food", "takeout", "order takeout", "get takeout", "I'd like to order", "I want to order", "can I order", "I need to order", "ordering", "place a takeout order", "put in an order", "make an order"
@@ -669,7 +672,7 @@ STEP 1: Say ending greeting (MANDATORY):
 ⚠️⚠️⚠️ ABSOLUTE REQUIREMENTS FOR ENDING:
 - The ending greeting MUST be said EVERY TIME at the end of EVERY call - it is NOT optional
 - Do NOT just say "Goodbye" or "Thanks" - you MUST use the exact ending greeting from settings
-- Wait for the call to end naturally after your greeting
+- After your closing line, stop speaking and let the caller hang up when they are ready—do not rush to terminate the call
 - ⚠️ CRITICAL: Do NOT say the ending greeting DURING any flow - only say it AFTER the flow is complete (Flow 1 step 5, Flow 2 step 7, Flow 3 step 8)
 - ⚠️ CRITICAL FOR FLOW 3: You MUST complete all 8 steps of Flow 3 before this ending section applies. Even if the customer says "that's everything" or "no", you must continue through steps 6-8 before ending
 - ⚠️ CRITICAL: Do NOT trigger ending logic when customer says "that's everything" during Flow 3 step 5 - that means they're done adding items, NOT done with the call
