@@ -49,7 +49,7 @@ export const MAX_FACILITY_TRANSFERS_PER_CALL = 3;
 const TRANSFER_TO_FACILITY_TOOL = {
   name: "transfer_to_facility",
   description:
-    "Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
+    "CRITICAL: You MUST invoke (execute) this function to transfer the call. Saying you will connect them, asking them to hold, or describing a transfer WITHOUT calling this function does nothing—no transfer happens. Same rule as submit_takeout_order: invocation is required. Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
   parameters: {
     type: "object",
     properties: {

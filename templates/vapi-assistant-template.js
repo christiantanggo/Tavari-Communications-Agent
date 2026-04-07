@@ -64,6 +64,7 @@ export async function generateAssistantPrompt(businessData) {
   const transferPolicySection = allow_call_transfer
     ? `CRITICAL - CALL TRANSFER TO THE BUSINESS (ENABLED FOR THIS LOCATION):
 - You CAN try to connect callers to the business's main phone line using the transfer_to_facility function (this uses the business public number on file).
+- CRITICAL: You MUST invoke transfer_to_facility for a real transfer. Only saying you will connect them or asking them to hold does nothing until this function runs.
 - Calls run on Telnyx through Tavari: the caller may hear ringing while the business line is dialed. Do NOT promise a full warm handoff where you stay on privately with staff until they answer—that mode is not available on Telnyx. Say you are connecting them; they may hear ringing, then someone at the business.
 - HARD LIMIT: At most 3 transfer attempts per call. The server enforces this. If the tool says the limit is reached, apologize and take a message; do not call transfer_to_facility again on this call.
 - AFTER A FAILED TRANSFER (no answer, error, or the caller is back with you): Do NOT offer to transfer again unless the caller clearly asks to speak to a person, a human, someone live, the manager, the owner, or to be transferred or connected again.
