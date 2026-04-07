@@ -11,7 +11,7 @@ import { excludeConstructionModulesFromList } from '@/lib/construction-module-ke
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://api.tavarios.com').replace(/\/$/, '');
 const DEPLOYMENT_FOOTER =
-  process.env.NEXT_PUBLIC_DEPLOYMENT_FOOTER || 'Deployed April 6 2026 V1';
+  process.env.NEXT_PUBLIC_DEPLOYMENT_FOOTER || 'Version 2';
 
 export default function V2Sidebar({ mobileOpen = false, onClose }) {
   const pathname = usePathname();

@@ -70,9 +70,34 @@ const TRANSFER_TO_FACILITY_TOOL = {
   },
 };
 
-function toAssistantPatchFunction(tool) {
-  const { type, ...patchTool } = tool;
-  return patchTool;
+function getAssistantWebhookUrl() {
+  let backendUrl = process.env.BACKEND_URL ||
+                    process.env.RAILWAY_PUBLIC_DOMAIN ||
+                    process.env.VERCEL_URL ||
+                    process.env.SERVER_URL ||
+                    getApiPublicBaseUrl();
+
+  if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
+    backendUrl = `https://${backendUrl}`;
+  }
+
+  return `${backendUrl}/api/vapi/webhook`;
+}
+
+function toVapiModelTool(tool, webhookUrl) {
+  return {
+    type: "function",
+    async: false,
+    strict: true,
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters || { type: "object", properties: {} },
+    },
+    server: {
+      url: webhookUrl,
+    },
+  };
 }
 
 /**
@@ -122,6 +147,8 @@ export async function createAssistant(businessData) {
       ? businessData.name.substring(0, maxBusinessNameLength).trim() 
       : businessData.name;
     
+    const webhookUrl = getAssistantWebhookUrl();
+
     const assistantConfig = {
       name: businessData.isDemo ? truncatedBusinessName : `${truncatedBusinessName}${suffix}`,
       model: {
@@ -141,22 +168,7 @@ export async function createAssistant(businessData) {
         voiceId: voiceId,
       },
       firstMessage: openingGreeting,
-      serverUrl: (() => {
-        let backendUrl = process.env.BACKEND_URL || 
-                          process.env.RAILWAY_PUBLIC_DOMAIN || 
-                          process.env.VERCEL_URL || 
-                          process.env.SERVER_URL ||
-                          getApiPublicBaseUrl();
-        
-        // Ensure URL has https:// protocol
-        if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
-          backendUrl = `https://${backendUrl}`;
-        }
-        
-        const webhookUrl = `${backendUrl}/api/vapi/webhook`;
-        console.log(`[VAPI] Setting webhook URL: ${webhookUrl}`);
-        return webhookUrl;
-      })(),
+      serverUrl: webhookUrl,
       serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET,
       // CRITICAL: serverMessages tells VAPI which events to send to the webhook
       // Without this, VAPI won't send any webhooks even if serverUrl is set
@@ -190,89 +202,88 @@ export async function createAssistant(businessData) {
       },
     };
     
-    // Add takeout and/or facility transfer tools
-    assistantConfig.functions = [];
+    console.log(`[VAPI] Setting webhook URL: ${webhookUrl}`);
+
+    // Register custom tools using Vapi's current model.tools schema so the model emits real tool calls.
+    const modelTools = [];
     if (businessData.takeout_orders_enabled) {
-      assistantConfig.functions.push({
-          type: "serverless",
-          name: "submit_takeout_order",
-          description: "🚨🚨🚨 CRITICAL MANDATORY FUNCTION - YOU ABSOLUTELY MUST CALL THIS FUNCTION OR THE ORDER WILL FAIL: This function MUST be invoked (called/executed) to submit EVERY takeout order. Simply saying words like 'I will submit' or 'I'm submitting' is NOT enough - you MUST actually invoke/call/execute this function using your function calling capability. If you do NOT call this function, the order will NOT be placed, will NOT appear in the kiosk, will NOT be fulfilled, and the customer will receive NOTHING. This is a CRITICAL FAILURE if you do not call this function. You MUST call this function immediately after announcing the total and pickup time - DO NOT proceed to phone confirmation until AFTER you have called this function. This function is in your available tools/functions list - you MUST actively invoke it. To call it, use your function calling mechanism - do NOT just say you will call it, actually CALL IT. Required fields: customer_name, customer_phone, items array (with name, quantity, price, item_number), subtotal, tax, total.",
-          parameters: {
-            type: "object",
-            properties: {
-              customer_name: {
-                type: "string",
-                description: "The customer's name",
-              },
-              customer_phone: {
-                type: "string",
-                description: "The customer's phone number (required)",
-              },
-              customer_email: {
-                type: "string",
-                description: "The customer's email address (optional)",
-              },
+      modelTools.push({
+        name: "submit_takeout_order",
+        description: "🚨🚨🚨 CRITICAL MANDATORY FUNCTION - YOU ABSOLUTELY MUST CALL THIS FUNCTION OR THE ORDER WILL FAIL: This function MUST be invoked (called/executed) to submit EVERY takeout order. Simply saying words like 'I will submit' or 'I'm submitting' is NOT enough - you MUST actually invoke/call/execute this function using your function calling capability. If you do NOT call this function, the order will NOT be placed, will NOT appear in the kiosk, will NOT be fulfilled, and the customer will receive NOTHING. This is a CRITICAL FAILURE if you do not call this function. You MUST call this function immediately after announcing the total and pickup time - DO NOT proceed to phone confirmation until AFTER you have called this function. This function is in your available tools/functions list - you MUST actively invoke it. To call it, use your function calling mechanism - do NOT just say you will call it, actually CALL IT. Required fields: customer_name, customer_phone, items array (with name, quantity, price, item_number), subtotal, tax, total.",
+        parameters: {
+          type: "object",
+          properties: {
+            customer_name: {
+              type: "string",
+              description: "The customer's name",
+            },
+            customer_phone: {
+              type: "string",
+              description: "The customer's phone number (required)",
+            },
+            customer_email: {
+              type: "string",
+              description: "The customer's email address (optional)",
+            },
+            items: {
+              type: "array",
+              description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
               items: {
-                type: "array",
-                description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: {
-                      type: "string",
-                      description: "Item name (required)",
-                    },
-                    quantity: {
-                      type: "integer",
-                      description: "Quantity ordered (required)",
-                    },
-                    price: {
-                      type: "number",
-                      description: "Price per item (required)",
-                    },
-                    item_number: {
-                      type: "integer",
-                      description: "Menu item number (e.g., 1, 2, 3) if available",
-                    },
-                    modifications: {
-                      type: "string",
-                      description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
-                    },
-                    special_instructions: {
-                      type: "string",
-                      description: "Special instructions for this item",
-                    },
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Item name (required)",
                   },
-                  required: ["name", "quantity", "price"],
+                  quantity: {
+                    type: "integer",
+                    description: "Quantity ordered (required)",
+                  },
+                  price: {
+                    type: "number",
+                    description: "Price per item (required)",
+                  },
+                  item_number: {
+                    type: "integer",
+                    description: "Menu item number (e.g., 1, 2, 3) if available",
+                  },
+                  modifications: {
+                    type: "string",
+                    description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
+                  },
+                  special_instructions: {
+                    type: "string",
+                    description: "Special instructions for this item",
+                  },
                 },
-              },
-              subtotal: {
-                type: "number",
-                description: "Order subtotal before tax",
-              },
-              tax: {
-                type: "number",
-                description: "Tax amount",
-              },
-              total: {
-                type: "number",
-                description: "Total order amount including tax",
-              },
-              special_instructions: {
-                type: "string",
-                description: "Special instructions for the entire order",
+                required: ["name", "quantity", "price"],
               },
             },
-            required: ["customer_phone", "items"],
+            subtotal: {
+              type: "number",
+              description: "Order subtotal before tax",
+            },
+            tax: {
+              type: "number",
+              description: "Tax amount",
+            },
+            total: {
+              type: "number",
+              description: "Total order amount including tax",
+            },
+            special_instructions: {
+              type: "string",
+              description: "Special instructions for the entire order",
+            },
           },
-        });
-    }
-    if (businessData.allow_call_transfer ?? true) {
-      assistantConfig.functions.push({
-        type: "serverless",
-        ...TRANSFER_TO_FACILITY_TOOL,
+          required: ["customer_phone", "items"],
+        },
       });
     }
+    if (businessData.allow_call_transfer ?? true) {
+      modelTools.push(TRANSFER_TO_FACILITY_TOOL);
+    }
+    assistantConfig.model.tools = modelTools.map((tool) => toVapiModelTool(tool, webhookUrl));
     
     // Do NOT enable Vapi's end-call tool: when enabled, the model can hang up early
     // (assistant-ended-call) during normal conversation—e.g. before transfer_to_facility.
@@ -1575,6 +1586,8 @@ export async function rebuildAssistant(businessId) {
       ? businessName.substring(0, maxBusinessNameLength).trim() 
       : businessName;
     
+    const webhookUrl = getAssistantWebhookUrl();
+
     const updatePayload = {
       name: `${truncatedBusinessName}${suffix}`,
       // Use PHONE_AGENT_MODEL (default gpt-4.1-nano for lower cost)
@@ -1591,22 +1604,7 @@ export async function rebuildAssistant(businessId) {
         voiceId: voiceId, // Use selected voice (defaults to alloy)
       },
       firstMessage: openingGreeting,
-      serverUrl: (() => {
-        let backendUrl = process.env.BACKEND_URL || 
-                          process.env.RAILWAY_PUBLIC_DOMAIN || 
-                          process.env.VERCEL_URL || 
-                          process.env.SERVER_URL ||
-                          getApiPublicBaseUrl();
-        
-        // Ensure URL has https:// protocol
-        if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
-          backendUrl = `https://${backendUrl}`;
-        }
-        
-        const webhookUrl = `${backendUrl}/api/vapi/webhook`;
-        console.log(`[VAPI Rebuild] Setting webhook URL: ${webhookUrl}`);
-        return webhookUrl;
-      })(),
+      serverUrl: webhookUrl,
       serverMessages: ASSISTANT_SERVER_MESSAGES,
       // NOTE: The following fields are READ-ONLY in VAPI and cannot be updated via PATCH:
       // - serverUrlSecret (set during creation)
@@ -1619,89 +1617,90 @@ export async function rebuildAssistant(businessId) {
       // These fields persist from the original assistant creation and don't need to be updated
     };
     
-    const patchFunctions = [];
+    console.log(`[VAPI Rebuild] Setting webhook URL: ${webhookUrl}`);
+
+    const patchTools = [];
     if (takeoutOrdersEnabled) {
-      // VAPI PATCH rejects `type` on function objects ("property type should not exist"); keep type only on POST create.
-      patchFunctions.push(toAssistantPatchFunction({
-          name: "submit_takeout_order",
-          description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
-          parameters: {
-            type: "object",
-            properties: {
-              customer_name: {
-                type: "string",
-                description: "The customer's name",
-              },
-              customer_phone: {
-                type: "string",
-                description: "The customer's phone number (required)",
-              },
-              customer_email: {
-                type: "string",
-                description: "The customer's email address (optional)",
-              },
+      patchTools.push({
+        name: "submit_takeout_order",
+        description: "Submit a takeout order from a customer call. Use this when the customer wants to place a takeout order and you have collected all the necessary information: customer name, phone number, items ordered (using item numbers #1, #2, etc.), quantities, prices, and any special instructions.",
+        parameters: {
+          type: "object",
+          properties: {
+            customer_name: {
+              type: "string",
+              description: "The customer's name",
+            },
+            customer_phone: {
+              type: "string",
+              description: "The customer's phone number (required)",
+            },
+            customer_email: {
+              type: "string",
+              description: "The customer's email address (optional)",
+            },
+            items: {
+              type: "array",
+              description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
               items: {
-                type: "array",
-                description: "Array of items ordered (use item numbers like #1, #2 when referencing menu items)",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: {
-                      type: "string",
-                      description: "Item name (required)",
-                    },
-                    quantity: {
-                      type: "integer",
-                      description: "Quantity ordered (required)",
-                    },
-                    price: {
-                      type: "number",
-                      description: "Price per item (required)",
-                    },
-                    item_number: {
-                      type: "integer",
-                      description: "Menu item number (e.g., 1, 2, 3) if available",
-                    },
-                    modifications: {
-                      type: "string",
-                      description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
-                    },
-                    special_instructions: {
-                      type: "string",
-                      description: "Special instructions for this item",
-                    },
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Item name (required)",
                   },
-                  required: ["name", "quantity", "price"],
+                  quantity: {
+                    type: "integer",
+                    description: "Quantity ordered (required)",
+                  },
+                  price: {
+                    type: "number",
+                    description: "Price per item (required)",
+                  },
+                  item_number: {
+                    type: "integer",
+                    description: "Menu item number (e.g., 1, 2, 3) if available",
+                  },
+                  modifications: {
+                    type: "string",
+                    description: "Modifications or customizations (e.g., 'no onions, extra cheese')",
+                  },
+                  special_instructions: {
+                    type: "string",
+                    description: "Special instructions for this item",
+                  },
                 },
-              },
-              subtotal: {
-                type: "number",
-                description: "Order subtotal before tax",
-              },
-              tax: {
-                type: "number",
-                description: "Tax amount",
-              },
-              total: {
-                type: "number",
-                description: "Total order amount including tax",
-              },
-              special_instructions: {
-                type: "string",
-                description: "Special instructions for the entire order",
+                required: ["name", "quantity", "price"],
               },
             },
-            required: ["customer_phone", "items"],
+            subtotal: {
+              type: "number",
+              description: "Order subtotal before tax",
+            },
+            tax: {
+              type: "number",
+              description: "Tax amount",
+            },
+            total: {
+              type: "number",
+              description: "Total order amount including tax",
+            },
+            special_instructions: {
+              type: "string",
+              description: "Special instructions for the entire order",
+            },
           },
-        }));
+          required: ["customer_phone", "items"],
+        },
+      });
     }
     if (allowTransfer) {
-      patchFunctions.push(toAssistantPatchFunction(TRANSFER_TO_FACILITY_TOOL));
+      patchTools.push(TRANSFER_TO_FACILITY_TOOL);
     }
-    updatePayload.functions = patchFunctions;
+    updatePayload.model.tools = patchTools.map((tool) => toVapiModelTool(tool, webhookUrl));
     console.log(
       `[VAPI Rebuild] Vapi tools in PATCH:`,
-      patchFunctions.map((f) => f.name).join(", ") || "(none)"
+      updatePayload.model.tools.map((tool) => tool.function?.name || "(unknown)").join(", ") || "(none)"
     );
     
     // Keep disabled so the model cannot programmatically hang up before transfers/messages complete.
