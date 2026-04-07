@@ -468,7 +468,11 @@ router.get("/webhook/diagnostic", async (req, res) => {
             const assistantResponse = await vapiClient.get(`/assistant/${business.vapi_assistant_id}`);
             const assistant = assistantResponse.data;
             
-            const hasServerMessages = assistant.serverMessages && assistant.serverMessages.length > 0;
+            const requiredServerMessages = ["status-update", "end-of-call-report", "tool-calls"];
+            const configuredServerMessages = assistant.serverMessages || [];
+            const hasServerMessages = requiredServerMessages.every((messageType) =>
+              configuredServerMessages.includes(messageType)
+            );
             
             assistantConfigs.push({
               businessId: business.id,
@@ -477,7 +481,7 @@ router.get("/webhook/diagnostic", async (req, res) => {
               assistantName: assistant.name,
               webhookUrl: assistant.serverUrl || "not set",
               webhookSecretSet: assistant.isServerUrlSecretSet || false,
-              serverMessages: assistant.serverMessages || [],
+              serverMessages: configuredServerMessages,
               hasServerMessages: hasServerMessages,
               webhookUrlMatch: assistant.serverUrl === webhookUrl,
               status: assistant.serverUrl === webhookUrl && hasServerMessages 

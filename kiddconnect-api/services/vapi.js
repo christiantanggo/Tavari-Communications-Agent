@@ -46,6 +46,14 @@ export const PHONE_AGENT_MODEL = process.env.PHONE_AGENT_MODEL || 'gpt-4o-mini';
 /** Max human handoff attempts to the business line per inbound AI call (server-enforced). */
 export const MAX_FACILITY_TRANSFERS_PER_CALL = 3;
 
+const ASSISTANT_SERVER_MESSAGES = [
+  "status-update",
+  "end-of-call-report",
+  "tool-calls",
+  "function-call",
+  "hang",
+];
+
 const TRANSFER_TO_FACILITY_TOOL = {
   name: "transfer_to_facility",
   description:
@@ -152,12 +160,7 @@ export async function createAssistant(businessData) {
       serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET,
       // CRITICAL: serverMessages tells VAPI which events to send to the webhook
       // Without this, VAPI won't send any webhooks even if serverUrl is set
-      serverMessages: [
-        "status-update",      // Call status changes (call-start, call-end, etc.)
-        "end-of-call-report", // Final call summary with transcript, duration, etc.
-        "function-call",      // Function calls during the call
-        "hang",               // Call hangup events
-      ],
+      serverMessages: ASSISTANT_SERVER_MESSAGES,
       // CRITICAL: Add businessId to metadata so webhook can find the business
       // For demo assistants, include demo metadata
       metadata: businessData.businessId ? {
@@ -1576,9 +1579,9 @@ export async function rebuildAssistant(businessId) {
         console.log(`[VAPI Rebuild] Setting webhook URL: ${webhookUrl}`);
         return webhookUrl;
       })(),
+      serverMessages: ASSISTANT_SERVER_MESSAGES,
       // NOTE: The following fields are READ-ONLY in VAPI and cannot be updated via PATCH:
       // - serverUrlSecret (set during creation)
-      // - serverMessages (set during creation)
       // - transcriber (set during creation)
       // - backgroundDenoisingEnabled (set during creation)
       // - interruptionsEnabled (set during creation)
