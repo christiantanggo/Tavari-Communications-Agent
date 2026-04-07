@@ -2030,57 +2030,110 @@ export async function forwardCallToBusiness(callId, targetNumber) {
       callData = await getCallData(callId);
       console.log(`[VAPI Forward] ✅ Call data fetched successfully`);
       console.log(`[VAPI Forward] Call data structure:`, {
+        hasMonitorControlUrl: !!callData?.monitor?.controlUrl,
         hasTransport: !!callData?.transport,
         hasPhoneCallProviderId: !!callData?.phoneCallProviderId,
         phoneCallProvider: callData?.phoneCallProvider,
         transportKeys: callData?.transport ? Object.keys(callData.transport) : [],
-        transportData: callData?.transport || null, // Log full transport data for debugging
+        transportData: callData?.transport || null,
       });
     } catch (error) {
       console.error(`[VAPI Forward] ❌ Failed to fetch call data:`, error.message);
       return { forwarded: false, reason: "failed_to_fetch_call_data", error: error.message };
     }
-    
-    // STEP 2: Extract Telnyx call control ID from transport data
-    // NOTE: We use callControlId (not callLegId) because Telnyx requires call_control_id for transfers
-    console.log(`[VAPI Forward] Step 2: Extracting Telnyx call control ID...`);
-    // Try callControlId first (this is what Telnyx needs for transfers)
-    // Priority: callControlId > call_control_id > callLegId > call_leg_id
-    const callControlId = callData?.transport?.callControlId || callData?.transport?.call_control_id || callData?.transport?.callLegId || callData?.transport?.call_leg_id;
-    
-    // Log which field we found
-    let foundInField = 'unknown';
-    if (callData?.transport?.callControlId) foundInField = 'callControlId';
-    else if (callData?.transport?.call_control_id) foundInField = 'call_control_id';
-    else if (callData?.transport?.callLegId) foundInField = 'callLegId';
-    else if (callData?.transport?.call_leg_id) foundInField = 'call_leg_id';
-    
-    if (!callControlId) {
-      console.error(`[VAPI Forward] ❌ Call control ID not found in call data`);
-      console.error(`[VAPI Forward] Available transport data:`, JSON.stringify(callData?.transport || {}, null, 2));
-      return { forwarded: false, reason: "call_control_id_not_found", callData: callData?.transport };
+
+    // STEP 2 (preferred): Vapi Live Call Control — POST to monitor.controlUrl with type "transfer".
+    const rawControlUrl = callData?.monitor?.controlUrl;
+    if (rawControlUrl) {
+      const controlUrl = String(rawControlUrl).replace(/^<|>$/g, "").trim();
+      try {
+        const axios = (await import("axios")).default;
+        console.log(`[VAPI Forward] Step 2: Transfer via Vapi Live Call Control...`);
+        const resp = await axios.post(
+          controlUrl,
+          {
+            type: "transfer",
+            destination: { type: "number", number: e164Number },
+            content: "Connecting you now.",
+          },
+          {
+            headers: { "Content-Type": "application/json" },
+            timeout: 20000,
+          }
+        );
+        console.log(`[VAPI Forward] ✅ TRANSFER OK (vapi_live_control)`);
+        return { forwarded: true, method: "vapi_live_control", result: resp.data };
+      } catch (vapiCtrlErr) {
+        console.error(
+          `[VAPI Forward] Live Call Control transfer failed:`,
+          vapiCtrlErr.response?.data || vapiCtrlErr.message
+        );
+      }
+    } else {
+      console.warn(`[VAPI Forward] No monitor.controlUrl on call object — trying REST / Telnyx`);
     }
-    
-    console.log(`[VAPI Forward] ✅ Found call control ID: ${callControlId} (from field: ${foundInField})`);
-    console.log(`[VAPI Forward] Available transport fields:`, {
-      callControlId: callData?.transport?.callControlId || 'NOT FOUND',
-      call_control_id: callData?.transport?.call_control_id || 'NOT FOUND',
-      callLegId: callData?.transport?.callLegId || 'NOT FOUND',
-      call_leg_id: callData?.transport?.call_leg_id || 'NOT FOUND',
-    });
-    
-    // STEP 3: Transfer call via Telnyx API
-    console.log(`[VAPI Forward] Step 3: Transferring call via Telnyx API...`);
+
+    try {
+      console.log(`[VAPI Forward] Step 3: Vapi REST POST /call/:id/transfer (phoneNumber)...`);
+      const response = await getVapiClient().post(`/call/${callId}/transfer`, {
+        phoneNumberId: null,
+        phoneNumber: e164Number,
+      });
+      console.log(`[VAPI Forward] ✅ TRANSFER OK (vapi_rest)`);
+      return { forwarded: true, method: "vapi_rest", result: response.data };
+    } catch (restErr) {
+      console.error(
+        `[VAPI Forward] Vapi REST transfer (phoneNumber) failed:`,
+        restErr.response?.data || restErr.message
+      );
+      try {
+        console.log(`[VAPI Forward] Step 3b: Vapi REST /call/:id/transfer (destination object)...`);
+        const response = await getVapiClient().post(`/call/${callId}/transfer`, {
+          destination: { type: "number", number: e164Number },
+        });
+        console.log(`[VAPI Forward] ✅ TRANSFER OK (vapi_rest_destination)`);
+        return { forwarded: true, method: "vapi_rest_destination", result: response.data };
+      } catch (restErr2) {
+        console.error(
+          `[VAPI Forward] Vapi REST transfer (destination) failed:`,
+          restErr2.response?.data || restErr2.message
+        );
+      }
+    }
+
+    const callControlId =
+      callData?.transport?.callControlId ||
+      callData?.transport?.call_control_id ||
+      callData?.transport?.callLegId ||
+      callData?.transport?.call_leg_id;
+
+    if (!callControlId) {
+      console.error(`[VAPI Forward] ❌ No Telnyx call control id and Vapi transfer methods failed`);
+      console.error(`[VAPI Forward] transport:`, JSON.stringify(callData?.transport || {}, null, 2));
+      return {
+        forwarded: false,
+        reason: "all_transfer_methods_failed",
+        error: "Vapi Live Control and REST transfer failed; no Telnyx call_control_id in transport",
+      };
+    }
+
+    let foundInField = "unknown";
+    if (callData?.transport?.callControlId) foundInField = "callControlId";
+    else if (callData?.transport?.call_control_id) foundInField = "call_control_id";
+    else if (callData?.transport?.callLegId) foundInField = "callLegId";
+    else if (callData?.transport?.call_leg_id) foundInField = "call_leg_id";
+
+    console.log(`[VAPI Forward] Step 4: Telnyx transfer (control ID from ${foundInField})...`);
     try {
       const result = await forwardCallViaTelnyx(callControlId, e164Number);
-      console.log(`[VAPI Forward] ✅✅✅ TRANSFER SUCCESSFUL via Telnyx API`);
+      console.log(`[VAPI Forward] ✅ TRANSFER OK (telnyx)`);
       return { forwarded: true, method: "telnyx", result };
     } catch (telnyxError) {
       console.error(`[VAPI Forward] ❌ Telnyx transfer failed:`, telnyxError.message);
       console.error(`[VAPI Forward] Telnyx error details:`, telnyxError.response?.data || telnyxError.message);
-      return { 
-        forwarded: false, 
-        reason: "telnyx_transfer_failed", 
+      return {
+        forwarded: false,
+        reason: "telnyx_transfer_failed",
         error: telnyxError.message,
         telnyxError: telnyxError.response?.data,
         callControlId,
