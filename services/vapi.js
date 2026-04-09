@@ -80,17 +80,18 @@ function buildBookingTools(bookingSettings = null) {
     {
       name: "lookup_booking_slots",
       description:
-        `Check the live booking calendar before promising a time. Use this whenever a caller wants to book, schedule, reserve, or make an appointment. Allowed durations are ${allowedDurations.join(", ")} minutes; default is ${defaultDuration} minutes.`,
+        `Check the live booking calendar before promising a time. Use this whenever a caller wants to book, schedule, reserve, or make an appointment. Allowed durations are ${allowedDurations.join(", ")} minutes; default is ${defaultDuration} minutes. preferred_date must be the literal calendar date (year-month-day) in the business timezone—never encode "10 AM" as month 10; use preferred_time_range for times.`,
       parameters: {
         type: "object",
         properties: {
           preferred_date: {
             type: "string",
-            description: "Requested booking date in YYYY-MM-DD format",
+            description:
+              "Calendar booking date only: YYYY-MM-DD from the actual day (e.g. tomorrow = today+1). Not a time. Do not use 10 for October because the caller said 10 AM—put 10 AM in preferred_time_range.",
           },
           preferred_time_range: {
             type: "string",
-            description: "Optional time preference such as morning, afternoon, after 3 PM, or 10:30 AM",
+            description: "Optional time preference: morning, afternoon, after 3 PM, 10:30 AM, 10 AM, etc.",
           },
           duration_minutes: {
             type: "integer",
@@ -103,7 +104,7 @@ function buildBookingTools(bookingSettings = null) {
     {
       name: "create_booking",
       description:
-        "Create the booking only after the caller has chosen a slot returned by lookup_booking_slots. Required details: customer name, customer phone, date, start time, and duration. Ask for email when possible. Include reason or notes if the caller gave them.",
+        "Create the booking only after the caller has chosen a slot returned by lookup_booking_slots. date must match that slot's calendar YYYY-MM-DD (not a time). Required: name, phone, date, start_time (HH:MM 24h), duration. Ask for email when possible.",
       parameters: {
         type: "object",
         properties: {
@@ -129,7 +130,7 @@ function buildBookingTools(bookingSettings = null) {
           },
           date: {
             type: "string",
-            description: "Booking date in YYYY-MM-DD format",
+            description: "Same calendar date as the chosen slot: YYYY-MM-DD only. Never use month 10 for 10 AM.",
           },
           start_time: {
             type: "string",

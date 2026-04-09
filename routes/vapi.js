@@ -13,7 +13,12 @@ import { isBusinessOpenAtTime } from "../utils/businessHours.js";
 import { AIAgent } from "../models/AIAgent.js";
 import { Notification } from "../models/v2/Notification.js";
 import { getApiPublicBaseUrl, DEFAULT_API_PUBLIC_BASE } from "../config/public-urls.js";
-import { createBooking, getAvailableSlotsForDate, summarizeAvailableSlots } from "../services/bookings.js";
+import {
+  createBooking,
+  getAvailableSlotsForDate,
+  getBookingCalendarBoundsForBusiness,
+  summarizeAvailableSlots,
+} from "../services/bookings.js";
 
 const router = express.Router();
 
@@ -2758,6 +2763,63 @@ function fixPreferredDateYearIfStale(preferredDate, timezone) {
   return `${String(y).padStart(4, '0')}-${mo}-${da}`;
 }
 
+/**
+ * Models often confuse "10 AM" with month 10 (October), producing YYYY-10-DD. When that date is outside the
+ * bookable window but swapping month/day (e.g. 2026-10-04 → 2026-04-10) lands inside the window, use the swap.
+ */
+function tryFixOctoberVersusTenAmDateSwap(dateStr, todayInZone, maxAllowedDate) {
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const oldMonth = parseInt(m[2], 10);
+  const oldDay = parseInt(m[3], 10);
+  if (oldMonth !== 10 || oldDay < 1 || oldDay > 12) return null;
+  if (dateStr >= todayInZone && dateStr <= maxAllowedDate) return null;
+  const newMonth = oldDay;
+  const newDay = oldMonth;
+  const swapped = `${String(y).padStart(4, '0')}-${String(newMonth).padStart(2, '0')}-${String(newDay).padStart(2, '0')}`;
+  const vm = swapped.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const mn = parseInt(vm[2], 10) - 1;
+  const dn = parseInt(vm[3], 10);
+  const d = new Date(Date.UTC(y, mn, dn));
+  if (d.getUTCFullYear() !== y || d.getUTCMonth() !== mn || d.getUTCDate() !== dn) return null;
+  if (swapped < todayInZone || swapped > maxAllowedDate) return null;
+  return swapped;
+}
+
+function buildBookingDateOutOfRangeMessage(bounds, attemptedDate) {
+  return (
+    `The date ${attemptedDate} is outside the bookable calendar. ` +
+    `Use the business timezone (${bounds.timezone}): today is ${bounds.todayInZone}; ` +
+    `bookable through ${bounds.maxAllowedDate} (${bounds.maxDaysAhead} days ahead). ` +
+    `Convert the caller's words to a real calendar YYYY-MM-DD (e.g. "tomorrow" = the day after ${bounds.todayInZone}). ` +
+    `Do NOT use month 10 for "10 AM"—put 10 AM only in preferred_time_range, not in preferred_date. ` +
+    `Call lookup_booking_slots again with the corrected preferred_date.`
+  );
+}
+
+async function normalizeAiBookingDate(rawDate, business) {
+  const tz = business.timezone || 'America/New_York';
+  let dateStr = fixPreferredDateYearIfStale(String(rawDate || '').trim(), tz);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return {
+      ok: false,
+      message:
+        'Please use preferred_date as a real calendar date in YYYY-MM-DD only (not a time). ' +
+        'Put times like 10 AM in preferred_time_range or start_time. Call again with corrected arguments.',
+    };
+  }
+  const bounds = await getBookingCalendarBoundsForBusiness(business.id);
+  if (dateStr < bounds.todayInZone || dateStr > bounds.maxAllowedDate) {
+    const swapped = tryFixOctoberVersusTenAmDateSwap(dateStr, bounds.todayInZone, bounds.maxAllowedDate);
+    if (swapped) dateStr = swapped;
+  }
+  if (dateStr < bounds.todayInZone || dateStr > bounds.maxAllowedDate) {
+    return { ok: false, message: buildBookingDateOutOfRangeMessage(bounds, dateStr) };
+  }
+  return { ok: true, date: dateStr, bounds };
+}
+
 async function handleLookupBookingSlotsTool(args, event) {
   const { assistantId } = getFunctionEventContext(event);
   if (!assistantId) {
@@ -2770,11 +2832,9 @@ async function handleLookupBookingSlotsTool(args, event) {
   }
 
   const tz = business.timezone || 'America/New_York';
-  let preferredDate = String(args?.preferred_date || args?.date || '').trim();
-  preferredDate = fixPreferredDateYearIfStale(preferredDate, tz);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(preferredDate)) {
-    return "Please collect the exact booking date first in YYYY-MM-DD form, then call lookup_booking_slots again.";
-  }
+  const normalized = await normalizeAiBookingDate(args?.preferred_date || args?.date, business);
+  if (!normalized.ok) return normalized.message;
+  const preferredDate = normalized.date;
 
   const duration = parseInt(args?.duration_minutes, 10) || null;
   const allSlots = await getAvailableSlotsForDate(business.id, preferredDate, duration);
@@ -2807,7 +2867,9 @@ async function handleCreateBookingTool(args, event) {
 
   try {
     const tz = business.timezone || 'America/New_York';
-    const bookingDate = fixPreferredDateYearIfStale(String(args?.date || '').trim(), tz);
+    const normalized = await normalizeAiBookingDate(args?.date, business);
+    if (!normalized.ok) return normalized.message;
+    const bookingDate = normalized.date;
     const result = await createBooking({
       business_id: business.id,
       customer_name: customerName,
@@ -2815,7 +2877,7 @@ async function handleCreateBookingTool(args, event) {
       customer_email: args?.customer_email || null,
       reason: args?.reason || null,
       notes: args?.notes || null,
-      date: bookingDate || args?.date,
+      date: bookingDate,
       start_time: args?.start_time,
       duration_minutes: args?.duration_minutes,
       source: 'ai_call',

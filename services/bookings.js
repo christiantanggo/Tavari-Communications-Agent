@@ -139,6 +139,24 @@ export async function getBookingContext(businessId) {
   return { business, agent, settings };
 }
 
+/** Today and last bookable date (YYYY-MM-DD) in the business timezone, plus settings. */
+export async function getBookingCalendarBoundsForBusiness(businessId) {
+  const { business, settings } = await getBookingContext(businessId);
+  const timezone = business.timezone || 'America/New_York';
+  const now = new Date();
+  const todayInZone = getDatePartsInZone(now, timezone).date;
+  const maxAllowedDate = getDatePartsInZone(
+    new Date(now.getTime() + settings.max_days_ahead * 24 * 60 * 60 * 1000),
+    timezone,
+  ).date;
+  return {
+    timezone,
+    todayInZone,
+    maxAllowedDate,
+    maxDaysAhead: settings.max_days_ahead,
+  };
+}
+
 export async function getAvailableSlotsForDate(businessId, dateStr, durationMinutes = null) {
   const { business, agent, settings } = await getBookingContext(businessId);
   const timezone = business.timezone || 'America/New_York';
