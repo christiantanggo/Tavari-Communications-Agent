@@ -70,6 +70,82 @@ const TRANSFER_TO_FACILITY_TOOL = {
   },
 };
 
+function buildBookingTools(bookingSettings = null) {
+  const allowedDurations = Array.isArray(bookingSettings?.allowed_durations_minutes) && bookingSettings.allowed_durations_minutes.length
+    ? bookingSettings.allowed_durations_minutes
+    : [bookingSettings?.slot_duration_minutes || 30];
+  const defaultDuration = bookingSettings?.slot_duration_minutes || allowedDurations[0] || 30;
+
+  return [
+    {
+      name: "lookup_booking_slots",
+      description:
+        `Check the live booking calendar before promising a time. Use this whenever a caller wants to book, schedule, reserve, or make an appointment. Allowed durations are ${allowedDurations.join(", ")} minutes; default is ${defaultDuration} minutes.`,
+      parameters: {
+        type: "object",
+        properties: {
+          preferred_date: {
+            type: "string",
+            description: "Requested booking date in YYYY-MM-DD format",
+          },
+          preferred_time_range: {
+            type: "string",
+            description: "Optional time preference such as morning, afternoon, after 3 PM, or 10:30 AM",
+          },
+          duration_minutes: {
+            type: "integer",
+            description: `Requested booking duration in minutes. Allowed values: ${allowedDurations.join(", ")}.`,
+          },
+        },
+        required: ["preferred_date"],
+      },
+    },
+    {
+      name: "create_booking",
+      description:
+        "Create the booking only after the caller has chosen a slot returned by lookup_booking_slots. Required details: customer name, customer phone, date, start time, and duration. Ask for email when possible. Include reason or notes if the caller gave them.",
+      parameters: {
+        type: "object",
+        properties: {
+          customer_name: {
+            type: "string",
+            description: "Customer full name",
+          },
+          customer_phone: {
+            type: "string",
+            description: "Customer phone number (required)",
+          },
+          customer_email: {
+            type: "string",
+            description: "Customer email address if collected",
+          },
+          reason: {
+            type: "string",
+            description: "Short reason for the booking",
+          },
+          notes: {
+            type: "string",
+            description: "Internal notes or extra details",
+          },
+          date: {
+            type: "string",
+            description: "Booking date in YYYY-MM-DD format",
+          },
+          start_time: {
+            type: "string",
+            description: "Booking start time in HH:MM 24-hour format",
+          },
+          duration_minutes: {
+            type: "integer",
+            description: `Booking duration in minutes. Allowed values: ${allowedDurations.join(", ")}.`,
+          },
+        },
+        required: ["customer_name", "customer_phone", "date", "start_time", "duration_minutes"],
+      },
+    },
+  ];
+}
+
 function getAssistantWebhookUrl() {
   let backendUrl = process.env.BACKEND_URL ||
                     process.env.RAILWAY_PUBLIC_DOMAIN ||
@@ -204,6 +280,10 @@ export async function createAssistant(businessData) {
 
     // Register custom tools using Vapi's current model.tools schema so the model emits real tool calls.
     const modelTools = [];
+    const bookingToolsEnabled = businessData.bookings_enabled && businessData.booking_settings?.enabled === true;
+    if (bookingToolsEnabled) {
+      modelTools.push(...buildBookingTools(businessData.booking_settings));
+    }
     if (businessData.takeout_orders_enabled) {
       modelTools.push({
         name: "submit_takeout_order",
@@ -1391,6 +1471,17 @@ export async function rebuildAssistant(businessId) {
     );
     const afterHoursBehavior = businessRecord.after_hours_behavior || "take_message";
     const aiEnabled = businessRecord.ai_enabled ?? true; // Default to true if not set
+    const bookingsEnabled = businessRecord.bookings_enabled ?? false;
+    let bookingSettings = null;
+    if (bookingsEnabled) {
+      try {
+        const { BookingSettings } = await import("../models/Booking.js");
+        bookingSettings = await BookingSettings.findByBusinessId(businessId);
+      } catch (bookingSettingsError) {
+        console.warn(`[VAPI Rebuild] Could not load booking settings:`, bookingSettingsError.message);
+      }
+    }
+    const bookingToolsEnabled = bookingsEnabled && bookingSettings?.enabled === true;
     const takeoutOrdersEnabled = businessRecord.takeout_orders_enabled ?? false;
     const takeoutTaxRate = businessRecord.takeout_tax_rate ?? 0.13; // Default 13%
     const takeoutTaxMethod = businessRecord.takeout_tax_calculation_method || 'exclusive';
@@ -1566,6 +1657,8 @@ export async function rebuildAssistant(businessId) {
       opening_greeting: openingGreeting,
       ending_greeting: endingGreeting,
       personality: personality,
+      bookings_enabled: bookingToolsEnabled,
+      booking_settings: bookingSettings,
       takeout_orders_enabled: takeoutOrdersEnabled,
       takeout_tax_rate: takeoutTaxRate,
       takeout_tax_calculation_method: takeoutTaxMethod,
@@ -1618,6 +1711,9 @@ export async function rebuildAssistant(businessId) {
     console.log(`[VAPI Rebuild] Setting webhook URL: ${webhookUrl}`);
 
     const patchTools = [];
+    if (bookingToolsEnabled) {
+      patchTools.push(...buildBookingTools(bookingSettings));
+    }
     if (takeoutOrdersEnabled) {
       patchTools.push({
         name: "submit_takeout_order",

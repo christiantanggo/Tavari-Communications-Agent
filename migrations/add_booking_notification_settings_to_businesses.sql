@@ -1,0 +1,10 @@
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_customer_confirmation_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_customer_confirmation_channels JSONB NOT NULL DEFAULT '["sms"]'::jsonb;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_customer_reminders_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_customer_reminder_offsets JSONB NOT NULL DEFAULT '[1440]'::jsonb;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_customer_reminder_channels JSONB NOT NULL DEFAULT '["sms"]'::jsonb;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_business_confirmation_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_business_confirmation_channels JSONB NOT NULL DEFAULT '["email"]'::jsonb;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_business_reminders_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_business_reminder_offsets JSONB NOT NULL DEFAULT '[60]'::jsonb;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS booking_business_reminder_channels JSONB NOT NULL DEFAULT '["email"]'::jsonb;

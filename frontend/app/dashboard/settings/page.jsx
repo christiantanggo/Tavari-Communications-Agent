@@ -4,10 +4,19 @@ import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import AuthGuard from '@/components/AuthGuard';
 import DashboardHeader from '@/components/DashboardHeader';
+import ConstructionUnlockModal from '@/components/ConstructionUnlockModal';
 import { authAPI, billingAPI, businessAPI, agentsAPI, phoneNumbersAPI } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import TimeInput12Hour from '@/components/TimeInput12Hour';
 import { useToast } from '@/components/ToastProvider';
+
+function parseCsvNumbers(value, fallback = []) {
+  const parsed = String(value || '')
+    .split(',')
+    .map((part) => parseInt(part.trim(), 10))
+    .filter((num) => Number.isFinite(num) && num > 0);
+  return parsed.length ? Array.from(new Set(parsed)).sort((a, b) => a - b) : fallback;
+}
 
 function SettingsPage() {
   const router = useRouter();
@@ -105,21 +114,87 @@ function SettingsPage() {
     sms_timezone: 'America/New_York',
     sms_allowed_start_time: '09:00:00',
     sms_allowed_end_time: '21:00:00',
+    booking_customer_confirmation_enabled: true,
+    booking_customer_confirmation_channels: ['sms'],
+    booking_customer_reminders_enabled: false,
+    booking_customer_reminder_offsets: [1440],
+    booking_customer_reminder_channels: ['sms'],
+    booking_business_confirmation_enabled: true,
+    booking_business_confirmation_channels: ['email'],
+    booking_business_reminders_enabled: false,
+    booking_business_reminder_offsets: [60],
+    booking_business_reminder_channels: ['email'],
   });
+  const [bookingCustomerReminderCsv, setBookingCustomerReminderCsv] = useState('1440');
+  const [bookingBusinessReminderCsv, setBookingBusinessReminderCsv] = useState('60');
   
   // Features state (for add-ons like takeout orders)
   const [features, setFeatures] = useState({
+    sms_advertising_enabled: false,
+    bookings_enabled: false,
     takeout_orders_enabled: false,
     takeout_tax_rate: 0.13, // Default 13% (Ontario HST)
     takeout_tax_calculation_method: 'exclusive', // 'inclusive' or 'exclusive'
     takeout_estimated_ready_minutes: 30, // Default 30 minutes
   });
+  const [smsAdvertisingUnlockOpen, setSmsAdvertisingUnlockOpen] = useState(false);
+  const [smsAdvertisingUnlocked, setSmsAdvertisingUnlocked] = useState(false);
+  const [bookingsUnlockOpen, setBookingsUnlockOpen] = useState(false);
+  const [bookingsUnlocked, setBookingsUnlocked] = useState(false);
+  const [takeoutUnlockOpen, setTakeoutUnlockOpen] = useState(false);
+  const [takeoutUnlocked, setTakeoutUnlocked] = useState(false);
 
   // Kiosk token state
   const [kioskToken, setKioskToken] = useState(null);
   const [kioskUrl, setKioskUrl] = useState(null);
   const [loadingKioskToken, setLoadingKioskToken] = useState(false);
   const [generatingToken, setGeneratingToken] = useState(false);
+
+  const handleTakeoutToggleChange = (nextEnabled) => {
+    if (nextEnabled && !takeoutUnlocked) {
+      setTakeoutUnlockOpen(true);
+      return;
+    }
+
+    setFeatures((prev) => ({
+      ...prev,
+      takeout_orders_enabled: nextEnabled,
+    }));
+  };
+
+  const handleBookingsToggleChange = (nextEnabled) => {
+    if (nextEnabled && !bookingsUnlocked) {
+      setBookingsUnlockOpen(true);
+      return;
+    }
+
+    setFeatures((prev) => ({
+      ...prev,
+      bookings_enabled: nextEnabled,
+    }));
+  };
+
+  const handleSmsAdvertisingToggleChange = (nextEnabled) => {
+    if (nextEnabled && !smsAdvertisingUnlocked) {
+      setSmsAdvertisingUnlockOpen(true);
+      return;
+    }
+
+    setFeatures((prev) => ({
+      ...prev,
+      sms_advertising_enabled: nextEnabled,
+    }));
+  };
+
+  const toggleNotificationChannel = (key, channel) => {
+    setNotifications((prev) => {
+      const current = Array.isArray(prev[key]) ? prev[key] : [];
+      const next = current.includes(channel)
+        ? current.filter((value) => value !== channel)
+        : [...current, channel];
+      return { ...prev, [key]: next };
+    });
+  };
 
   // Load kiosk token
   const loadKioskToken = async () => {
@@ -259,11 +334,25 @@ function SettingsPage() {
           sms_timezone: business.sms_timezone || business.timezone || 'America/New_York',
           sms_allowed_start_time: business.sms_allowed_start_time || '09:00:00',
           sms_allowed_end_time: business.sms_allowed_end_time || '21:00:00',
+          booking_customer_confirmation_enabled: business.booking_customer_confirmation_enabled ?? true,
+          booking_customer_confirmation_channels: Array.isArray(business.booking_customer_confirmation_channels) && business.booking_customer_confirmation_channels.length ? business.booking_customer_confirmation_channels : ['sms'],
+          booking_customer_reminders_enabled: business.booking_customer_reminders_enabled ?? false,
+          booking_customer_reminder_offsets: Array.isArray(business.booking_customer_reminder_offsets) && business.booking_customer_reminder_offsets.length ? business.booking_customer_reminder_offsets : [1440],
+          booking_customer_reminder_channels: Array.isArray(business.booking_customer_reminder_channels) && business.booking_customer_reminder_channels.length ? business.booking_customer_reminder_channels : ['sms'],
+          booking_business_confirmation_enabled: business.booking_business_confirmation_enabled ?? true,
+          booking_business_confirmation_channels: Array.isArray(business.booking_business_confirmation_channels) && business.booking_business_confirmation_channels.length ? business.booking_business_confirmation_channels : ['email'],
+          booking_business_reminders_enabled: business.booking_business_reminders_enabled ?? false,
+          booking_business_reminder_offsets: Array.isArray(business.booking_business_reminder_offsets) && business.booking_business_reminder_offsets.length ? business.booking_business_reminder_offsets : [60],
+          booking_business_reminder_channels: Array.isArray(business.booking_business_reminder_channels) && business.booking_business_reminder_channels.length ? business.booking_business_reminder_channels : ['email'],
         };
         console.log('[Settings Load] Setting notifications:', loadedNotifications);
         setNotifications(loadedNotifications);
+        setBookingCustomerReminderCsv((loadedNotifications.booking_customer_reminder_offsets || []).join(', '));
+        setBookingBusinessReminderCsv((loadedNotifications.booking_business_reminder_offsets || []).join(', '));
         
         const loadedFeatures = {
+          sms_advertising_enabled: business.sms_advertising_enabled ?? false,
+          bookings_enabled: business.bookings_enabled ?? false,
           takeout_orders_enabled: business.takeout_orders_enabled ?? false,
           takeout_tax_rate: business.takeout_tax_rate != null ? business.takeout_tax_rate : 0.13,
           takeout_tax_calculation_method: business.takeout_tax_calculation_method || 'exclusive',
@@ -271,6 +360,9 @@ function SettingsPage() {
         };
         console.log('[Settings Load] Setting features:', loadedFeatures);
         setFeatures(loadedFeatures);
+        setSmsAdvertisingUnlocked(Boolean(loadedFeatures.sms_advertising_enabled));
+        setBookingsUnlocked(Boolean(loadedFeatures.bookings_enabled));
+        setTakeoutUnlocked(Boolean(loadedFeatures.takeout_orders_enabled));
       }
       
       if (agentRes.data?.agent) {
@@ -405,6 +497,8 @@ function SettingsPage() {
         public_phone_number: businessInfo.public_phone_number,
         ...aiSettings,
         ...notifications,
+        booking_customer_reminder_offsets: parseCsvNumbers(bookingCustomerReminderCsv, notifications.booking_customer_reminder_offsets || [1440]),
+        booking_business_reminder_offsets: parseCsvNumbers(bookingBusinessReminderCsv, notifications.booking_business_reminder_offsets || [60]),
         ...features,
         // Put website last to ensure it's never overwritten
         website: businessInfo.website,
@@ -715,6 +809,39 @@ function SettingsPage() {
 
   return (
     <AuthGuard>
+      <ConstructionUnlockModal
+        open={smsAdvertisingUnlockOpen}
+        onClose={() => setSmsAdvertisingUnlockOpen(false)}
+        onUnlocked={() => {
+          setSmsAdvertisingUnlocked(true);
+          setFeatures((prev) => ({
+            ...prev,
+            sms_advertising_enabled: true,
+          }));
+        }}
+      />
+      <ConstructionUnlockModal
+        open={bookingsUnlockOpen}
+        onClose={() => setBookingsUnlockOpen(false)}
+        onUnlocked={() => {
+          setBookingsUnlocked(true);
+          setFeatures((prev) => ({
+            ...prev,
+            bookings_enabled: true,
+          }));
+        }}
+      />
+      <ConstructionUnlockModal
+        open={takeoutUnlockOpen}
+        onClose={() => setTakeoutUnlockOpen(false)}
+        onUnlocked={() => {
+          setTakeoutUnlocked(true);
+          setFeatures((prev) => ({
+            ...prev,
+            takeout_orders_enabled: true,
+          }));
+        }}
+      />
       <div className="min-h-screen bg-gray-50">
         <DashboardHeader />
 
@@ -1291,16 +1418,71 @@ function SettingsPage() {
                       <div className="border-t pt-4 mt-4">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex-1">
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">
-                              Takeout Orders
+                            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-1">
+                              <span>SMS Advertising</span>
+                              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                                Coming Soon
+                              </span>
                             </label>
-                            <p className="text-xs text-gray-500">Enable phone ordering for takeout orders. Customers can call to place orders that will appear on your kitchen tablet.</p>
+                            <p className="text-xs text-gray-500">
+                              Coming Soon. This controls the SMS advertising tools in the dashboard action cards only and does not affect SMS notifications.
+                            </p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={features.sms_advertising_enabled}
+                              onChange={(e) => handleSmsAdvertisingToggleChange(e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4 mt-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex-1">
+                            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-1">
+                              <span>Bookings</span>
+                              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                                Coming Soon
+                              </span>
+                            </label>
+                            <p className="text-xs text-gray-500">
+                              Coming Soon. This feature is still under construction and can only be unlocked by Tavari employees for internal testing.
+                            </p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={features.bookings_enabled}
+                              onChange={(e) => handleBookingsToggleChange(e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4 mt-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex-1">
+                            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-1">
+                              <span>Takeout Orders</span>
+                              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                                Coming Soon
+                              </span>
+                            </label>
+                            <p className="text-xs text-gray-500">
+                              Coming Soon. This feature is still under construction and can only be unlocked by Tavari employees for internal testing.
+                            </p>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input
                               type="checkbox"
                               checked={features.takeout_orders_enabled}
-                              onChange={(e) => setFeatures({ ...features, takeout_orders_enabled: e.target.checked })}
+                              onChange={(e) => handleTakeoutToggleChange(e.target.checked)}
                               className="sr-only peer"
                             />
                             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
@@ -1420,17 +1602,17 @@ function SettingsPage() {
                                         </p>
                                       </div>
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="grid grid-cols-2 gap-2">
                                       <button
                                         onClick={handleRegenerateKioskToken}
                                         disabled={generatingToken}
-                                        className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 disabled:bg-gray-400 text-sm font-medium"
+                                        className="w-full px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 disabled:bg-gray-400 text-sm font-medium"
                                       >
                                         {generatingToken ? 'Regenerating...' : 'Regenerate Token'}
                                       </button>
                                       <button
                                         onClick={handleRevokeKioskToken}
-                                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium"
+                                        className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium"
                                       >
                                         Revoke Access
                                       </button>
@@ -1441,7 +1623,7 @@ function SettingsPage() {
                                     <button
                                       onClick={handleGenerateKioskToken}
                                       disabled={generatingToken}
-                                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
+                                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
                                     >
                                       {generatingToken ? 'Generating...' : 'Generate Kiosk Token'}
                                     </button>
@@ -1858,6 +2040,128 @@ function SettingsPage() {
                         <p className="text-xs text-gray-500 mt-1">SMS messages are charged per message</p>
                       </div>
                     )}
+                  </div>
+
+                  <div className="border-t pt-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        Customer booking confirmations
+                      </label>
+                      <p className="text-xs text-gray-500">Control whether customers receive booking confirmations by SMS, email, or both.</p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={notifications.booking_customer_confirmation_enabled}
+                        onChange={(e) => setNotifications({ ...notifications, booking_customer_confirmation_enabled: e.target.checked })}
+                      />
+                      Enable customer booking confirmations
+                    </label>
+                    <div className="flex gap-4">
+                      {['email', 'sms'].map((channel) => (
+                        <label key={`booking-customer-confirm-${channel}`} className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={(notifications.booking_customer_confirmation_channels || []).includes(channel)}
+                            onChange={() => toggleNotificationChannel('booking_customer_confirmation_channels', channel)}
+                          />
+                          <span className="capitalize">{channel}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={notifications.booking_customer_reminders_enabled}
+                        onChange={(e) => setNotifications({ ...notifications, booking_customer_reminders_enabled: e.target.checked })}
+                      />
+                      Enable customer booking reminders
+                    </label>
+                    <div className="flex gap-4">
+                      {['email', 'sms'].map((channel) => (
+                        <label key={`booking-customer-reminder-${channel}`} className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={(notifications.booking_customer_reminder_channels || []).includes(channel)}
+                            onChange={() => toggleNotificationChannel('booking_customer_reminder_channels', channel)}
+                          />
+                          <span className="capitalize">{channel}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Customer reminder offsets (minutes, comma separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={bookingCustomerReminderCsv}
+                        onChange={(e) => setBookingCustomerReminderCsv(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white"
+                        placeholder="1440, 120"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        Business booking notifications
+                      </label>
+                      <p className="text-xs text-gray-500">Use your business email and SMS notification number above for booking alerts and reminders.</p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={notifications.booking_business_confirmation_enabled}
+                        onChange={(e) => setNotifications({ ...notifications, booking_business_confirmation_enabled: e.target.checked })}
+                      />
+                      Enable new booking alerts to the business
+                    </label>
+                    <div className="flex gap-4">
+                      {['email', 'sms'].map((channel) => (
+                        <label key={`booking-business-confirm-${channel}`} className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={(notifications.booking_business_confirmation_channels || []).includes(channel)}
+                            onChange={() => toggleNotificationChannel('booking_business_confirmation_channels', channel)}
+                          />
+                          <span className="capitalize">{channel}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={notifications.booking_business_reminders_enabled}
+                        onChange={(e) => setNotifications({ ...notifications, booking_business_reminders_enabled: e.target.checked })}
+                      />
+                      Enable business booking reminders
+                    </label>
+                    <div className="flex gap-4">
+                      {['email', 'sms'].map((channel) => (
+                        <label key={`booking-business-reminder-${channel}`} className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={(notifications.booking_business_reminder_channels || []).includes(channel)}
+                            onChange={() => toggleNotificationChannel('booking_business_reminder_channels', channel)}
+                          />
+                          <span className="capitalize">{channel}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Business reminder offsets (minutes, comma separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={bookingBusinessReminderCsv}
+                        onChange={(e) => setBookingBusinessReminderCsv(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white"
+                        placeholder="60"
+                      />
+                    </div>
                   </div>
                 </div>
               )}

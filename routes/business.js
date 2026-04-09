@@ -27,11 +27,23 @@ router.put("/settings", authenticate, async (req, res) => {
       sms_timezone,
       sms_allowed_start_time,
       sms_allowed_end_time,
+      booking_customer_confirmation_enabled,
+      booking_customer_confirmation_channels,
+      booking_customer_reminders_enabled,
+      booking_customer_reminder_offsets,
+      booking_customer_reminder_channels,
+      booking_business_confirmation_enabled,
+      booking_business_confirmation_channels,
+      booking_business_reminders_enabled,
+      booking_business_reminder_offsets,
+      booking_business_reminder_channels,
       minutes_exhausted_behavior,
       overage_billing_enabled,
       overage_cap_minutes,
       max_call_duration_minutes,
       detect_conversation_end,
+      sms_advertising_enabled,
+      bookings_enabled,
       takeout_orders_enabled,
       takeout_tax_rate,
       takeout_tax_calculation_method,
@@ -52,7 +64,9 @@ router.put("/settings", authenticate, async (req, res) => {
       timezone,
       public_phone_number,
       website,
+      sms_advertising_enabled,
       takeout_orders_enabled,
+      bookings_enabled,
     });
 
     updateData = {};
@@ -68,11 +82,29 @@ router.put("/settings", authenticate, async (req, res) => {
     if (sms_timezone !== undefined) updateData.sms_timezone = sms_timezone;
     if (sms_allowed_start_time !== undefined) updateData.sms_allowed_start_time = sms_allowed_start_time;
     if (sms_allowed_end_time !== undefined) updateData.sms_allowed_end_time = sms_allowed_end_time;
+    if (booking_customer_confirmation_enabled !== undefined) updateData.booking_customer_confirmation_enabled = booking_customer_confirmation_enabled;
+    if (booking_customer_confirmation_channels !== undefined) updateData.booking_customer_confirmation_channels = booking_customer_confirmation_channels;
+    if (booking_customer_reminders_enabled !== undefined) updateData.booking_customer_reminders_enabled = booking_customer_reminders_enabled;
+    if (booking_customer_reminder_offsets !== undefined) updateData.booking_customer_reminder_offsets = booking_customer_reminder_offsets;
+    if (booking_customer_reminder_channels !== undefined) updateData.booking_customer_reminder_channels = booking_customer_reminder_channels;
+    if (booking_business_confirmation_enabled !== undefined) updateData.booking_business_confirmation_enabled = booking_business_confirmation_enabled;
+    if (booking_business_confirmation_channels !== undefined) updateData.booking_business_confirmation_channels = booking_business_confirmation_channels;
+    if (booking_business_reminders_enabled !== undefined) updateData.booking_business_reminders_enabled = booking_business_reminders_enabled;
+    if (booking_business_reminder_offsets !== undefined) updateData.booking_business_reminder_offsets = booking_business_reminder_offsets;
+    if (booking_business_reminder_channels !== undefined) updateData.booking_business_reminder_channels = booking_business_reminder_channels;
     if (minutes_exhausted_behavior !== undefined) updateData.minutes_exhausted_behavior = minutes_exhausted_behavior;
     if (overage_billing_enabled !== undefined) updateData.overage_billing_enabled = overage_billing_enabled;
     if (overage_cap_minutes !== undefined) updateData.overage_cap_minutes = overage_cap_minutes;
     if (max_call_duration_minutes !== undefined) updateData.max_call_duration_minutes = max_call_duration_minutes;
     if (detect_conversation_end !== undefined) updateData.detect_conversation_end = detect_conversation_end;
+    if (sms_advertising_enabled !== undefined) {
+      updateData.sms_advertising_enabled = sms_advertising_enabled;
+      console.log('[Business Settings] ✅ Adding sms_advertising_enabled to updateData:', sms_advertising_enabled);
+    }
+    if (bookings_enabled !== undefined) {
+      updateData.bookings_enabled = bookings_enabled;
+      console.log('[Business Settings] ✅ Adding bookings_enabled to updateData:', bookings_enabled);
+    }
     if (takeout_orders_enabled !== undefined) {
       updateData.takeout_orders_enabled = takeout_orders_enabled;
       console.log('[Business Settings] ✅ Adding takeout_orders_enabled to updateData:', takeout_orders_enabled);
@@ -114,6 +146,8 @@ router.put("/settings", authenticate, async (req, res) => {
       public_phone_number: updatedBusiness.public_phone_number,
       timezone: updatedBusiness.timezone,
       ai_enabled: updatedBusiness.ai_enabled,
+      sms_advertising_enabled: updatedBusiness.sms_advertising_enabled,
+      bookings_enabled: updatedBusiness.bookings_enabled,
       takeout_orders_enabled: updatedBusiness.takeout_orders_enabled,
     });
 

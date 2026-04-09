@@ -152,7 +152,23 @@ export const menuAPI = {
   deleteGlobalModifier: (modifierId) => api.delete(`/menu/global-modifiers/${modifierId}`),
 };
 
-export default api;
+export const bookingsAPI = {
+  getSettings: () => api.get('/bookings/settings'),
+  updateSettings: (data) => api.put('/bookings/settings', data),
+  getSlots: (params) => api.get('/bookings/slots', { params }),
+  getCalendar: (params) => api.get('/bookings/calendar', { params }),
+  listBlocks: (params) => api.get('/bookings/blocks', { params }),
+  createBlock: (data) => api.post('/bookings/blocks', data),
+  updateBlock: (blockId, data) => api.put(`/bookings/blocks/${blockId}`, data),
+  deleteBlock: (blockId) => api.delete(`/bookings/blocks/${blockId}`),
+  list: (params) => api.get('/bookings', { params }),
+  get: (bookingId) => api.get(`/bookings/${bookingId}`),
+  create: (data) => api.post('/bookings', data),
+  update: (bookingId, data) => api.put(`/bookings/${bookingId}`, data),
+  confirm: (bookingId) => api.post(`/bookings/${bookingId}/confirm`),
+  cancel: (bookingId, cancel_reason) => api.post(`/bookings/${bookingId}/cancel`, { cancel_reason }),
+  reschedule: (bookingId, data) => api.post(`/bookings/${bookingId}/reschedule`, data),
+};
 
 // Auth API
 export const authAPI = {
@@ -767,5 +783,7 @@ export const createKioskAPI = (token) => {
     getSettings: () => kioskApi.get('/settings'),
   };
 };
+
+export default api;
 
 

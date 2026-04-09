@@ -5,11 +5,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { agentsAPI, authAPI } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
-import { HelpCircle, UtensilsCrossed, MessageSquare, RefreshCw, Settings } from 'lucide-react';
+import { CalendarDays, HelpCircle, UtensilsCrossed, MessageSquare, RefreshCw, Settings } from 'lucide-react';
 
 export default function PhoneAgentV2ActionCards() {
   const router = useRouter();
   const [rebuilding, setRebuilding] = useState(false);
+  const [smsAdvertisingEnabled, setSmsAdvertisingEnabled] = useState(false);
+  const [bookingsEnabled, setBookingsEnabled] = useState(false);
   const [takeoutOrdersEnabled, setTakeoutOrdersEnabled] = useState(false);
   const { success, error: showError } = useToast();
 
@@ -18,11 +20,9 @@ export default function PhoneAgentV2ActionCards() {
     const fetchBusinessData = async () => {
       try {
         const response = await authAPI.getMe();
-        if (response.data?.business?.takeout_orders_enabled) {
-          setTakeoutOrdersEnabled(true);
-        } else {
-          setTakeoutOrdersEnabled(false);
-        }
+        setSmsAdvertisingEnabled(Boolean(response.data?.business?.sms_advertising_enabled));
+        setBookingsEnabled(Boolean(response.data?.business?.bookings_enabled));
+        setTakeoutOrdersEnabled(Boolean(response.data?.business?.takeout_orders_enabled));
       } catch (error) {
         console.error('Failed to fetch business data:', error);
       }
@@ -66,7 +66,12 @@ export default function PhoneAgentV2ActionCards() {
   };
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+    <div
+      className="grid gap-4 mb-8"
+      style={{
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      }}
+    >
       {/* FAQs */}
       <Link
         href="/tavari-ai-phone/dashboard/faqs"
@@ -91,6 +96,33 @@ export default function PhoneAgentV2ActionCards() {
         <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>FAQ's</h3>
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Manage questions</p>
       </Link>
+
+      {/* Bookings */}
+      {bookingsEnabled && (
+        <Link
+          href="/tavari-ai-phone/dashboard/bookings"
+          className="shadow p-4 text-center transition-all hover:shadow-lg"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            borderRadius: 'var(--card-radius)',
+            border: '1px solid var(--color-border)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.borderColor = 'var(--color-accent)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.borderColor = 'var(--color-border)';
+          }}
+        >
+          <div className="mb-2 flex justify-center">
+            <CalendarDays className="w-8 h-8" style={{ color: 'var(--color-accent)' }} />
+          </div>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>Bookings</h3>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Coming soon</p>
+        </Link>
+      )}
 
       {/* Menu */}
       {takeoutOrdersEnabled && (
@@ -119,30 +151,32 @@ export default function PhoneAgentV2ActionCards() {
         </Link>
       )}
 
-      {/* SMS */}
-      <Link
-        href="/tavari-ai-phone/dashboard/sms"
-        className="shadow p-4 text-center transition-all hover:shadow-lg"
-        style={{
-          backgroundColor: 'var(--color-surface)',
-          borderRadius: 'var(--card-radius)',
-          border: '1px solid var(--color-border)',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.borderColor = 'var(--color-accent)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.borderColor = 'var(--color-border)';
+      {/* SMS Advertising */}
+      {smsAdvertisingEnabled && (
+        <Link
+          href="/tavari-ai-phone/dashboard/sms-advertising"
+          className="shadow p-4 text-center transition-all hover:shadow-lg"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            borderRadius: 'var(--card-radius)',
+            border: '1px solid var(--color-border)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.borderColor = 'var(--color-accent)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.borderColor = 'var(--color-border)';
           }}
         >
-        <div className="mb-2 flex justify-center">
-          <MessageSquare className="w-8 h-8" style={{ color: 'var(--color-accent)' }} />
-        </div>
-        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>SMS</h3>
-        <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Send messages</p>
-      </Link>
+          <div className="mb-2 flex justify-center">
+            <MessageSquare className="w-8 h-8" style={{ color: 'var(--color-accent)' }} />
+          </div>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>SMS Advertising</h3>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Coming soon</p>
+        </Link>
+      )}
 
       {/* Settings */}
       <Link

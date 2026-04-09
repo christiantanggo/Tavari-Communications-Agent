@@ -10,6 +10,8 @@ import { useToast } from '@/components/ToastProvider';
 export default function DashboardHeader() {
   const router = useRouter();
   const [rebuilding, setRebuilding] = useState(false);
+  const [smsAdvertisingEnabled, setSmsAdvertisingEnabled] = useState(false);
+  const [bookingsEnabled, setBookingsEnabled] = useState(false);
   const [takeoutOrdersEnabled, setTakeoutOrdersEnabled] = useState(false);
   const { success, error: showError } = useToast();
 
@@ -18,11 +20,9 @@ export default function DashboardHeader() {
     const fetchBusinessData = async () => {
       try {
         const response = await authAPI.getMe();
-        if (response.data?.business?.takeout_orders_enabled) {
-          setTakeoutOrdersEnabled(true);
-        } else {
-          setTakeoutOrdersEnabled(false);
-        }
+        setSmsAdvertisingEnabled(Boolean(response.data?.business?.sms_advertising_enabled));
+        setBookingsEnabled(Boolean(response.data?.business?.bookings_enabled));
+        setTakeoutOrdersEnabled(Boolean(response.data?.business?.takeout_orders_enabled));
       } catch (error) {
         console.error('Failed to fetch business data:', error);
       }
@@ -77,6 +77,14 @@ export default function DashboardHeader() {
           <Link href="/dashboard/faqs" className="text-gray-700 hover:text-blue-600">
             FAQ's
           </Link>
+          {bookingsEnabled && (
+            <>
+              <span className="text-gray-300">|</span>
+              <Link href="/dashboard/bookings" className="text-gray-700 hover:text-blue-600">
+                Bookings
+              </Link>
+            </>
+          )}
           {takeoutOrdersEnabled && (
             <>
               <span className="text-gray-300">|</span>
@@ -85,10 +93,14 @@ export default function DashboardHeader() {
               </Link>
             </>
           )}
-          <span className="text-gray-300">|</span>
-          <Link href="/dashboard/sms" className="text-gray-700 hover:text-blue-600">
-            SMS
-          </Link>
+          {smsAdvertisingEnabled && (
+            <>
+              <span className="text-gray-300">|</span>
+              <Link href="/dashboard/sms-advertising" className="text-gray-700 hover:text-blue-600">
+                SMS Advertising
+              </Link>
+            </>
+          )}
           <span className="text-gray-300">|</span>
           <Link href="/dashboard/settings" className="text-gray-700 hover:text-blue-600">
             Settings

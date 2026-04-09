@@ -23,6 +23,8 @@ export async function generateAssistantPrompt(businessData) {
     ending_greeting,
     max_call_duration_minutes = null,
     detect_conversation_end = true,
+    bookings_enabled = false,
+    booking_settings = null,
     takeout_orders_enabled = false,
     takeout_tax_rate = 0.13,
     takeout_tax_calculation_method = 'exclusive',
@@ -122,6 +124,56 @@ STEPS:
 ${messageTakingSubsteps}
 
 ⚠️ CRITICAL: This flow does NOT require ending greeting yet - that happens in Section 6.`;
+
+  const normalizedBookingSettings = booking_settings && typeof booking_settings === 'object' ? booking_settings : {};
+  const bookingDurations = Array.isArray(normalizedBookingSettings.allowed_durations_minutes) && normalizedBookingSettings.allowed_durations_minutes.length
+    ? normalizedBookingSettings.allowed_durations_minutes
+    : [normalizedBookingSettings.slot_duration_minutes || 30];
+  const bookingDefaultDuration = normalizedBookingSettings.slot_duration_minutes || bookingDurations[0] || 30;
+  const bookingAvailabilitySummary = business_hours && typeof business_hours === 'object'
+    ? Object.entries(business_hours)
+        .map(([day, blocks]) => {
+          if (!blocks || blocks.closed) return `${day}: closed`;
+          return `${day}: ${blocks.open || 'closed'}-${blocks.close || 'closed'}`;
+        })
+        .join(' | ')
+    : 'Use lookup_booking_slots for live availability.';
+  const bookingIntentBlock = bookings_enabled
+    ? `INTENT 3A: BOOKINGS / APPOINTMENTS
+- Keywords/phrases: "book", "booking", "appointment", "schedule", "scheduled", "reserve", "reservation", "set up a time", "come in", "see someone"
+- If the caller wants to book an appointment or reserve a time:
+- → IMMEDIATELY ROUTE TO: Flow 3A - Booking Flow
+- Booking durations allowed: ${bookingDurations.join(', ')} minutes. Default duration: ${bookingDefaultDuration} minutes.`
+    : `INTENT 3A: BOOKINGS / APPOINTMENTS
+- ⚠️⚠️⚠️ CRITICAL: Bookings are NOT enabled. If a caller wants to make an appointment or booking, you MUST say: "I'm sorry, we aren't booking appointments through this line right now, but I can take a message and have someone call you back." Then IMMEDIATELY proceed to Flow 2.`;
+  const bookingFlowBlock = bookings_enabled
+    ? `═══════════════════════════════════════════════════════════════
+FLOW 3A: BOOKING FLOW (ONLY IF ENABLED)
+═══════════════════════════════════════════════════════════════
+
+This flow handles: appointments, bookings, reservations, and scheduling requests.
+
+BOOKING CONFIG:
+- Allowed durations: ${bookingDurations.join(', ')} minutes
+- Default duration: ${bookingDefaultDuration} minutes
+- Duplicate bookings are allowed, but duplicates may be marked as pending confirmation by the server
+- Live availability summary: ${bookingAvailabilitySummary}
+
+STEPS:
+1. Acknowledge the request and say you can help book a time.
+2. Ask what date or time they prefer, and whether they are flexible if needed.
+3. Use lookup_booking_slots BEFORE promising any time. Never invent or guess availability.
+4. Offer only the slots returned by lookup_booking_slots. If none are available, offer the closest alternatives or take a message.
+5. Once the caller picks a slot, collect the customer's full name and best phone number.
+6. Attempt to collect an email address if the caller is willing to share it.
+7. Collect the reason for the booking if the caller gives one.
+8. Call create_booking with the chosen date, time, duration, name, phone, and any email, reason, or notes you collected.
+9. Follow the tool result exactly:
+   - If confirmed → tell them the booking is confirmed
+   - If pending confirmation → tell them the request was received and the business will confirm it
+   - If unavailable → apologize, offer another slot, and use lookup_booking_slots again if needed
+10. After the booking result is clear, PROCEED TO ENDING SECTION (Section 6).`
+    : '';
 
   // Format business hours
   console.log('[VAPI Template] ========== FORMATTING BUSINESS HOURS ==========');
@@ -361,6 +413,8 @@ INTENT 1: FAQ / GENERAL INQUIRY
 - → IMMEDIATELY ROUTE TO: Flow 1 - FAQ/General Inquiry Flow
 - ⚠️ Do NOT use this flow if INTENT 2 applies (human/staff/transfer)—those override FAQ.
 
+${bookingIntentBlock}
+
 INTENT 3: TAKEOUT ORDER${takeout_orders_enabled ? `
 - ⚠️⚠️⚠️ CRITICAL KEYWORDS/PHRASES: "place an order", "put an order in", "order", "order food", "takeout", "order takeout", "get takeout", "I'd like to order", "I want to order", "can I order", "I need to order", "ordering", "place a takeout order", "put in an order", "make an order"
 - If the caller says ANY variation of wanting to place an order, order food, get takeout, or order takeout:
@@ -409,6 +463,8 @@ STEPS:
 ⚠️ CRITICAL: This flow does NOT require ending greeting yet - that happens in Section 6.
 
 ${flow2Block}
+
+${bookingFlowBlock}
 
 ${takeout_orders_enabled ? `
 ═══════════════════════════════════════════════════════════════

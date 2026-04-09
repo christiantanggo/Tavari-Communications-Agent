@@ -117,6 +117,30 @@ export default function MovieReviewRenderPage() {
     }
   }
 
+  async function cancelRender() {
+    setCancelling(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/v2/movie-review/projects/${projectId}/render/cancel`, {
+        method: 'POST',
+        headers: apiHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to stop render');
+
+      clearInterval(pollRef.current);
+      setRender(data.render || null);
+      if (data.project_status) {
+        setProject((current) => (current ? { ...current, status: data.project_status } : current));
+      }
+      setRendering(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   const isDone = render?.status === 'DONE';
   const isFailed = render?.status === 'FAILED';
   const isRendering = render?.status === 'RENDERING' || render?.status === 'PENDING';

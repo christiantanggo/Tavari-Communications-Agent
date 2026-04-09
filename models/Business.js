@@ -107,6 +107,8 @@ export class Business {
       id: business.id,
       name: business.name,
       website: business.website,
+      sms_advertising_enabled: business.sms_advertising_enabled,
+      bookings_enabled: business.bookings_enabled,
       takeout_orders_enabled: business.takeout_orders_enabled,
     });
     

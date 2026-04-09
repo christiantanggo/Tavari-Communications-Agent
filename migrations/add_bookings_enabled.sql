@@ -1,0 +1,2 @@
+ALTER TABLE businesses
+ADD COLUMN IF NOT EXISTS bookings_enabled BOOLEAN DEFAULT FALSE;

@@ -334,6 +334,7 @@ import diagnosticsRoutes from "./routes/diagnostics.js";
 import demoRoutes from "./routes/demo.js";
 import demoTestEmailRoutes from "./routes/demo-test-email.js";
 import clickbankRoutes from "./routes/clickbank.js";
+import bookingsRoutes from "./routes/bookings.js";
 import ordersRoutes from "./routes/orders.js";
 import menuRoutes from "./routes/menu.js";
 import kioskRoutes from "./routes/kiosk.js";
@@ -387,6 +388,7 @@ app.use("/api/diagnostics", diagnosticsRoutes);
 app.use("/api/demo", demoRoutes);
 app.use("/api/demo-test-email", demoTestEmailRoutes);
 app.use("/api/clickbank", clickbankRoutes);
+app.use("/api/bookings", bookingsRoutes);
 const demoFollowupRoutes = (await import("./routes/demo-followup.js")).default;
 app.use("/api/demo-followup", demoFollowupRoutes);
 app.use("/api/demo-followup", (await import("./routes/demo-followup.js")).default);
@@ -670,6 +672,25 @@ try {
   console.log('✅ Queued SMS processor started (runs every 5 minutes)');
 } catch (error) {
   console.warn('⚠️  Could not start queued SMS processor:', error.message);
+}
+
+let bookingNotificationsInterval = null;
+try {
+  const { processQueuedBookingNotifications } = await import('./services/bookings.js');
+
+  const processBookingNotificationsJob = async () => {
+    try {
+      await processQueuedBookingNotifications();
+    } catch (error) {
+      console.error('[Server] Error in booking notification job:', error.message);
+    }
+  };
+
+  processBookingNotificationsJob().catch((e) => console.error('[Server] Booking notification job failed:', e?.message || e));
+  bookingNotificationsInterval = setInterval(processBookingNotificationsJob, 60 * 1000);
+  console.log('✅ Booking notification processor started (runs every minute)');
+} catch (error) {
+  console.warn('⚠️  Could not start booking notification processor:', error.message);
 }
 
 // Start scheduled job to update expired sale prices (daily at 2 AM)

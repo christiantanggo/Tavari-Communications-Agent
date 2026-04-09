@@ -13,6 +13,7 @@ import { isBusinessOpenAtTime } from "../utils/businessHours.js";
 import { AIAgent } from "../models/AIAgent.js";
 import { Notification } from "../models/v2/Notification.js";
 import { getApiPublicBaseUrl, DEFAULT_API_PUBLIC_BASE } from "../config/public-urls.js";
+import { createBooking, getAvailableSlotsForDate, summarizeAvailableSlots } from "../services/bookings.js";
 
 const router = express.Router();
 
@@ -2419,6 +2420,15 @@ async function handleCallReturned(event) {
  * Extract toolCallId from VAPI event (required for correct tool response format).
  * VAPI expects response: { results: [ { toolCallId: "<id>", result: "<string>" } ] }
  */
+/**
+ * Normalize tool/function names from VAPI (trim, strip zero-width chars, coerce String objects).
+ */
+function normalizeVapiFunctionName(name) {
+  if (name == null) return '';
+  const s = String(name).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  return s;
+}
+
 function getToolCallIdFromEvent(event) {
   const msg = event.message || event;
   const list = msg.toolCallList || msg.tool_call_list || msg.toolCalls || msg.tool_calls;
@@ -2571,10 +2581,11 @@ async function handleFunctionCall(event) {
     const firstTool = firstFromList || firstFromArtifact;
     const functionCall = event.functionCall || msg.functionCall || msg.function_call
       || firstTool || msg.toolWithToolCallList?.[0]?.toolCall || msg.artifact?.toolWithToolCallList?.[0]?.toolCall || event;
-    // Name can be at top level or under .function (OpenAI-style tool_calls)
-    const functionName = functionCall?.name || functionCall?.functionName || functionCall?.function_name
+    // Name can be at top level or under .function (OpenAI-style tool_calls); some payloads use toolName.
+    const functionNameRaw = functionCall?.name || functionCall?.functionName || functionCall?.function_name
       || functionCall?.function?.name || (firstTool?.function && (firstTool.function.name || firstTool.function.functionName))
-      || firstTool?.name;
+      || firstTool?.name || firstTool?.toolName || firstTool?.tool_name;
+    const functionName = normalizeVapiFunctionName(functionNameRaw);
     let functionArguments = functionCall.arguments || functionCall.args || functionCall.parameters
       || functionCall.function?.arguments || (firstTool?.function?.arguments);
     if (typeof functionArguments === 'string') {
@@ -2591,6 +2602,20 @@ async function handleFunctionCall(event) {
     if (functionName === 'submit_takeout_order') {
       await handleSubmitTakeoutOrder(functionArguments, event);
       return toolCallId ? { results: [{ toolCallId, result: 'Order received.' }] } : undefined;
+    }
+    if (functionName.toLowerCase() === "lookup_booking_slots") {
+      resultContent = await handleLookupBookingSlotsTool(functionArguments, event);
+      if (toolCallId) {
+        return { results: [{ toolCallId, result: resultContent }] };
+      }
+      return { result: resultContent };
+    }
+    if (functionName.toLowerCase() === "create_booking") {
+      resultContent = await handleCreateBookingTool(functionArguments, event);
+      if (toolCallId) {
+        return { results: [{ toolCallId, result: resultContent }] };
+      }
+      return { result: resultContent };
     }
     // Emergency dispatch: provider accepted or declined
     if (functionName === 'dispatch_accept' || functionName === 'dispatch_decline') {
@@ -2655,6 +2680,164 @@ async function handleFunctionCall(event) {
     }
   }
   return undefined;
+}
+
+function getFunctionEventContext(event) {
+  const call = event.call || event.message?.call || event.message?.artifact?.call || {};
+  const callId = call.id || call.callId || event.message?.call?.id || event.message?.artifact?.call?.id;
+  const assistantId = event.call?.assistant?.id
+    || event.message?.assistant?.id
+    || call.assistant?.id
+    || event.message?.call?.assistant?.id
+    || event.message?.artifact?.assistant?.id
+    || event.message?.artifact?.call?.assistant?.id;
+  const callerNumber = call.customer?.number
+    || event.message?.customer?.number
+    || event.message?.artifact?.customer?.number
+    || null;
+  return { call, callId, assistantId, callerNumber };
+}
+
+function filterBookingSlotsByPreference(slots, preferredTimeRange, timezone) {
+  const preference = String(preferredTimeRange || '').trim().toLowerCase();
+  if (!preference) return slots;
+
+  const toMinutes = (slot) => {
+    const local = new Date(slot.start_at).toLocaleTimeString('en-GB', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const [hours, minutes] = local.split(':').map(Number);
+    return (hours || 0) * 60 + (minutes || 0);
+  };
+
+  if (preference.includes('morning')) return slots.filter((slot) => toMinutes(slot) < 12 * 60);
+  if (preference.includes('afternoon')) return slots.filter((slot) => toMinutes(slot) >= 12 * 60 && toMinutes(slot) < 17 * 60);
+  if (preference.includes('evening')) return slots.filter((slot) => toMinutes(slot) >= 17 * 60);
+
+  const exactTime = preference.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (exactTime) {
+    let hours = parseInt(exactTime[1], 10) || 0;
+    const minutes = parseInt(exactTime[2] || '0', 10) || 0;
+    const meridiem = (exactTime[3] || '').toLowerCase();
+    if (meridiem === 'pm' && hours < 12) hours += 12;
+    if (meridiem === 'am' && hours === 12) hours = 0;
+    const target = hours * 60 + minutes;
+    return slots.filter((slot) => Math.abs(toMinutes(slot) - target) <= 120);
+  }
+
+  return slots;
+}
+
+/**
+ * If the model used a past calendar year (e.g. 2024 for "April 9" when today is 2026), bump the year
+ * to the current year in the business timezone so slot lookup matches caller intent.
+ */
+function fixPreferredDateYearIfStale(preferredDate, timezone) {
+  const m = String(preferredDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return preferredDate;
+  let y = parseInt(m[1], 10);
+  const mo = m[2];
+  const da = m[3];
+  const tz = timezone || 'UTC';
+  const now = new Date();
+  const currentYear = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric' }).format(now),
+    10
+  );
+  if (y >= currentYear) return preferredDate;
+  y = currentYear;
+  const monthNum = parseInt(mo, 10) - 1;
+  const dayNum = parseInt(da, 10);
+  const d = new Date(Date.UTC(y, monthNum, dayNum));
+  if (d.getUTCFullYear() !== y || d.getUTCMonth() !== monthNum || d.getUTCDate() !== dayNum) {
+    return preferredDate;
+  }
+  return `${String(y).padStart(4, '0')}-${mo}-${da}`;
+}
+
+async function handleLookupBookingSlotsTool(args, event) {
+  const { assistantId } = getFunctionEventContext(event);
+  if (!assistantId) {
+    return "I couldn't find the business for this call. Ask the caller for a date and take a message instead.";
+  }
+
+  const business = await Business.findByVapiAssistantId(assistantId);
+  if (!business) {
+    return "I couldn't load booking availability for this call. Take a message instead.";
+  }
+
+  const tz = business.timezone || 'America/New_York';
+  let preferredDate = String(args?.preferred_date || args?.date || '').trim();
+  preferredDate = fixPreferredDateYearIfStale(preferredDate, tz);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(preferredDate)) {
+    return "Please collect the exact booking date first in YYYY-MM-DD form, then call lookup_booking_slots again.";
+  }
+
+  const duration = parseInt(args?.duration_minutes, 10) || null;
+  const allSlots = await getAvailableSlotsForDate(business.id, preferredDate, duration);
+  const filteredSlots = filterBookingSlotsByPreference(allSlots, args?.preferred_time_range, tz);
+  if (filteredSlots.length) {
+    return summarizeAvailableSlots(filteredSlots, tz);
+  }
+  if (allSlots.length) {
+    return `No slots match that time preference. ${summarizeAvailableSlots(allSlots, tz)}`;
+  }
+  return "No booking slots are available for that request. Offer nearby dates if the caller is flexible, or take a message.";
+}
+
+async function handleCreateBookingTool(args, event) {
+  const { callId, assistantId, callerNumber } = getFunctionEventContext(event);
+  if (!assistantId) {
+    return "I couldn't find the business for this call. Apologize and take a message instead.";
+  }
+
+  const business = await Business.findByVapiAssistantId(assistantId);
+  if (!business) {
+    return "I couldn't load the booking system right now. Apologize and take a message instead.";
+  }
+
+  const customerName = String(args?.customer_name || '').trim();
+  const customerPhone = String(args?.customer_phone || callerNumber || '').trim();
+  if (!customerName || !customerPhone) {
+    return "You still need the caller's full name and phone number before creating the booking.";
+  }
+
+  try {
+    const tz = business.timezone || 'America/New_York';
+    const bookingDate = fixPreferredDateYearIfStale(String(args?.date || '').trim(), tz);
+    const result = await createBooking({
+      business_id: business.id,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: args?.customer_email || null,
+      reason: args?.reason || null,
+      notes: args?.notes || null,
+      date: bookingDate || args?.date,
+      start_time: args?.start_time,
+      duration_minutes: args?.duration_minutes,
+      source: 'ai_call',
+      source_call_id: callId || null,
+    });
+
+    const booking = result.booking;
+    const bookingTime = new Date(booking.start_at).toLocaleString('en-US', {
+      timeZone: business.timezone || 'America/New_York',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+
+    if (result.requires_confirmation) {
+      return `Booking request received for ${bookingTime}. This booking is pending confirmation because it may be a duplicate. Tell the caller the business will confirm it shortly.`;
+    }
+    return `Booking confirmed for ${bookingTime}. Tell the caller it is confirmed and they will receive any enabled reminders or notifications.`;
+  } catch (error) {
+    return error?.message || "The booking could not be created. Offer another available time or take a message.";
+  }
 }
 
 /**
