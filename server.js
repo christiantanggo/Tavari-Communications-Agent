@@ -338,6 +338,7 @@ import bookingsRoutes from "./routes/bookings.js";
 import ordersRoutes from "./routes/orders.js";
 import menuRoutes from "./routes/menu.js";
 import kioskRoutes from "./routes/kiosk.js";
+import aiSalesAgentRoutes from "./routes/ai-sales-agent.js";
 
 // Apply specific rate limiters
 app.use("/api/auth/login", authLimiter);
@@ -401,6 +402,7 @@ app.use("/api/menu", menuRoutes);
 
 // Kiosk routes (token-based authentication)
 app.use("/api/kiosk", kioskRoutes);
+app.use("/api/ai-sales-agent", aiSalesAgentRoutes);
 
 // ========== TAVARI AI CORE v2 ROUTES ==========
 // Mount v2 routes (built in parallel, does not touch Phone Agent)
@@ -413,6 +415,7 @@ try {
   const v2ClickBankWebhookRoutes = (await import("./routes/v2/webhooks/clickbank.js")).default;
   const v2AuthRoutes = (await import("./routes/v2/auth.js")).default;
   const v2AdminRoutes = (await import("./routes/v2/admin.js")).default;
+  const v2AdminAiSalesAgentRoutes = (await import("./routes/v2/admin-ai-sales-agent.js")).default;
   const v2NotificationsRoutes = (await import("./routes/v2/notifications.js")).default;
 
   app.use("/api/v2/organizations", v2OrganizationsRoutes);
@@ -425,6 +428,7 @@ try {
   app.use("/api/v2/webhooks/stripe", v2StripeWebhookRoutes);
   app.use("/api/v2/webhooks/clickbank", v2ClickBankWebhookRoutes);
   app.use("/api/v2/auth", v2AuthRoutes);
+  app.use("/api/v2/admin/ai-sales-agent", v2AdminAiSalesAgentRoutes);
   app.use("/api/v2/admin", v2AdminRoutes);
   app.use("/api/v2/notifications", v2NotificationsRoutes);
   
@@ -691,6 +695,25 @@ try {
   console.log('✅ Booking notification processor started (runs every minute)');
 } catch (error) {
   console.warn('⚠️  Could not start booking notification processor:', error.message);
+}
+
+let aiSalesAgentInterval = null;
+try {
+  const { runAISalesDailyCycle } = await import('./services/ai-sales-agent.js');
+
+  const aiSalesAgentJob = async () => {
+    try {
+      await runAISalesDailyCycle();
+    } catch (error) {
+      console.error('[Server] Error in AI Sales Agent automation job:', error.message);
+    }
+  };
+
+  aiSalesAgentJob().catch((e) => console.error('[Server] AI Sales Agent job failed:', e?.message || e));
+  aiSalesAgentInterval = setInterval(aiSalesAgentJob, 15 * 60 * 1000);
+  console.log('✅ AI Sales Agent automation started (runs every 15 minutes)');
+} catch (error) {
+  console.warn('⚠️  Could not start AI Sales Agent automation:', error.message);
 }
 
 // Start scheduled job to update expired sale prices (daily at 2 AM)

@@ -12,6 +12,8 @@ export function getAdminModuleManageHref(moduleKey) {
       return '/admin/delivery-operator';
     case 'emergency-dispatch':
       return '/dashboard/v2/modules/emergency-dispatch';
+    case 'ai-sales-agent':
+      return '/admin/ai-sales-agent';
     case 'movie-review':
     case 'orbix-network':
       return `/dashboard/v2/modules/${key}/dashboard`;

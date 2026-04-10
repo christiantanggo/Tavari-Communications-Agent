@@ -97,6 +97,7 @@ function AdminDashboardPage() {
       reviews: { icon: '⭐', color: 'yellow' },
       'delivery-dispatch': { icon: '🚚', color: 'emerald' },
       'emergency-dispatch': { icon: '🚨', color: 'red' },
+      'ai-sales-agent': { icon: '📬', color: 'teal' },
       'orbix-network': { icon: '📺', color: 'purple' },
       'movie-review': { icon: '🎬', color: 'indigo' },
     };

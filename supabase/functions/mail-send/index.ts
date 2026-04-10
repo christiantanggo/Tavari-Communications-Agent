@@ -41,6 +41,7 @@ interface SendPayload {
   contactId: string;
   to: string;
   cc?: string;
+  replyTo?: string | string[];
   fromEmail: string;
   fromName?: string;
   subject: string;
@@ -144,6 +145,14 @@ serve(async (req) => {
       const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
       let rawMessage = `From: ${payload.fromName ? `"${payload.fromName}" ` : ""}<${payload.fromEmail}>\r\n`;
       rawMessage += `To: ${payload.to}\r\n`;
+      const replyToAddresses = Array.isArray(payload.replyTo)
+        ? payload.replyTo.filter(Boolean)
+        : payload.replyTo
+          ? [payload.replyTo]
+          : [];
+      if (replyToAddresses.length > 0) {
+        rawMessage += `Reply-To: ${replyToAddresses.join(", ")}\r\n`;
+      }
       if (payload.cc) {
         rawMessage += `Cc: ${payload.cc}\r\n`;
       }
@@ -201,6 +210,11 @@ serve(async (req) => {
     } else {
       // Simple email (no attachments) - use SES v2
       const ccAddresses = payload.cc ? payload.cc.split(',').map(email => email.trim()) : [];
+      const replyToAddresses = Array.isArray(payload.replyTo)
+        ? payload.replyTo.filter(Boolean)
+        : payload.replyTo
+          ? [payload.replyTo]
+          : [];
       
       const sendCmd = new SendEmailCommand({
         Destination: { 
@@ -210,6 +224,7 @@ serve(async (req) => {
         FromEmailAddress: payload.fromName 
           ? `"${payload.fromName}" <${payload.fromEmail}>`
           : payload.fromEmail,
+        ...(replyToAddresses.length > 0 ? { ReplyToAddresses: replyToAddresses } : {}),
         Content: {
           Simple: {
             Subject: { Data: payload.subject },

@@ -10,6 +10,7 @@ import { getStripeInstance } from '../../services/stripe.js';
 import { calculateBillingCycle } from '../../services/billing.js';
 import { getFrontendPublicBaseUrl } from '../../config/public-urls.js';
 import { excludeRetiredModules, isRetiredModuleKey } from '../../config/retired-module-keys.js';
+import { excludeAdminOnlyModules, isAdminOnlyModuleKey } from '../../config/admin-only-module-keys.js';
 import { excludeConstructionModules } from '../../config/construction-dashboard.js';
 
 const router = express.Router();
@@ -135,7 +136,9 @@ async function ensureModuleRecurringPriceId(stripe, module, moduleKey, pricing) 
  */
 router.get('/list', authenticate, async (req, res) => {
   try {
-    const modules = excludeConstructionModules(excludeRetiredModules(await Module.findAll()));
+    const modules = excludeConstructionModules(
+      excludeAdminOnlyModules(excludeRetiredModules(await Module.findAll()))
+    );
     res.json({ modules });
   } catch (error) {
     console.error('[GET /api/v2/modules/list] Error:', error);
@@ -149,7 +152,9 @@ router.get('/list', authenticate, async (req, res) => {
  */
 router.get('/', authenticate, requireBusinessContext, async (req, res) => {
   try {
-    const modules = excludeConstructionModules(excludeRetiredModules(await Module.findAll()));
+    const modules = excludeConstructionModules(
+      excludeAdminOnlyModules(excludeRetiredModules(await Module.findAll()))
+    );
     const subscriptions = await Subscription.findByBusinessId(req.active_business_id);
     
     // Get business to check for legacy Phone Agent subscription
@@ -207,7 +212,7 @@ router.get('/:moduleKey', authenticate, requireBusinessContext, async (req, res)
   try {
     const { moduleKey } = req.params;
 
-    if (isRetiredModuleKey(moduleKey)) {
+    if (isRetiredModuleKey(moduleKey) || isAdminOnlyModuleKey(moduleKey)) {
       return res.status(404).json({ error: 'Module not found' });
     }
 
