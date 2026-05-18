@@ -1,6 +1,8 @@
 // templates/vapi-assistant-template.js
 // VAPI assistant prompt template for restaurant receptionist
 
+import { getCurrentTimeInfo } from "../utils/businessHours.js";
+
 /**
  * Generate system prompt for VAPI assistant
  * @param {Object} businessData - Business information
@@ -187,6 +189,8 @@ STEPS:
   console.log('[VAPI Template] Raw holiday hours received:', JSON.stringify(holiday_hours, null, 2));
   const holidayHoursText = formatHolidayHours(holiday_hours);
   console.log('[VAPI Template] Formatted holiday hours text:', holidayHoursText.substring(0, 500));
+  const currentTimeInfo = getCurrentTimeInfo(business_hours, timezone || 'America/New_York', holiday_hours);
+  const todayStatusText = formatTodayStatus(currentTimeInfo);
 
   // Format FAQs
   const faqsText = formatFAQs(faqs);
@@ -255,11 +259,14 @@ CORE BUSINESS INFORMATION (Always Available):
 ${hoursText}
 - Holiday Hours (Special Hours):
 ${holidayHoursText}
+- Today's Current Status (server-calculated, authoritative):
+${todayStatusText}
 
 
 ${faqsText ? `\nFREQUENTLY ASKED QUESTIONS:\n${faqsText}\n` : ""}
 
 BUSINESS HOURS QUESTIONS - CRITICAL INSTRUCTIONS:
+Use "Today's Current Status" as the authoritative answer for "Are you open?", "Are you open today?", "Are you open right now?", and similar questions about today. Do NOT recalculate today's date/time yourself if this block is present.
 ⚠️⚠️⚠️ ABSOLUTELY CRITICAL - YOU MUST USE THE ACTUAL CURRENT DATE AND TIME:
 When answering ANY questions about hours, you MUST ALWAYS use your knowledge of the ACTUAL CURRENT DATE and ACTUAL CURRENT TIME. NEVER use any hardcoded dates or dates from when the assistant was created/updated. YOU MUST check what the ACTUAL date is TODAY before answering any questions about hours.
 
@@ -904,6 +911,47 @@ function formatHolidayHours(holidayHours) {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function formatTodayStatus(currentTimeInfo) {
+  if (!currentTimeInfo || currentTimeInfo.day === 'unknown') {
+    return "Unable to determine today's current status.";
+  }
+
+  const todayHours = currentTimeInfo.todayHours || {};
+  const open12 = convertTo12Hour(todayHours.open || '09:00');
+  const close12 = convertTo12Hour(todayHours.close || '17:00');
+  const isOpenToday = !todayHours.closed;
+  const lines = [
+    `Today: ${currentTimeInfo.day}, ${currentTimeInfo.date} (${currentTimeInfo.dateISO})`,
+    `Current local time: ${currentTimeInfo.time} (${currentTimeInfo.time24Hour})`,
+    `Current status: ${currentTimeInfo.statusText}`,
+  ];
+
+  if (currentTimeInfo.todayHoliday) {
+    const holiday = currentTimeInfo.todayHoliday;
+    if (holiday.closed) {
+      lines.push(`Holiday override: ${holiday.name} is set for today and the business is closed.`);
+    } else {
+      lines.push(`Holiday override: ${holiday.name} is set for today with hours ${convertTo12Hour(holiday.open || '09:00')} to ${convertTo12Hour(holiday.close || '17:00')}.`);
+    }
+  }
+
+  if (isOpenToday) {
+    lines.push(`Exact answer for "Are you open today?": Yes, we are open today from ${open12} to ${close12}.`);
+    if (currentTimeInfo.isOpen) {
+      lines.push(`Exact answer for "Are you open right now?": Yes, we are open right now and close at ${close12} today.`);
+    } else if (currentTimeInfo.time24Hour < (todayHours.open || '09:00')) {
+      lines.push(`Exact answer for "Are you open right now?": No, we are closed right now, but we open today at ${open12}.`);
+    } else {
+      lines.push(`Exact answer for "Are you open right now?": No, we are closed right now. We closed today at ${close12}.`);
+    }
+  } else {
+    lines.push(`Exact answer for "Are you open today?": No, we are closed today.`);
+    lines.push(`Exact answer for "Are you open right now?": No, we are closed right now because we are closed today.`);
+  }
+
+  return lines.join("\n");
 }
 
 /**
