@@ -238,7 +238,7 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
   // CRITICAL: If forceEmail is true (for callbacks/messages), ALWAYS send email regardless of email_ai_answered setting
   if (!forceEmail && !business.email_ai_answered) {
     console.log("[Call Summary Email] ⚠️ Email disabled for AI-answered calls, skipping (not a callback/message)");
-    return; // Email disabled for AI-answered calls (but not for callbacks/messages)
+    return { sent: false, reason: "email_ai_answered_disabled" };
   }
   
   if (forceEmail) {
@@ -259,7 +259,7 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
     console.log("[Call Summary Email] Summary:", summary || "(empty)");
     console.log("[Call Summary Email] Transcript:", transcript ? `${transcript.substring(0, 50)}...` : "(empty)");
     console.log("[Call Summary Email] Message:", hasMessage ? "present" : "none");
-    return; // Wait for next webhook event (end-of-call-report) that has the actual summary
+    return { sent: false, reason: "summary_not_ready" };
   }
 
   try {
@@ -309,12 +309,14 @@ export async function sendCallSummaryEmail(business, callSession, transcript, su
     await sendEmail(business.email, subject, bodyText, bodyHtml, displayName, business.id);
     console.log(`[Call Summary Email] ✅ Call summary email sent successfully`);
     console.log("[Call Summary Email] ========== CALL SUMMARY EMAIL SUCCESS ==========");
+    return { sent: true };
   } catch (error) {
     console.error(`[Call Summary Email] ========== CALL SUMMARY EMAIL ERROR ==========`);
     console.error(`[Call Summary Email] Error sending call summary email:`, error.message);
     console.error(`[Call Summary Email] Error stack:`, error.stack);
     console.error(`[Call Summary Email] Full error:`, JSON.stringify(error, null, 2));
     // Don't throw - email failures shouldn't break the call flow
+    return { sent: false, reason: "send_error", error: error.message };
   }
 }
 

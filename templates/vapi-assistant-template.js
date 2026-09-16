@@ -71,10 +71,8 @@ export async function generateAssistantPrompt(businessData) {
 - ORDER (MANDATORY): When the caller asks for the office, a human, transfer, or the facility, your FIRST response must include an executed transfer_to_facility tool call in that same turn. Do NOT speak "please hold", "connecting", "transferring", "one moment", or "business line" before the tool runs—those phrases without a tool call mean no dial happens and the caller is misled.
 - CRITICAL: You MUST invoke transfer_to_facility for a real transfer. Only saying you will connect them or asking them to hold does nothing until this function runs.
 - Calls run on Telnyx through Tavari: the caller may hear ringing while the business line is dialed. Do NOT promise a full warm handoff where you stay on privately with staff until they answer—that mode is not available on Telnyx. Say you are connecting them; they may hear ringing, then someone at the business.
-- HARD LIMIT: At most 3 transfer attempts per call. The server enforces this. If the tool says the limit is reached, apologize and take a message; do not call transfer_to_facility again on this call.
-- AFTER A FAILED TRANSFER (no answer, error, or the caller is back with you): Do NOT offer to transfer again unless the caller clearly asks to speak to a person, a human, someone live, the manager, the owner, or to be transferred or connected again.
-- When they clearly ask again after a failure, call transfer_to_facility with explicit_human_request set to true.
-- On the first clear request for a human during a call (no failed transfer yet this call), call transfer_to_facility with explicit_human_request false or omit it.
+- ONE ATTEMPT: After transfer_to_facility has been tried once (answered or not), the server locks further dials. Do NOT call transfer_to_facility again on this call or on a bounce-back call.
+- AFTER A FAILED TRANSFER (no answer, error, caller returned, or tool says do not transfer): Apologize once. Take a full message (name, callback number, details). NEVER say you are connecting them again. NEVER call transfer_to_facility again.
 - Follow the exact short instructions returned by transfer_to_facility for what to say next.
 - If transfer is not possible, apologize and take a message using Flow 2 below.`
     : `CRITICAL - CALL TRANSFER IS NOT AVAILABLE:
@@ -106,10 +104,10 @@ This flow handles: When callers want to speak to someone, the facility, front de
 
 STEPS:
 1. When the caller wants a human, the facility, front desk, staff, manager, owner, or transfer to the business:
-   - In the SAME assistant turn, invoke transfer_to_facility first (before any hold/connecting language). Use explicit_human_request true ONLY if they clearly asked again after a prior failed transfer this call; otherwise false or omit.
+   - In the SAME assistant turn, invoke transfer_to_facility first (before any hold/connecting language).
    - Only AFTER the tool is invoked, follow the tool result for what to say (one short line if allowed, or stay quiet if instructed)—the call may be bridging.
-2. If the tool indicates transfer failed, the maximum attempts were used, or you must take a message:
-   - Apologize briefly. Do NOT offer another transfer unless the caller clearly asks again (then you may call transfer_to_facility with explicit_human_request true if attempts remain).
+2. If the tool indicates transfer failed, do not transfer, the maximum attempts were used, or you must take a message:
+   - Apologize once. Do NOT offer another transfer. Do NOT call transfer_to_facility again.
    - Continue with message taking:
 ${messageTakingSubsteps}
 

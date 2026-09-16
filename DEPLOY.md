@@ -72,6 +72,8 @@ After deploy, the frontend on Vercel will call the backend using `NEXT_PUBLIC_AP
 
 ### Phone agent: facility human handoff (`transfer_to_facility`)
 
-1. **Database (Supabase):** In **SQL Editor**, run `migrations/add_call_sessions_facility_transfer.sql` (adds `facility_transfer_count` and `facility_transfer_suppress_until_explicit` on `call_sessions`). Safe to re-run (`IF NOT EXISTS`).
-2. **Backend:** Push to `main` so Railway picks up `routes/vapi.js`, `services/vapi.js`, `templates/vapi-assistant-template.js`, `models/CallSession.js`.
+1. **Database (Supabase):** In **SQL Editor**, run (safe to re-run, `IF NOT EXISTS`):
+   - `migrations/add_call_sessions_facility_transfer.sql` (`facility_transfer_count`, `facility_transfer_suppress_until_explicit`)
+   - `migrations/add_call_sessions_transfer_lock_and_email_sent.sql` (`facility_transfer_locked`, `email_notification_sent` — bounce hard-lock + email dedupe)
+2. **Backend:** Push to `main` so Railway picks up `routes/vapi.js`, `services/notifications.js`, `templates/vapi-assistant-template.js`, `models/CallSession.js`.
 3. **VAPI assistants:** After deploy, each business needs an assistant **rebuild** so the `transfer_to_facility` tool and updated system prompt are applied (e.g. save **Agent** / **Business** phone settings in the dashboard, or use admin flows that call `rebuildAssistant`). **New** assistants created after deploy get transfer-related `serverMessages` at creation time; very old assistants may still lack those webhook types until recreated—core transfer still works via the server tool and Telnyx forward.

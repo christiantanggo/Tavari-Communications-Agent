@@ -146,22 +146,22 @@ export class CallSession {
     callerNumber,
     businessPhoneNumber,
     recentWindowMinutes = 10,
-    ambiguousWindowMinutes = 2,
-    sameCallerWindowMinutes = 1,
-    limit = 15,
+    // Wide enough to cover a long unanswered ring + return inbound.
+    ambiguousWindowMinutes = 5,
+    sameCallerWindowMinutes = 5,
+    limit = 20,
   }) {
     try {
       const { data, error } = await supabaseClient
         .from('call_sessions')
         .select('*')
         .eq('business_id', businessId)
-        .eq('transfer_attempted', true)
         .order('created_at', { ascending: false })
         .limit(limit);
 
       if (error) {
         if (error.message && (error.message.includes('column') || error.message.includes('does not exist'))) {
-          console.warn('⚠️ transfer_attempted column missing. Run RUN_THIS_MIGRATION.sql');
+          console.warn('⚠️ transfer-related columns missing. Run RUN_THIS_MIGRATION.sql');
           return null;
         }
         throw error;
@@ -175,8 +175,13 @@ export class CallSession {
       const normalizedBusiness = normalizePhoneForMatch(businessPhoneNumber);
 
       const recentTransfers = (data || []).filter((session) => {
-        const activityTime = getSessionActivityTime(session);
-        return activityTime >= recentCutoff;
+        if (getSessionActivityTime(session) < recentCutoff) return false;
+        const attempted =
+          session.transfer_attempted === true ||
+          Number(session.facility_transfer_count) > 0 ||
+          session.facility_transfer_locked === true ||
+          session.facility_transfer_suppress_until_explicit === true;
+        return attempted;
       });
 
       if (recentTransfers.length === 0) {
@@ -222,6 +227,13 @@ export class CallSession {
         };
       }
 
+      if (veryRecentTransfers.length > 1) {
+        return {
+          session: veryRecentTransfers[0],
+          reason: 'recent_transfer_burst',
+        };
+      }
+
       return null;
     } catch (err) {
       if (err.message && (err.message.includes('column') || err.message.includes('does not exist'))) {
@@ -231,44 +243,102 @@ export class CallSession {
       throw err;
     }
   }
+
+  /** True if this business already emailed for this caller in the last N minutes. */
+  static async hasRecentEmailNotification({
+    businessId,
+    callerNumber,
+    excludeSessionId = null,
+    recentWindowMinutes = 15,
+    limit = 25,
+  }) {
+    const normalizedCaller = normalizePhoneForMatch(callerNumber);
+    if (!businessId || !normalizedCaller) return false;
+
+    try {
+      const { data, error } = await supabaseClient
+        .from('call_sessions')
+        .select('id, caller_number, email_notification_sent, created_at, updated_at, started_at')
+        .eq('business_id', businessId)
+        .eq('email_notification_sent', true)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        if (error.message && (error.message.includes('column') || error.message.includes('does not exist'))) {
+          return false;
+        }
+        throw error;
+      }
+
+      const recentCutoff = Date.now() - recentWindowMinutes * 60 * 1000;
+      return (data || []).some((session) => {
+        if (excludeSessionId && session.id === excludeSessionId) return false;
+        if (getSessionActivityTime(session) < recentCutoff) return false;
+        return normalizePhoneForMatch(session.caller_number) === normalizedCaller;
+      });
+    } catch (err) {
+      console.warn('[CallSession] hasRecentEmailNotification failed:', err?.message || err);
+      return false;
+    }
+  }
   
   static async update(id, data) {
-    const updateData = {
+    let updateData = {
       ...data,
       updated_at: new Date().toISOString(),
     };
-    
-    // Remove VAPI columns if they don't exist in DB
-    const { data: session, error } = await supabaseClient
-      .from('call_sessions')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-    
-    // If error is about missing columns, try without them
-    if (error && error.message && (error.message.includes('column') || error.message.includes('does not exist'))) {
-      console.warn('⚠️ VAPI columns missing in update, removing them. Run RUN_THIS_MIGRATION.sql');
-      const cleanData = { ...updateData };
-      delete cleanData.vapi_call_id;
-      delete cleanData.transfer_attempted;
-      delete cleanData.transfer_successful;
-      delete cleanData.transfer_timestamp;
-      delete cleanData.facility_transfer_count;
-      delete cleanData.facility_transfer_suppress_until_explicit;
-      
-      const { data: session2, error: error2 } = await supabaseClient
+
+    // Retry while dropping unknown columns one-by-one so a missing new column
+    // (e.g. facility_transfer_locked before migration) does not wipe known fields.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const { data: session, error } = await supabaseClient
         .from('call_sessions')
-        .update(cleanData)
+        .update(updateData)
         .eq('id', id)
         .select()
         .single();
-      if (error2) throw error2;
-      return session2;
+
+      if (!error) return session;
+
+      const msg = error.message || '';
+      const missingCol =
+        msg.match(/Could not find the ['"]?(\w+)['"]? column/i)?.[1] ||
+        msg.match(/column ['"]?(\w+)['"]? of relation/i)?.[1] ||
+        msg.match(/column ['"]?(\w+)['"]? does not exist/i)?.[1] ||
+        null;
+
+      if (missingCol && Object.prototype.hasOwnProperty.call(updateData, missingCol)) {
+        console.warn(`⚠️ call_sessions.${missingCol} missing — retrying update without it. Run pending migrations.`);
+        delete updateData[missingCol];
+        continue;
+      }
+
+      if (msg.includes('column') || msg.includes('does not exist')) {
+        console.warn('⚠️ VAPI columns missing in update, removing known optional set. Run RUN_THIS_MIGRATION.sql');
+        delete updateData.vapi_call_id;
+        delete updateData.transfer_attempted;
+        delete updateData.transfer_successful;
+        delete updateData.transfer_timestamp;
+        delete updateData.facility_transfer_count;
+        delete updateData.facility_transfer_suppress_until_explicit;
+        delete updateData.facility_transfer_locked;
+        delete updateData.email_notification_sent;
+
+        const { data: session2, error: error2 } = await supabaseClient
+          .from('call_sessions')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+        if (error2) throw error2;
+        return session2;
+      }
+
+      throw error;
     }
-    
-    if (error) throw error;
-    return session;
+
+    throw new Error('CallSession.update exhausted retries stripping unknown columns');
   }
   
   static async endCall(id, duration_seconds, transcript, intent, message_taken) {

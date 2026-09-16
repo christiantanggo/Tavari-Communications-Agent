@@ -22,6 +22,39 @@ import {
 
 const router = express.Router();
 
+/** Process-local email dedupe (covers multi-leg journeys on a single Railway instance). */
+const recentCallSummaryEmailKeys = new Map();
+const EMAIL_DEDUPE_TTL_MS = 15 * 60 * 1000;
+
+function normalizeCallerDigits(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
+  return digits;
+}
+
+function markCallSummaryEmailSent(businessId, callerNumber, sessionId) {
+  const caller = normalizeCallerDigits(callerNumber);
+  if (!businessId || !caller) return;
+  const now = Date.now();
+  recentCallSummaryEmailKeys.set(`${businessId}:${caller}`, { at: now, sessionId: sessionId || null });
+  if (sessionId) recentCallSummaryEmailKeys.set(`session:${sessionId}`, { at: now });
+  for (const [key, meta] of recentCallSummaryEmailKeys) {
+    if (!meta?.at || now - meta.at > EMAIL_DEDUPE_TTL_MS) recentCallSummaryEmailKeys.delete(key);
+  }
+}
+
+function wasCallSummaryEmailSentRecently(businessId, callerNumber, sessionId) {
+  const now = Date.now();
+  if (sessionId) {
+    const bySession = recentCallSummaryEmailKeys.get(`session:${sessionId}`);
+    if (bySession?.at && now - bySession.at < EMAIL_DEDUPE_TTL_MS) return true;
+  }
+  const caller = normalizeCallerDigits(callerNumber);
+  if (!businessId || !caller) return false;
+  const byCaller = recentCallSummaryEmailKeys.get(`${businessId}:${caller}`);
+  return Boolean(byCaller?.at && now - byCaller.at < EMAIL_DEDUPE_TTL_MS);
+}
+
 /**
  * Quick status check - simple endpoint to verify webhook is accessible
  * GET /api/vapi/webhook - Quick status check
@@ -755,6 +788,12 @@ async function handleAssistantRequest(body, res) {
   return { sent: true };
 }
 
+const BOUNCE_HARD_RULE =
+  "HARD RULE for this call: Do NOT call transfer_to_facility. Do NOT say you are connecting them or ask them to hold for a transfer. The office already did not answer. Apologize once, then take a message (name, callback number, details). Say someone will call them back.";
+
+const TRANSFER_LEG_ENDED_REASON_RE = /forwarded|transfer|assistant-forwarded/i;
+const THIN_TRANSFER_SUMMARY_RE = /transfer|forwarded|connecting you|couldn.?t reach|office line/i;
+
 function buildReturnedTransferSystemInstruction(returnedTransferContext) {
   const priorSession = returnedTransferContext?.session;
   const priorCaller = priorSession?.caller_number || "the caller";
@@ -766,7 +805,7 @@ function buildReturnedTransferSystemInstruction(returnedTransferContext) {
     "Do not use the normal opening greeting for this call.",
     "Start by apologizing that the business line did not connect.",
     "Offer to take a message with their name, callback number, and details.",
-    "Do not offer another transfer unless the caller clearly asks again for a human.",
+    BOUNCE_HARD_RULE,
   ].join(" ");
 }
 
@@ -1311,11 +1350,13 @@ async function handleCallStart(event) {
           transfer_attempted: true,
           transfer_successful: false,
           facility_transfer_suppress_until_explicit: true,
+          facility_transfer_locked: true,
         });
 
         await CallSession.update(returnedTransferContext.session.id, {
           transfer_successful: false,
           facility_transfer_suppress_until_explicit: true,
+          facility_transfer_locked: true,
         });
 
         if (!returnedTransferContext.appliedViaAssistantRequest && !returnedTransferInjected) {
@@ -1394,6 +1435,14 @@ async function getLiveControlUrlForCall(call, callId) {
   }
 }
 
+async function postLiveControl(controlUrl, payload) {
+  const axios = (await import("axios")).default;
+  await axios.post(controlUrl, payload, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 20000,
+  });
+}
+
 async function injectReturnedTransferInstructions(call, callId, returnedTransferContext) {
   const controlUrl = await getLiveControlUrlForCall(call, callId);
   if (!controlUrl) {
@@ -1404,35 +1453,73 @@ async function injectReturnedTransferInstructions(call, callId, returnedTransfer
   const instruction = buildReturnedTransferSystemInstruction(returnedTransferContext);
   const firstMessage = buildReturnedTransferFirstMessage();
 
-  const axios = (await import("axios")).default;
-  await axios.post(
-    controlUrl,
-    {
-      type: "say",
-      message: firstMessage,
+  await postLiveControl(controlUrl, {
+    type: "say",
+    message: firstMessage,
+  });
+  await postLiveControl(controlUrl, {
+    type: "add-message",
+    message: {
+      role: "system",
+      content: instruction,
     },
-    {
-      headers: { "Content-Type": "application/json" },
-      timeout: 20000,
-    }
-  );
-  await axios.post(
-    controlUrl,
-    {
+    triggerResponseEnabled: false,
+  });
+  await postLiveControl(controlUrl, {
+    type: "add-message",
+    message: {
+      role: "system",
+      content: BOUNCE_HARD_RULE,
+    },
+    triggerResponseEnabled: false,
+  });
+
+  return true;
+}
+
+/**
+ * After an unanswered / failed facility transfer, force message-taking mode on the live call.
+ */
+async function recoverToMessageMode(call, callId, reason = "transfer-failed") {
+  const controlUrl = await getLiveControlUrlForCall(call, callId);
+  if (!controlUrl) {
+    console.warn(`[VAPI Webhook] recoverToMessageMode: no controlUrl for call ${callId}`);
+    return false;
+  }
+
+  try {
+    await postLiveControl(controlUrl, {
+      type: "say",
+      message:
+        "I'm sorry, I couldn't reach anyone at the office. I can take a message and have someone call you back.",
+    });
+    await postLiveControl(controlUrl, {
       type: "add-message",
       message: {
         role: "system",
-        content: instruction,
+        content: `${BOUNCE_HARD_RULE} Context: transfer recovery (${reason}). Do not use the opening greeting. Do not call transfer_to_facility again.`,
       },
       triggerResponseEnabled: false,
-    },
-    {
-      headers: { "Content-Type": "application/json" },
-      timeout: 20000,
-    }
-  );
+    });
+    return true;
+  } catch (err) {
+    console.error(`[VAPI Webhook] recoverToMessageMode failed for ${callId}:`, err?.message || err);
+    return false;
+  }
+}
 
-  return true;
+async function lockFacilityTransferOnSession(sessionId, extra = {}) {
+  if (!sessionId) return;
+  try {
+    await CallSession.update(sessionId, {
+      transfer_successful: false,
+      facility_transfer_suppress_until_explicit: true,
+      facility_transfer_locked: true,
+      ...extra,
+    });
+  } catch (err) {
+    console.warn(`[VAPI Webhook] lockFacilityTransferOnSession failed:`, err?.message || err);
+  }
 }
 
 /**
@@ -2280,9 +2367,60 @@ async function handleCallEnd(event) {
                               intent === "message" || 
                               createdMessage !== null ||
                               hasCallbackKeywords; // Also check for keywords in case intent detection failed
+
+  const endedReasonLower = String(endedReason || "").toLowerCase();
+  const isTransferLeg =
+    TRANSFER_LEG_ENDED_REASON_RE.test(endedReasonLower) ||
+    (callSession.transfer_attempted === true &&
+      !createdMessage &&
+      !hasCallbackKeywords &&
+      THIN_TRANSFER_SUMMARY_RE.test(String(summary || "")));
+
+  const hasRealMessage =
+    createdMessage &&
+    createdMessage.message_text &&
+    String(createdMessage.message_text).trim().length > 20 &&
+    !/^no message provided$/i.test(String(createdMessage.message_text).trim());
+
+  const emailSkipReasons = [];
+  if (callSession.email_notification_sent === true) {
+    emailSkipReasons.push("already_sent_for_this_session");
+  }
+  if (wasCallSummaryEmailSentRecently(business.id, callSession.caller_number, callSession.id)) {
+    emailSkipReasons.push("deduped_process_memory");
+  }
+  if (isTransferLeg && !hasRealMessage) {
+    emailSkipReasons.push("transfer_leg");
+  }
+  if (
+    (callSession.facility_transfer_locked === true ||
+      callSession.facility_transfer_suppress_until_explicit === true) &&
+    !hasRealMessage &&
+    !hasCallbackKeywords
+  ) {
+    emailSkipReasons.push("bounce_leg_without_message");
+  }
+
+  if (emailSkipReasons.length === 0 && callSession.caller_number) {
+    try {
+      const recentEmail = await CallSession.hasRecentEmailNotification({
+        businessId: business.id,
+        callerNumber: callSession.caller_number,
+        excludeSessionId: callSession.id,
+        recentWindowMinutes: 15,
+      });
+      if (recentEmail && !hasRealMessage) {
+        emailSkipReasons.push("deduped_recent_caller_email");
+      }
+    } catch (dedupeErr) {
+      console.warn(`[VAPI Webhook] email dedupe check failed:`, dedupeErr?.message || dedupeErr);
+    }
+  }
   
-  // ALWAYS send email if it's a callback/message OR if email_ai_answered is enabled
-  if (isCallbackOrMessage || business.email_ai_answered) {
+  // ALWAYS send email if it's a callback/message OR if email_ai_answered is enabled — unless skipped
+  if (emailSkipReasons.length > 0) {
+    console.log(`[VAPI Webhook] ⚠️ Skipping email — ${emailSkipReasons.join(",")}`);
+  } else if (isCallbackOrMessage || business.email_ai_answered) {
     try {
       // Force email for callbacks/messages even if email_ai_answered is disabled
       const forceEmail = isCallbackOrMessage;
@@ -2298,7 +2436,7 @@ async function handleCallEnd(event) {
       console.log(`[VAPI Webhook] Summary length: ${summary?.length || 0}`);
       console.log(`[VAPI Webhook] Transcript length: ${transcript?.length || 0}`);
       
-      await sendCallSummaryEmail(
+      const emailResult = await sendCallSummaryEmail(
         business, 
         callSession, 
         transcript, 
@@ -2307,7 +2445,17 @@ async function handleCallEnd(event) {
         createdMessage, // Pass message if one was created
         forceEmail // Force email for callbacks/messages
       );
-      console.log(`[VAPI Webhook] ✅ Email notification sent successfully (or skipped if summary not ready)`);
+      if (emailResult?.sent) {
+        markCallSummaryEmailSent(business.id, callSession.caller_number, callSession.id);
+        try {
+          await CallSession.update(callSession.id, { email_notification_sent: true });
+        } catch (flagErr) {
+          console.warn(`[VAPI Webhook] Could not mark email_notification_sent:`, flagErr?.message || flagErr);
+        }
+        console.log(`[VAPI Webhook] ✅ Email notification sent successfully`);
+      } else {
+        console.log(`[VAPI Webhook] ⚠️ Email skipped by notifier (${emailResult?.reason || "not_sent"})`);
+      }
     } catch (emailError) {
       console.error(`[VAPI Webhook] ❌❌❌ CRITICAL ERROR sending email:`, emailError);
       console.error(`[VAPI Webhook] Email error details:`, {
@@ -2390,11 +2538,11 @@ async function handleTransferFailed(event) {
 
   const callSession = await CallSession.findByVapiCallId(callId);
   if (callSession) {
-    await CallSession.update(callSession.id, {
-      transfer_successful: false,
-      facility_transfer_suppress_until_explicit: true,
+    await lockFacilityTransferOnSession(callSession.id, {
+      transfer_attempted: true,
     });
   }
+  await recoverToMessageMode(call, callId, "transfer-failed");
 }
 
 /**
@@ -2407,11 +2555,11 @@ async function handleCallReturned(event) {
   console.log(`[VAPI Webhook] Call ${callId} returned after transfer failure`);
   const callSession = await CallSession.findByVapiCallId(callId);
   if (callSession) {
-    await CallSession.update(callSession.id, {
-      facility_transfer_suppress_until_explicit: true,
-      transfer_successful: false,
+    await lockFacilityTransferOnSession(callSession.id, {
+      transfer_attempted: true,
     });
   }
+  await recoverToMessageMode(call, callId, "call-returned");
 }
 
 /**
@@ -2450,7 +2598,8 @@ function getToolCallIdFromEvent(event) {
 }
 
 /**
- * Telnyx transfer to the business public line. Returns a short instruction string for the assistant.
+ * Blind VAPI live-control transfer to the business public line.
+ * After any dial attempt (or bounce return), further dials are hard-locked — take a message only.
  */
 async function handleTransferToFacilityRequest(event, functionArguments) {
   const explicitHumanRequest = Boolean(functionArguments?.explicit_human_request);
@@ -2516,17 +2665,7 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
 
   let callSession = await CallSession.findByVapiCallId(callId);
 
-  if (callSession) {
-    const suppress = callSession.facility_transfer_suppress_until_explicit === true;
-    if (suppress && !explicitHumanRequest) {
-      return "Do not transfer yet: the last connection attempt did not complete. Briefly apologize and offer to take a message. Only if the caller clearly asks again to speak to a person or to be transferred, call transfer_to_facility again with explicit_human_request set to true.";
-    }
-
-    const count = Number(callSession.facility_transfer_count) || 0;
-    if (count >= MAX_FACILITY_TRANSFERS_PER_CALL) {
-      return "Maximum transfer attempts for this call have been used (3). Apologize and take a message. Do not call transfer_to_facility again on this call.";
-    }
-  } else {
+  if (!callSession) {
     console.warn("[VAPI Webhook] transfer_to_facility: no CallSession for call", callId, "— creating fallback session");
     try {
       callSession = await CallSession.create({
@@ -2542,18 +2681,58 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
     }
   }
 
+  const count = Number(callSession?.facility_transfer_count) || 0;
+  const lockedOnSession =
+    callSession?.facility_transfer_locked === true ||
+    callSession?.facility_transfer_suppress_until_explicit === true ||
+    count >= 1;
+
+  let bounceContext = null;
+  try {
+    bounceContext = await CallSession.findRecentTransferContext({
+      businessId: business.id,
+      callerNumber: callerNumber || callSession?.caller_number,
+      businessPhoneNumber: business.public_phone_number,
+    });
+  } catch (bounceErr) {
+    console.warn("[VAPI Webhook] transfer_to_facility: bounce context lookup failed", bounceErr?.message || bounceErr);
+  }
+
+  const hardLocked = lockedOnSession || Boolean(bounceContext?.session);
+
+  if (hardLocked) {
+    if (callSession?.id) {
+      await lockFacilityTransferOnSession(callSession.id, {
+        transfer_attempted: true,
+      });
+    }
+    console.log("[VAPI Webhook] transfer_to_facility: refusing re-dial (bounce lock)", {
+      callId,
+      lockedOnSession,
+      bounceReason: bounceContext?.reason || null,
+      count,
+      explicitHumanRequest,
+    });
+    return "Do NOT transfer. The office was already tried and did not connect. Apologize that nobody answered, then take a full message (name, callback number, details). Say you will have someone call them back. Never say you are connecting them again. Do not call transfer_to_facility again.";
+  }
+
+  if (count >= MAX_FACILITY_TRANSFERS_PER_CALL) {
+    return "Maximum transfer attempts for this call have been used (3). Apologize and take a message. Do not call transfer_to_facility again on this call.";
+  }
+
   const forwardResult = await forwardCallToBusiness(callId, targetNumber);
 
   if (callSession?.id) {
     const prevCount = Number(callSession.facility_transfer_count) || 0;
-    // Vapi may not emit transfer-started for server-initiated bridges; record attempt here so sessions are not stuck false.
+    // Lock immediately after any dial so bounce/return cannot re-ring 519.
     const patch = {
       facility_transfer_count: prevCount + 1,
       transfer_attempted: true,
       transfer_timestamp: new Date().toISOString(),
+      facility_transfer_locked: true,
+      facility_transfer_suppress_until_explicit: true,
     };
     if (!forwardResult.forwarded) {
-      patch.facility_transfer_suppress_until_explicit = true;
       patch.transfer_successful = false;
     }
     try {
@@ -2568,7 +2747,8 @@ async function handleTransferToFacilityRequest(event, functionArguments) {
   }
 
   console.error("[VAPI Webhook] transfer_to_facility: forward failed", forwardResult.reason, forwardResult.error);
-  return "The connection did not go through. Apologize briefly. Do not offer another transfer unless the caller clearly asks to speak to someone again; if they do, you may call transfer_to_facility with explicit_human_request true if attempts remain. Otherwise take a message.";
+  await recoverToMessageMode(call, callId, `forward-failed:${forwardResult.reason || "unknown"}`);
+  return "The connection did not go through. Apologize briefly and take a message. Do not call transfer_to_facility again.";
 }
 
 async function handleFunctionCall(event) {
