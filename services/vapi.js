@@ -57,14 +57,14 @@ const ASSISTANT_SERVER_MESSAGES = [
 const TRANSFER_TO_FACILITY_TOOL = {
   name: "transfer_to_facility",
   description:
-    "CRITICAL: You MUST invoke (execute) this function to transfer the call. On transfer/office/human intent, emit this tool call in the SAME assistant turn as your first response—do NOT say please hold, connecting, transferring, one moment, or business line BEFORE the tool runs; without an executed call the dial never starts. Saying you will connect them or asking them to hold WITHOUT calling this function does nothing. Same rule as submit_takeout_order: invocation is required. Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After a failed transfer, call again only if the caller clearly asks to speak to a person again—then set explicit_human_request to true. At most 3 attempts per call; the server returns an error string if exceeded.",
+    "CRITICAL: You MUST invoke (execute) this function to transfer the call. On transfer/office/human intent, emit this tool call in the SAME assistant turn as your first response—do NOT say please hold, connecting, transferring, one moment, or business line BEFORE the tool runs; without an executed call the dial never starts. Saying you will connect them or asking them to hold WITHOUT calling this function does nothing. Same rule as submit_takeout_order: invocation is required. Connect the caller to this business's main phone line (public business number). Call when they want a live person: human, manager, owner, transfer, connect me, speak to the facility, front desk, staff, or office. After any transfer attempt (success or failure), the server locks further dials—do NOT call this function again; apologize and take a message instead.",
   parameters: {
     type: "object",
     properties: {
       explicit_human_request: {
         type: "boolean",
         description:
-          "True only if the caller clearly asked again to speak to a person, human, manager, or to be transferred after a failed transfer this call. Otherwise false or omit.",
+          "Optional legacy flag. Ignored for re-dial: after one transfer attempt the server always refuses further transfers.",
       },
     },
   },
